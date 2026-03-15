@@ -1,0 +1,450 @@
+// mcc.cs  —  CROSSBOW MCC controller class — A2 (ENG GUI) and A3 (THEIA HMI)
+//
+// Transport is selected at construction via TransportPath:
+//   THEIA:    new MCC(log, TransportPath.A3_External)  — port 10050, magic 0xCB 0x58
+//   ENG GUI:  new MCC(log, TransportPath.A2_Internal)  — port 10018, magic 0xCB 0x49
+//
+// INT_ENG commands (EnableSolenoid, VicorEnable, EnableRelay, ReInitDevice,
+//   EnableDevice, SetFanSpeed, SetTargetTemp) are guarded — calling them on
+//   an A3 instance logs a warning and does nothing. Firmware rejects INT
+//   commands on A3 regardless, but the guard catches mistakes early.
+//
+// MSG classes are in separate files:
+//   MSG_MCC.cs, MSG_BATTERY.cs, MSG_IPG.cs, MSG_TMC.cs, MSG_GNSS.cs, MSG_CMC.cs
+
+using Serilog;
+using System.Diagnostics;
+using System.Net;
+using System.Net.Sockets;
+
+namespace CROSSBOW
+{
+    public class MCC
+    {
+        public enum READY_STATUS
+        {
+            ALIVE,
+            READY,
+            WARN,
+            ERROR,
+            NA,
+        }
+
+        // ── Frame constants ───────────────────────────────────────────────────
+        private const byte MAGIC_HI             = 0xCB;
+        private const int  FRAME_RESPONSE_LEN   = 521;
+        private const int  PAYLOAD_OFFSET       = 7;
+        private const int  PAYLOAD_LEN          = 512;
+        private const byte STATUS_OK            = 0x00;
+
+        // Transport-dependent computed properties
+        private byte   MagicLo    => Transport == TransportPath.A3_External ? (byte)0x58   : (byte)0x49;
+        private int    ActivePort => Transport == TransportPath.A3_External ? 10050         : 10018;
+        private string LocalIP    => Transport == TransportPath.A3_External ? "192.168.1.208" : "0.0.0.0";
+
+        // Keepalive — re-send SET_UNSOLICITED every 30 s to stay within the
+        // firmware's 60-second liveness window (frame.hpp CLIENT_TIMEOUT_MS).
+        private const int KEEPALIVE_INTERVAL_MS = 30_000;
+
+        public string IP   { get; private set; } = "192.168.1.10";
+        public int    Port => ActivePort;
+
+        // ── Transport + Logger ────────────────────────────────────────────────
+        public TransportPath Transport { get; private set; }
+        private ILogger Log { get; set; }
+
+        // ── State ─────────────────────────────────────────────────────────────
+        private UdpClient?               udpClient;
+        private IPEndPoint?              ipEndPoint;
+        private CancellationTokenSource? ts;
+        private CancellationToken        ct;
+        private bool                     _isStarted     = false;
+        private byte                     _seq           = 0;
+        private DateTime                 _lastKeepalive = DateTime.MinValue;
+
+        public DateTime lastMsgRx  { get; private set; } = DateTime.UtcNow;
+        public double   HB_RX_us   { get; private set; } = 0;
+        public bool     isConnected { get; private set; } = false;
+
+        public MSG_MCC       LatestMSG    { get; private set; }
+        public SYSTEM_STATES System_State { get { return LatestMSG.System_State; } }
+        public BDC_MODES     BDC_Mode     { get { return LatestMSG.BDC_Mode; } }
+
+        // ── Constructors ──────────────────────────────────────────────────────
+        public MCC(ILogger _log, TransportPath transport = TransportPath.A3_External)
+        {
+            Log       = _log;
+            Transport = transport;
+            LatestMSG = new MSG_MCC(Log, transport);
+        }
+
+        public MCC(TransportPath transport = TransportPath.A3_External)
+        {
+            Transport = transport;
+            LatestMSG = new MSG_MCC(transport);
+        }
+
+        // ── Lifecycle ─────────────────────────────────────────────────────────
+        public void Start()
+        {
+            if (_isStarted) return;
+            _isStarted = true;
+            ts = new CancellationTokenSource();
+            ct = ts.Token;
+            // Randomise SEQ to avoid landing in the firmware's replay-rejection window
+            // (last_seq − 32) from the previous session. Range 33–223 clears both wrap edges.
+            _seq = (byte)new Random().Next(33, 224);
+            Log?.Information("MCC starting ({Transport})", Transport);
+            _ = backgroundUDPRead();
+            _ = KeepaliveLoop();
+        }
+
+        public void Stop()
+        {
+            Log?.Information("MCC stopping");
+            _isStarted  = false;
+            isConnected = false;
+            ts?.Cancel();
+        }
+
+        // ── Receive loop ──────────────────────────────────────────────────────
+        private async Task backgroundUDPRead()
+        {
+            try
+            {
+                if (udpClient != null) { udpClient.Close(); udpClient = null; }
+
+                if (Transport == TransportPath.A3_External)
+                {
+                    // A3: bind to external IP so firmware accepts packets from .200–.254 range
+                    udpClient = new UdpClient();
+                    udpClient.Client.Bind(new IPEndPoint(IPAddress.Parse(LocalIP), 0));
+                    ipEndPoint = new IPEndPoint(IPAddress.Parse(IP), ActivePort);
+                }
+                else
+                {
+                    // A2: OS assigns local port — any .1–.99 source IP is accepted
+                    udpClient = new UdpClient();
+                    _remoteEP = new IPEndPoint(IPAddress.Parse(IP), ActivePort);
+                    udpClient.Connect(_remoteEP);
+
+                    // Registration burst — advance past any stale replay window
+                    for (int i = 0; i < 3; i++)
+                        Send(BuildFrame((byte)ICD.SET_UNSOLICITED, new[] { (byte)1 }));
+                    Debug.WriteLine("MCC: A2 registration burst sent");
+                }
+            }
+            catch (Exception ex)
+            {
+                Log?.Error("MCC socket init failed: {Ex}", ex.Message);
+                _isStarted = false;
+                return;
+            }
+
+            if (Transport == TransportPath.A3_External)
+            {
+                await Task.Delay(50, ct).ConfigureAwait(false);
+                UnsolicitedMode = true;
+            }
+
+            Log?.Information("MCC UDP connected ({LocalIp}:{Port} → {RemoteIp})",
+                LocalIP, ActivePort, IP);
+
+            try
+            {
+                while (!ct.IsCancellationRequested)
+                {
+                    var res = await udpClient.ReceiveAsync(ct).ConfigureAwait(false);
+
+                    if (Transport == TransportPath.A3_External)
+                    {
+                        // A3: pass full 521-byte frame — MSG_MCC.ParseA3 validates internally
+                        if (!res.RemoteEndPoint.Address.Equals(IPAddress.Parse(IP))) continue;
+                        byte[] rxBuff = res.Buffer;
+                        if (rxBuff.Length > 0)
+                        {
+                            isConnected = true;
+                            var now   = DateTime.UtcNow;
+                            HB_RX_us  = (now - lastMsgRx).TotalMicroseconds;
+                            lastMsgRx = now;
+                            LatestMSG.Parse(rxBuff);
+                        }
+                    }
+                    else
+                    {
+                        // A2: validate frame here, strip to 512-byte payload, pass to ParseA2
+                        byte[] frame = res.Buffer;
+                        if (frame.Length == FRAME_RESPONSE_LEN
+                            && frame[0] == MAGIC_HI && frame[1] == MagicLo
+                            && frame[4] == STATUS_OK
+                            && CrcHelper.Crc16(frame, FRAME_RESPONSE_LEN - 2)
+                               == (ushort)((frame[519] << 8) | frame[520]))
+                        {
+                            isConnected = true;
+                            HB_RX_us  = (DateTime.UtcNow - lastMsgRx).TotalMicroseconds;
+                            lastMsgRx = DateTime.UtcNow;
+                            byte[] payload = new byte[PAYLOAD_LEN];
+                            Array.Copy(frame, PAYLOAD_OFFSET, payload, 0, PAYLOAD_LEN);
+                            LatestMSG.Parse(payload);
+                        }
+                        else
+                        {
+                            Debug.WriteLine($"MCC: A2 frame rejected length={frame.Length}");
+                        }
+                    }
+                }
+            }
+            catch (OperationCanceledException) { /* clean shutdown */ }
+            catch (Exception ex)
+            {
+                Log?.Warning("MCC receive error: {Ex}", ex.Message);
+            }
+            finally
+            {
+                udpClient?.Close();
+                udpClient   = null;
+                isConnected = false;
+                Log?.Information("MCC UDP closed");
+            }
+        }
+
+        // A2 remote endpoint — used only on A2 path
+        private IPEndPoint? _remoteEP;
+
+        // ── Frame builder ─────────────────────────────────────────────────────
+        private byte[] BuildFrame(byte cmd, byte[]? payload = null)
+        {
+            payload ??= Array.Empty<byte>();
+            ushort plen     = (ushort)payload.Length;
+            int    frameLen = 6 + plen + 2;
+            byte[] frame    = new byte[frameLen];
+            frame[0] = MAGIC_HI;
+            frame[1] = MagicLo;
+            frame[2] = _seq++;
+            frame[3] = cmd;
+            frame[4] = (byte)(plen & 0xFF);    // payload len LE
+            frame[5] = (byte)(plen >> 8);
+            if (plen > 0)
+                Buffer.BlockCopy(payload, 0, frame, 6, plen);
+            ushort crc = CrcHelper.Crc16(frame, frameLen - 2);
+            frame[frameLen - 2] = (byte)(crc >> 8);  // CRC BE
+            frame[frameLen - 1] = (byte)(crc & 0xFF);
+            return frame;
+        }
+
+        private void Send(byte cmd, byte[]? payload = null)
+        {
+            Send(BuildFrame(cmd, payload));
+        }
+
+        private void Send(byte[] frame)
+        {
+            if (udpClient == null) return;
+            try
+            {
+                if (Transport == TransportPath.A3_External && ipEndPoint != null)
+                    udpClient.Send(frame, frame.Length, ipEndPoint);
+                else
+                    udpClient.Send(frame);
+                _lastKeepalive = DateTime.UtcNow;
+            }
+            catch (Exception ex)
+            {
+                Log?.Warning("MCC: send error: {Ex}", ex.Message);
+                Debug.WriteLine($"MCC: send error: {ex.Message}");
+            }
+        }
+
+        // ── INT_ENG command guard ─────────────────────────────────────────────
+        // INT_ENG commands are valid on A2 only. Firmware rejects them on A3
+        // regardless, but this guard catches mistakes early at the call site.
+        private bool AssertIntEng(string cmdName)
+        {
+            if (Transport == TransportPath.A3_External)
+            {
+                Log?.Warning("MCC: {Cmd} is INT_ENG only — not sent on A3 transport", cmdName);
+                Debug.WriteLine($"MCC: {cmdName} blocked — A3 transport does not support INT_ENG commands");
+                return false;
+            }
+            return true;
+        }
+
+        // ── Keepalive / staleness watchdog ────────────────────────────────────
+        private async Task KeepaliveLoop()
+        {
+            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(KEEPALIVE_INTERVAL_MS));
+            try
+            {
+                while (await timer.WaitForNextTickAsync(ct))
+                {
+                    if ((DateTime.UtcNow - _lastKeepalive).TotalMilliseconds >= KEEPALIVE_INTERVAL_MS)
+                        SendKeepalive();
+
+                    if (isConnected &&
+                        (DateTime.UtcNow - lastMsgRx).TotalMilliseconds > KEEPALIVE_INTERVAL_MS * 2)
+                        Log?.Warning("MCC: no telemetry for >{Seconds}s — firmware stream may have dropped",
+                            KEEPALIVE_INTERVAL_MS * 2 / 1000);
+                }
+            }
+            catch (OperationCanceledException) { /* normal shutdown */ }
+        }
+
+        private void SendKeepalive()
+        {
+            Send((byte)ICD.SET_UNSOLICITED, new byte[] { 1 });
+            Log?.Information("MCC: keepalive sent");
+        }
+
+        // ── INT_OPS commands — available on both A2 and A3 ───────────────────
+
+        // 0xA0 SET_UNSOLICITED
+        public bool UnsolicitedMode
+        {
+            set { Send((byte)ICD.SET_UNSOLICITED, new byte[] { Convert.ToByte(value) }); }
+        }
+
+        // 0xA1 GET_REGISTER1
+        public void REQ_REG_01() { Send((byte)ICD.GET_REGISTER1); }
+
+        // 0xA2 GET_REGISTER2 — deprecated stub
+        public void REQ_REG_02() { Send((byte)ICD.GET_REGISTER2); }
+
+        // 0xA5 SET_SYSTEM_STATE
+        public void SetState(SYSTEM_STATES state)
+        {
+            Send((byte)ICD.SET_SYSTEM_STATE, new byte[] { Convert.ToByte(state) });
+        }
+
+        // 0xA6 SET_GIMBAL_MODE
+        public void SetMode(BDC_MODES mode)
+        {
+            Send((byte)ICD.SET_GIMBAL_MODE, new byte[] { Convert.ToByte(mode) });
+        }
+
+        // 0xE3 PMS_CHARGER_ENABLE
+        public bool ChargeEnabled
+        {
+            set { Send((byte)ICD.PMS_CHARGER_ENABLE, new byte[] { Convert.ToByte(value) }); }
+        }
+
+        // 0xED PMS_SET_CHARGER_LEVEL
+        public CHARGE_LEVELS ChargeLevel
+        {
+            set { Send((byte)ICD.PMS_SET_CHARGER_LEVEL, new byte[] { Convert.ToByte(value) }); }
+        }
+
+        // 0xAD SET_HEL_POWER
+        public void SetLaserPower(uint pow)
+        {
+            Send((byte)ICD.SET_HEL_POWER, new byte[] { Convert.ToByte(pow) });
+        }
+
+        // 0xAE CLEAR_HEL_ERROR
+        public void ClearLaserError()
+        {
+            Send((byte)ICD.CLEAR_HEL_ERROR);
+        }
+
+        // 0xE6 PMS_SET_FIRE_REQUESTED_VOTE — continuous heartbeat required while active
+        public bool wasLaserFireRequested { get; private set; } = false;
+        public Stopwatch LaserFireStopwatch { get; set; } = new Stopwatch();
+
+        public bool LaserFireRequest
+        {
+            set
+            {
+                wasLaserFireRequested = value;
+                Send((byte)ICD.PMS_SET_FIRE_REQUESTED_VOTE, new byte[] { Convert.ToByte(value) });
+                if (wasLaserFireRequested)
+                    LaserFireStopwatch.Restart();
+                else
+                    LaserFireStopwatch.Stop();
+            }
+        }
+
+        // ── INT_ENG commands — A2 only, guarded ──────────────────────────────
+
+        // 0xE2 PMS_SOL_ENABLE
+        public void EnableSolenoid(int w, bool en)
+        {
+            if (!AssertIntEng("EnableSolenoid")) return;
+            Send((byte)ICD.PMS_SOL_ENABLE, new byte[] { (byte)w, (byte)(en ? 1 : 0) });
+        }
+
+        // 0xE4 PMS_RELAY_ENABLE
+        public void EnableRelay(int w, bool en)
+        {
+            if (!AssertIntEng("EnableRelay")) return;
+            Send((byte)ICD.PMS_RELAY_ENABLE, new byte[] { (byte)w, (byte)(en ? 1 : 0) });
+        }
+
+        // 0xEC PMS_VICOR_ENABLE
+        public bool VicorEnable
+        {
+            set
+            {
+                if (!AssertIntEng("VicorEnable")) return;
+                Send((byte)ICD.PMS_VICOR_ENABLE, new byte[] { (byte)(value ? 1 : 0) });
+            }
+        }
+
+        // 0xE0 SET_MCC_REINIT
+        public void ReInitDevice(MCC_DEVICES dev)
+        {
+            if (!AssertIntEng("ReInitDevice")) return;
+            Send((byte)ICD.SET_MCC_REINIT, new byte[] { (byte)dev });
+        }
+
+        // 0xE1 SET_MCC_DEVICES_ENABLE
+        public void EnableDevice(MCC_DEVICES dev, bool en)
+        {
+            if (!AssertIntEng("EnableDevice")) return;
+            Send((byte)ICD.SET_MCC_DEVICES_ENABLE, new byte[] { (byte)dev, (byte)(en ? 1 : 0) });
+        }
+
+        // 0xE7 TMS_INPUT_FAN_SPEED
+        public void SetFanSpeed(int fan, TMC_FAN_SPEEDS spd)
+        {
+            if (!AssertIntEng("SetFanSpeed")) return;
+            Send((byte)ICD.TMS_INPUT_FAN_SPEED, new byte[] { (byte)fan, (byte)spd });
+        }
+
+        // 0xEB TMS_SET_TARGET_TEMP — firmware clamps to [10–40 °C]
+        public void SetTargetTemp(byte tt)
+        {
+            if (!AssertIntEng("SetTargetTemp")) return;
+            Send((byte)ICD.TMS_SET_TARGET_TEMP, new byte[] { tt });
+        }
+
+        // ── Connection + status ───────────────────────────────────────────────
+        public bool MCC_STATUS { get { return LatestMSG.HB_ms < 200; } }
+        public bool TMC_STATUS { get { return LatestMSG.isTMC_DeviceReady; } }
+        public bool GPS_STATUS { get { return LatestMSG.isGNSS_DeviceReady && LatestMSG.GNSSMsg.SIV >= 4; } }
+
+        public READY_STATUS HEL_STATUS
+        {
+            get
+            {
+                if ((LatestMSG.IPGMsg.HKVoltage > 23.3) && (LatestMSG.IPGMsg.BusVoltage > 40))
+                {
+                    if (LatestMSG.isHEL_NOTREADY)
+                        return READY_STATUS.WARN;
+                    else
+                        return READY_STATUS.READY;
+                }
+                return READY_STATUS.ERROR;
+            }
+        }
+
+        public Color COLOR_FROM_STATUS(READY_STATUS status)
+        {
+            switch (status)
+            {
+                case READY_STATUS.READY: return Color.Green;
+                case READY_STATUS.WARN:  return Color.Orange;
+                default:
+                case READY_STATUS.ERROR: return Color.Red;
+            }
+        }
+    }
+}
