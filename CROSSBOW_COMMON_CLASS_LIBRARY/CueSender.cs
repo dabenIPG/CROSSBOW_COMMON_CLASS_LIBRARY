@@ -132,7 +132,7 @@ namespace CROSSBOW
             _theiaDest = new IPEndPoint(IPAddress.Parse(_theiaHost), THEIA_PORT);
 
             // Bind on any port — THEIA replies to our source IP:port
-            _udp = new UdpClient(new IPEndPoint(IPAddress.Any, THEIA_PORT));
+            _udp = new UdpClient(new IPEndPoint(IPAddress.Any, 0));  // OS assigns ephemeral port
             _udp.Client.ReceiveTimeout = RECV_TIMEOUT;
 
             _recvThread = new Thread(RecvThreadFunc) { IsBackground = true, Name = "CueSender.Recv" };

@@ -37,7 +37,7 @@ namespace CROSSBOW
 
         public FILETYPE FileType { get; set; } = FILETYPE.LCH;
 
-        public string FilePath { get; private set; } = "NA";
+        public string FilePath { get; set; } = "NA";
         public string SystemOperator { get; set; } = "IPG";
         
         private ptLLA _systemLocation { get; set; } = new ptLLA();
@@ -53,16 +53,18 @@ namespace CROSSBOW
 
         public double Undulation { get; set; } = 0;
 
-        public string MissionID { get; private set; } = "NA";
-        public string Operator { get; private set; } = "IPG";
-        public string MissionName { get; private set; } = "NA";
-        public DateTime MissionStartDateTime { get; private set; } = DateTime.UtcNow;
-        public DateTime MissionEndDateTime { get; private set; } = DateTime.UtcNow;
+        public string MissionID { get; set; } = "NA";
+        public string Operator { get; set; } = "IPG";
+        public string MissionName { get; set; } = "NA";
+        public DateTime MissionStartDateTime { get; set; } = DateTime.UtcNow;
+        public DateTime MissionEndDateTime { get; set; } = DateTime.UtcNow;
         public TimeSpan MissionDuration { get { return (MissionEndDateTime - MissionStartDateTime); } }
-        public AUTHORIZATION AuthorizationType { get; private set; } = AUTHORIZATION.PRACTICE;
+        public AUTHORIZATION AuthorizationType { get; set; } = AUTHORIZATION.PRACTICE;
         public bool isForExecution { get { return AuthorizationType == AUTHORIZATION.EXECUTION; } }
         public bool isOperatorValid { get { return Operator.Equals(SystemOperator); } }
         public bool isLocationValid { get; private set; } = false;
+        public bool WindowVote { get; private set; } = false;
+        public bool TotalVote { get { return isForExecution && isOperatorValid && isLocationValid && WindowVote; } }
 
         public int NumberTarget { get; private set; } = 0;
 
@@ -192,6 +194,31 @@ namespace CROSSBOW
                 isLocationValid = isLocationValid && (d2 <= 10);
             }
         }
+        public void CheckLocalVote(DateTime currentTime, PointF LOS)
+        {
+            WindowVote = false;
+            int it = 0;
+            foreach (LCH_TARGET aTarget in LCH_Targets)
+            {
+                bool isInWindow = ((LOS.X >= aTarget.Az1) && (LOS.X <= aTarget.Az2) && (LOS.Y >= aTarget.El1) && (LOS.Y <= aTarget.El2));
+                if (isInWindow)
+                {
+                    // is it in any time slot for this target?
+                    bool isInTime = (currentTime.ToUniversalTime() >= aTarget.StartDateTime.ToUniversalTime() && currentTime.ToUniversalTime() <= aTarget.EndDateTime.ToUniversalTime());
+                    if (isInTime)
+                    {
+                        foreach (LCH_WINDOW aWindow in aTarget.LCH_Windows)
+                        {
+                            WindowVote = (currentTime.ToUniversalTime() >= aWindow.StartDateTime.ToUniversalTime() && currentTime.ToUniversalTime() <= aWindow.EndDateTime.ToUniversalTime());
+
+                            if (WindowVote)
+                                break;
+                        }
+                    }
+                }
+                it++;
+            }
+        }
 
     }
     public class LCH_TARGET
@@ -274,6 +301,18 @@ namespace CROSSBOW
         
         }
 
+        public LCH_TARGET(DataGridViewRow dgvRow, double lat, double lng, double alt)
+        {
+            Latitude = lat;
+            Longitude = lng;
+            Altitude = alt;
+            Az1 = Convert.ToDouble(dgvRow.Cells["Az1"].Value);
+            El1 = Convert.ToDouble(dgvRow.Cells["El1"].Value);
+            Az2 = Convert.ToDouble(dgvRow.Cells["Az2"].Value);
+            El2 = Convert.ToDouble(dgvRow.Cells["El2"].Value);
+            LCH_Windows.Add(new LCH_WINDOW(DateTime.Parse(dgvRow.Cells["SartTime"].Value.ToString()), DateTime.Parse(dgvRow.Cells["StopTime"].Value.ToString())));
+        }
+
         public bool isOpen()
         {
             bool res = false;
@@ -310,6 +349,11 @@ namespace CROSSBOW
             EndDateTime = DateTime.ParseExact(d2 + " " + t2, "yyyy MMM dd HHmm ss", CultureInfo.InvariantCulture, DateTimeStyles.AssumeUniversal);
 
 
+        }
+        public LCH_WINDOW(DateTime startDateTime, DateTime endDateTime)
+        {
+            StartDateTime = startDateTime;
+            EndDateTime = endDateTime;
         }
     }
 

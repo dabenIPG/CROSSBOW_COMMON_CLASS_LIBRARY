@@ -53,7 +53,7 @@ namespace CROSSBOW
 
         public SYSTEM_STATES System_State
         {
-            get { return aMCC.System_State; }
+            get { return aMCC?.System_State ?? SYSTEM_STATES.OFF; }
             set 
             {
                 Last_System_State = value;

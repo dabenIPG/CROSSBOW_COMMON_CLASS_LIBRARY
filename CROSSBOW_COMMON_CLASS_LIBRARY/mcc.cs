@@ -67,6 +67,7 @@ namespace CROSSBOW
         public bool     isConnected { get; private set; } = false;
 
         public MSG_MCC       LatestMSG    { get; private set; }
+        
         public SYSTEM_STATES System_State { get { return LatestMSG.System_State; } }
         public BDC_MODES     BDC_Mode     { get { return LatestMSG.BDC_Mode; } }
 

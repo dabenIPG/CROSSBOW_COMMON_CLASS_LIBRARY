@@ -282,19 +282,20 @@ namespace   CROSSBOW
                 payload[0] = (byte)_aCB.System_State;
                 payload[1] = (byte)_aCB.BDC_Mode;
                 payload[2] = (byte)_aCB.Active_CAM;
-                payload[3] = _aCB.aMCC.LatestMSG.VoteBits;
-                payload[4] = _aCB.aBDC.LatestMSG.VoteBits1;
-                payload[5] = _aCB.aBDC.LatestMSG.VoteBits2;
 
-                ExtOpsFrame.WriteFloat(payload, 6,  _aCB.aBDC.LatestMSG.LOS_GIM.X);
-                ExtOpsFrame.WriteFloat(payload, 10, _aCB.aBDC.LatestMSG.LOS_GIM.Y);
-                ExtOpsFrame.WriteFloat(payload, 14, _aCB.aBDC.LatestMSG.LOS_FSM_RB.X);
-                ExtOpsFrame.WriteFloat(payload, 18, _aCB.aBDC.LatestMSG.LOS_FSM_RB.Y);
+                // LatestMSG is null until Parse() is called — default to zero if not yet populated
+                payload[3] = _aCB.aMCC?.LatestMSG?.VoteBits ?? 0;
+                payload[4] = _aCB.aBDC?.LatestMSG?.VoteBits1 ?? 0;
+                payload[5] = _aCB.aBDC?.LatestMSG?.VoteBits2 ?? 0;
+
+                ExtOpsFrame.WriteFloat(payload, 6, _aCB.aBDC?.LatestMSG?.LOS_GIM.X ?? 0f);
+                ExtOpsFrame.WriteFloat(payload, 10, _aCB.aBDC?.LatestMSG?.LOS_GIM.Y ?? 0f);
+                ExtOpsFrame.WriteFloat(payload, 14, _aCB.aBDC?.LatestMSG?.LOS_FSM_RB.X ?? 0f);
+                ExtOpsFrame.WriteFloat(payload, 18, _aCB.aBDC?.LatestMSG?.LOS_FSM_RB.Y ?? 0f);
                 // [22–29] RESERVED — already zero
 
                 byte[] frame = ExtOpsFrame.BuildFrame(ExtOpsFrame.CMD_STATUS_RESPONSE,
                                                        _txSeq++, payload);
-
                 udpClient?.Send(frame, frame.Length, iPEndPoint);
             }
             catch (Exception ex)
@@ -302,7 +303,6 @@ namespace   CROSSBOW
                 Debug.WriteLine($"{BaseICAO} SendResponse error: {ex.Message}");
             }
         }
-
     }
 
 
