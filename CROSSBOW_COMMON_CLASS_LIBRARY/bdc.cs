@@ -1,28 +1,21 @@
-// bdc.cs  —  THEIA HMI BDC controller class  (ICD v1.7, A3 framing)
+// bdc.cs  —  CROSSBOW BDC controller class — A2 (ENG GUI) and A3 (THEIA HMI)
 //
-// Changes from HMI original:
-//   Port 10020 → 10050 (A3)
-//   Socket bound explicitly to 192.168.1.208:10050 (firmware enforces src IP .200–.254)
-//   EXEC_UDP_CMD() replaced by BuildA3Frame() / SendA3()
-//   INT-only sends removed:
-//     VicorEnabled, EnableRelay, SetOverrideVote, GimbalSetHome,
-//     FMC_SET_FSM_SIGNS, FSMTestScan, STAGE_ENABLED, STAGE_CALIBRATE, SEND_LCH_PRINT
-//   CMD_MWIR_NUC1 and SET_CUE_OFFSET kept — EXT promotion
-//   Thread.Sleep(20) → await Task.Delay(20, ct) in LCH_UPLOAD
-//   Debug.WriteLine → Serilog Log?.Information/Warning/Debug
-//   TRC_MSG property renames applied:
-//     DeviceTemp → deviceTemperature, JetsonTemp → jetsonTemp,
-//     OverlayMaskRB → overlayMask
+// Transport is selected at construction via TransportPath:
+//   THEIA:    new BDC(log, TransportPath.A3_External)  — port 10050, magic 0xCB 0x58
+//   ENG GUI:  new BDC(log, TransportPath.A2_Internal)  — port 10018, magic 0xCB 0x49
+//
+// INT_ENG commands (VicorEnabled, EnableRelay, SetOverrideVote, GimbalSetHome,
+//   FMC_SET_FSM_SIGNS, FSMTestScan, STAGE_ENABLED, STAGE_CALIBRATE, SEND_LCH_PRINT)
+//   are guarded — calling them on an A3 instance logs a warning and does nothing.
+//   Firmware rejects INT commands on A3 regardless, but the guard catches mistakes early.
 //
 // MSG classes are in separate files:
-//   BDC_MSG.cs, GIMBAL_MSG.cs, TRC_MSG.cs, FMC_MSG.cs, CAMERA.cs
+//   MSG_BDC.cs, MSG_GIMBAL.cs, MSG_TRC.cs, MSG_FMC.cs, CAMERA.cs
 
-using Microsoft.VisualBasic.Logging;
 using Serilog;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
-using System.Security.Cryptography;
 
 namespace CROSSBOW
 {
@@ -31,47 +24,59 @@ namespace CROSSBOW
         public enum READY_STATUS { ALIVE, READY, WARN, ERROR, NA }
         public enum BDC_FOCUS_DIR { NEAR = -1, FAR = 1 }
 
-        // ── A3 constants ──────────────────────────────────────────────────────
-        private const byte   A3_MAGIC_HI = 0xCB;
-        private const byte   A3_MAGIC_LO = 0x58;
-        private const string LOCAL_IP    = "192.168.1.208";
-        private const int    A3_PORT     = 10050;
+        // ── Frame constants ───────────────────────────────────────────────────
+        private const byte MAGIC_HI           = 0xCB;
+        private const int  FRAME_RESPONSE_LEN = 521;
+        private const int  PAYLOAD_OFFSET     = 7;
+        private const int  PAYLOAD_LEN        = 512;
+        private const byte STATUS_OK          = 0x00;
+
+        // Transport-dependent computed properties
+        private byte   MagicLo    => Transport == TransportPath.A3_External ? (byte)0x58     : (byte)0x49;
+        private int    ActivePort => Transport == TransportPath.A3_External ? 10050           : 10018;
+        private string LocalIP    => Transport == TransportPath.A3_External ? "192.168.1.208" : "0.0.0.0";
 
         // Keepalive — re-send SET_UNSOLICITED every 30 s to stay within the
         // firmware's 60-second liveness window (frame.hpp CLIENT_TIMEOUT_MS).
-        private const int    KEEPALIVE_INTERVAL_MS = 30_000;
+        private const int KEEPALIVE_INTERVAL_MS = 30_000;
 
         public string IP   { get; private set; } = "192.168.1.20";
-        public int    Port { get; private set; } = A3_PORT;
+        public int    Port => ActivePort;
+
+        // ── Transport + Logger ────────────────────────────────────────────────
+        public TransportPath Transport           { get; private set; }
+        public bool          isVerboseLogEnabled { get; set; } = true;
+        private ILogger      Log                 { get; set; }
 
         // ── State ─────────────────────────────────────────────────────────────
-        private UdpClient?              udpClient;
-        private IPEndPoint?             ipEndPoint;
+        private UdpClient?               udpClient;
+        private IPEndPoint?              ipEndPoint;
+        private IPEndPoint?              _remoteEP;
         private CancellationTokenSource? ts;
-        private CancellationToken       ct;
-        private bool                    _isStarted = false;
-        private byte                    _seq       = 0;
-        private DateTime                _lastKeepalive = DateTime.MinValue;
-        private ILogger                 Log        { get; set; }
+        private CancellationToken        ct;
+        private bool                     _isStarted     = false;
+        private byte                     _seq           = 0;
+        private DateTime                 _lastKeepalive = DateTime.MinValue;
 
-        public bool isVerboseLogEnabled { get; set; } = true;
+        public DateTime lastMsgRx  { get; private set; } = DateTime.UtcNow;
+        public double   HB_RX_us   { get; private set; } = 0;
+        public bool     isConnected { get; private set; } = false;
 
-        public DateTime lastMsgRx { get; private set; } = DateTime.UtcNow;
-        public double   HB_RX_us  { get; private set; } = 0;
+        public MSG_BDC   LatestMSG { get; private set; }
+        public BDC_MODES Mode      { get { return LatestMSG.Mode; } }
 
-        public MSG_BDC LatestMSG { get; private set; }
-
-        public BDC_MODES Mode { get { return LatestMSG.Mode; } }
-        public TransportPath Transport { get; private set; }
-
-        // ── Constructor ───────────────────────────────────────────────────────
+        // ── Constructors ──────────────────────────────────────────────────────
         public BDC(ILogger _log, TransportPath transport = TransportPath.A3_External)
         {
             Log       = _log;
-            // LatestMSG = new BDC_MSG(Log);
-            LatestMSG = new MSG_BDC(Log, TransportPath.A3_External);
             Transport = transport;
+            LatestMSG = new MSG_BDC(Log, transport);
+        }
 
+        public BDC(TransportPath transport = TransportPath.A3_External)
+        {
+            Transport = transport;
+            LatestMSG = new MSG_BDC(transport);
         }
 
         // ── Lifecycle ─────────────────────────────────────────────────────────
@@ -81,10 +86,8 @@ namespace CROSSBOW
             _isStarted = true;
             ts = new CancellationTokenSource();
             ct = ts.Token;
-            // Randomise SEQ to avoid landing in the firmware's replay-rejection window
-            // (last_seq − 32) from the previous session. Range 33–223 clears both wrap edges.
             _seq = (byte)new Random().Next(33, 224);
-            Log?.Information("BDC starting");
+            Log?.Information("BDC starting ({Transport})", Transport);
             _ = Task.Run(async () => await backgroundUDPRead(), ct);
             _ = KeepaliveLoop();
         }
@@ -103,9 +106,26 @@ namespace CROSSBOW
             try
             {
                 if (udpClient != null) { udpClient.Close(); udpClient = null; }
-                udpClient = new UdpClient();
-                udpClient.Client.Bind(new IPEndPoint(IPAddress.Parse(LOCAL_IP), 0));
-                ipEndPoint = new IPEndPoint(IPAddress.Parse(IP), A3_PORT);
+
+                if (Transport == TransportPath.A3_External)
+                {
+                    // A3: bind to external IP — firmware enforces src .200–.254
+                    udpClient = new UdpClient();
+                    udpClient.Client.Bind(new IPEndPoint(IPAddress.Parse(LocalIP), 0));
+                    ipEndPoint = new IPEndPoint(IPAddress.Parse(IP), ActivePort);
+                }
+                else
+                {
+                    // A2: OS assigns local port — connect to remote
+                    udpClient = new UdpClient();
+                    _remoteEP = new IPEndPoint(IPAddress.Parse(IP), ActivePort);
+                    udpClient.Connect(_remoteEP);
+
+                    // Registration burst — advance past any stale replay window
+                    for (int i = 0; i < 3; i++)
+                        Send(BuildFrame((byte)ICD.SET_UNSOLICITED, new[] { (byte)1 }));
+                    Debug.WriteLine("BDC: A2 registration burst sent");
+                }
             }
             catch (Exception ex)
             {
@@ -114,24 +134,59 @@ namespace CROSSBOW
                 return;
             }
 
-            await Task.Delay(50, ct).ConfigureAwait(false);
-            UnsolicitedMode = true;
+            if (Transport == TransportPath.A3_External)
+            {
+                await Task.Delay(50, ct).ConfigureAwait(false);
+                UnsolicitedMode = true;
+            }
 
-            Log?.Information("BDC UDP connected ({LocalIp}:{Port} → {RemoteIp})", LOCAL_IP, A3_PORT, IP);
+            Log?.Information("BDC UDP connected ({LocalIp}:{Port} → {RemoteIp})",
+                LocalIP, ActivePort, IP);
+
             try
             {
                 while (!ct.IsCancellationRequested)
                 {
-                    var    res    = await udpClient.ReceiveAsync(ct).ConfigureAwait(false);
-                    if (!res.RemoteEndPoint.Address.Equals(IPAddress.Parse(IP))) continue;
-                    byte[] rxBuff = res.Buffer;
-                    if (rxBuff.Length > 0)
+                    var res = await udpClient.ReceiveAsync(ct).ConfigureAwait(false);
+
+                    if (Transport == TransportPath.A3_External)
                     {
-                        isConnected = true;
-                        var now   = DateTime.UtcNow;
-                        HB_RX_us  = (now - lastMsgRx).TotalMicroseconds;
-                        lastMsgRx = now;
-                        LatestMSG.Parse(rxBuff);
+                        // A3: pass full frame — MSG_BDC.ParseA3 validates internally
+                        if (!res.RemoteEndPoint.Address.Equals(IPAddress.Parse(IP))) continue;
+                        byte[] rxBuff = res.Buffer;
+                        if (rxBuff.Length > 0)
+                        {
+                            isConnected = true;
+                            var now   = DateTime.UtcNow;
+                            HB_RX_us  = (now - lastMsgRx).TotalMicroseconds;
+                            lastMsgRx = now;
+                            LatestMSG.Parse(rxBuff);
+                        }
+                    }
+                    else
+                    {
+                        // A2: validate frame, strip to payload, pass to ParseA2
+                        byte[] frame = res.Buffer;
+                        if (frame.Length == FRAME_RESPONSE_LEN
+                            && frame[0] == MAGIC_HI && frame[1] == MagicLo
+                            && frame[4] == STATUS_OK
+                            && CrcHelper.Crc16(frame, FRAME_RESPONSE_LEN - 2)
+                               == (ushort)((frame[519] << 8) | frame[520]))
+                        {
+                            isConnected = true;
+                            HB_RX_us  = (DateTime.UtcNow - lastMsgRx).TotalMicroseconds;
+                            lastMsgRx = DateTime.UtcNow;
+                            byte[] payload = new byte[PAYLOAD_LEN];
+                            Array.Copy(frame, PAYLOAD_OFFSET, payload, 0, PAYLOAD_LEN);
+                            LatestMSG.Parse(payload);
+                        }
+                        else
+                        {
+                            ushort computed = CrcHelper.Crc16(frame, FRAME_RESPONSE_LEN - 2);
+                            ushort received = frame.Length >= FRAME_RESPONSE_LEN
+                                ? (ushort)((frame[519] << 8) | frame[520]) : (ushort)0;
+                            Debug.WriteLine($"BDC RX FAIL: len={frame.Length} magic=0x{frame[0]:X2}{frame[1]:X2} STATUS=0x{frame[4]:X2} CRC computed=0x{computed:X4} received=0x{received:X4}");
+                        }
                     }
                 }
             }
@@ -149,40 +204,63 @@ namespace CROSSBOW
             }
         }
 
-        // ── A3 frame builder ──────────────────────────────────────────────────
-        private byte[] BuildA3Frame(byte cmd, byte[]? payload = null)
+        // ── Frame builder ─────────────────────────────────────────────────────
+        private byte[] BuildFrame(byte cmd, byte[]? payload = null)
         {
             payload ??= Array.Empty<byte>();
             ushort plen     = (ushort)payload.Length;
             int    frameLen = 6 + plen + 2;
             byte[] frame    = new byte[frameLen];
-            frame[0] = A3_MAGIC_HI;
-            frame[1] = A3_MAGIC_LO;
+            frame[0] = MAGIC_HI;
+            frame[1] = MagicLo;
             frame[2] = _seq++;
             frame[3] = cmd;
-            frame[4] = (byte)(plen & 0xFF);    // payload len LE
+            frame[4] = (byte)(plen & 0xFF);
             frame[5] = (byte)(plen >> 8);
             if (plen > 0)
                 Buffer.BlockCopy(payload, 0, frame, 6, plen);
             ushort crc = CrcHelper.Crc16(frame, frameLen - 2);
-            frame[frameLen - 2] = (byte)(crc >> 8);  // CRC BE
+            frame[frameLen - 2] = (byte)(crc >> 8);
             frame[frameLen - 1] = (byte)(crc & 0xFF);
             return frame;
         }
 
-        private void SendA3(byte cmd, byte[]? payload = null)
+        private void Send(byte cmd, byte[]? payload = null)
         {
-            if (udpClient == null || ipEndPoint == null) return;
-            byte[] frame = BuildA3Frame(cmd, payload);
-            udpClient.Send(frame, frame.Length, ipEndPoint);
-            _lastKeepalive = DateTime.UtcNow;   // any TX resets the keepalive clock
+            Send(BuildFrame(cmd, payload));
+        }
+
+        private void Send(byte[] frame)
+        {
+            if (udpClient == null) return;
+            try
+            {
+                if (Transport == TransportPath.A3_External && ipEndPoint != null)
+                    udpClient.Send(frame, frame.Length, ipEndPoint);
+                else
+                    udpClient.Send(frame);
+                _lastKeepalive = DateTime.UtcNow;
+            }
+            catch (Exception ex)
+            {
+                Log?.Warning("BDC: send error: {Ex}", ex.Message);
+                Debug.WriteLine($"BDC: send error: {ex.Message}");
+            }
+        }
+
+        // ── INT_ENG command guard ─────────────────────────────────────────────
+        private bool AssertIntEng(string cmdName)
+        {
+            if (Transport == TransportPath.A3_External)
+            {
+                Log?.Warning("BDC: {Cmd} is INT_ENG only — not sent on A3 transport", cmdName);
+                Debug.WriteLine($"BDC: {cmdName} blocked — A3 transport does not support INT_ENG commands");
+                return false;
+            }
+            return true;
         }
 
         // ── Keepalive / staleness watchdog ────────────────────────────────────
-        // Runs independently of the receive loop so it ticks even during network
-        // blips where ReceiveAsync blocks. SendA3() resets _lastKeepalive so any
-        // user command suppresses the next idle tick.
-        // Staleness warning fires if no RX for >2× keepalive interval (60 s).
         private async Task KeepaliveLoop()
         {
             using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(KEEPALIVE_INTERVAL_MS));
@@ -193,7 +271,8 @@ namespace CROSSBOW
                     if ((DateTime.UtcNow - _lastKeepalive).TotalMilliseconds >= KEEPALIVE_INTERVAL_MS)
                         SendKeepalive();
 
-                    if (isConnected && (DateTime.UtcNow - lastMsgRx).TotalMilliseconds > KEEPALIVE_INTERVAL_MS * 2)
+                    if (isConnected &&
+                        (DateTime.UtcNow - lastMsgRx).TotalMilliseconds > KEEPALIVE_INTERVAL_MS * 2)
                         Log?.Warning("BDC: no telemetry for >{Seconds}s — firmware stream may have dropped",
                             KEEPALIVE_INTERVAL_MS * 2 / 1000);
                 }
@@ -203,16 +282,14 @@ namespace CROSSBOW
 
         private void SendKeepalive()
         {
-            SendA3((byte)ICD.SET_UNSOLICITED, new byte[] { 1 });
+            Send((byte)ICD.SET_UNSOLICITED, new byte[] { 1 });
             Log?.Information("BDC: keepalive sent");
         }
 
-        // ── Status ────────────────────────────────────────────────────────────
-        public bool isConnected { get; private set; } = false;
-
+        // ── Status aggregates ─────────────────────────────────────────────────
         public DateTime BDC_TIME_UTC { get { return LatestMSG.ntpTime.ToUniversalTime(); } }
-        public bool BDC_STATUS  { get { return (LatestMSG.RX_HB > 10 && LatestMSG.RX_HB < 60.0); } }
-        public bool GIM_STATUS  { get { return (LatestMSG.gimbalMSG.isReady && LatestMSG.gimbalMSG.isStarted && LatestMSG.gimbalMSG.isConnected); } }
+        public bool BDC_STATUS  { get { return LatestMSG.RX_HB > 10 && LatestMSG.RX_HB < 60.0; } }
+        public bool GIM_STATUS  { get { return LatestMSG.gimbalMSG.isReady && LatestMSG.gimbalMSG.isStarted && LatestMSG.gimbalMSG.isConnected; } }
         public bool FMC_STATUS  { get { return LatestMSG.fmcMSG.isReady && LatestMSG.fmcMSG.HB_ms > 10 && LatestMSG.fmcMSG.HB_ms < 30; } }
         public bool VIS_STATUS  { get { return LatestMSG.trcMSG.Cameras[(int)BDC_CAM_IDS.VIS].isCapturing; } }
         public bool MWIR_STATUS { get { return LatestMSG.trcMSG.Cameras[(int)BDC_CAM_IDS.MWIR].isCapturing; } }
@@ -227,204 +304,193 @@ namespace CROSSBOW
             }
         }
 
-        // ── EXT commands ──────────────────────────────────────────────────────
-        // INT-only removed: VicorEnabled, EnableRelay, SetOverrideVote, GimbalSetHome,
-        //   FMC_SET_FSM_SIGNS, FSMTestScan, STAGE_ENABLED, STAGE_CALIBRATE, SEND_LCH_PRINT
+        // ── INT_OPS commands — available on both A2 and A3 ───────────────────
 
+        // 0xA0 SET_UNSOLICITED
         public bool UnsolicitedMode
         {
-            set { SendA3((byte)ICD.SET_UNSOLICITED, new byte[] { Convert.ToByte(value) }); }
+            set { Send((byte)ICD.SET_UNSOLICITED, new byte[] { Convert.ToByte(value) }); }
         }
 
-        public void REQ_REG_01() { SendA3((byte)ICD.GET_REGISTER1); }
-        public void REQ_REG_02() { SendA3((byte)ICD.GET_REGISTER2); }
+        // 0xA1 GET_REGISTER1
+        public void REQ_REG_01() { Send((byte)ICD.GET_REGISTER1); }
 
-        public void SetState(SYSTEM_STATES _state)
+        // 0xA2 GET_REGISTER2 — deprecated stub
+        public void REQ_REG_02() { Send((byte)ICD.GET_REGISTER2); }
+
+        // 0xA5 SET_SYSTEM_STATE
+        public void SetState(SYSTEM_STATES state)
         {
-            SendA3((byte)ICD.SET_SYSTEM_STATE, new byte[] { Convert.ToByte(_state) });
+            Send((byte)ICD.SET_SYSTEM_STATE, new byte[] { Convert.ToByte(state) });
         }
 
-        public void SetMode(BDC_MODES _mode)
+        // 0xA6 SET_GIMBAL_MODE
+        public void SetMode(BDC_MODES mode)
         {
-            SendA3((byte)ICD.SET_GIMBAL_MODE, new byte[] { Convert.ToByte(_mode) });
+            Send((byte)ICD.SET_GIMBAL_MODE, new byte[] { Convert.ToByte(mode) });
         }
 
-        public void SetActiveCamera(BDC_CAM_IDS _id)
+        // ORIN_CAM_SET_ACTIVE
+        public void SetActiveCamera(BDC_CAM_IDS id)
         {
-            SendA3((byte)ICD.ORIN_CAM_SET_ACTIVE, new byte[] { (byte)_id });
+            Send((byte)ICD.ORIN_CAM_SET_ACTIVE, new byte[] { (byte)id });
         }
 
-        public void ReInitDevice(BDC_DEVICES _dev)
+        // SET_BDC_REINIT
+        public void ReInitDevice(BDC_DEVICES dev)
         {
-            SendA3((byte)ICD.SET_BDC_REINIT, new byte[] { Convert.ToByte(_dev) });
+            Send((byte)ICD.SET_BDC_REINIT, new byte[] { Convert.ToByte(dev) });
         }
-        // SET_BDC_VOTE_OVERRIDE
-        public void SetOverrideVote(BDC_VOTE_OVERRIDES vote, bool val)
-        {
-            //Send(BuildA2Frame((byte)ICD.SET_BDC_VOTE_OVERRIDE, new[] { (byte)vote, (byte)(val ? 1 : 0) }));
-            SendA3((byte)ICD.SET_BDC_VOTE_OVERRIDE, new[] { (byte)vote, (byte)(val ? 1 : 0) });
 
-        }
+        // SET_GIM_SPD — jog gimbal
         public void Jog(Int32 x, Int32 y)
         {
-            byte[] vx = BitConverter.GetBytes(x);
-            byte[] vy = BitConverter.GetBytes(y);
-            SendA3((byte)ICD.SET_GIM_SPD, new byte[]
-            {
-                vx[0], vx[1], vx[2], vx[3],
-                vy[0], vy[1], vy[2], vy[3]
-            });
+            byte[] payload = new byte[8];
+            Buffer.BlockCopy(BitConverter.GetBytes(x), 0, payload, 0, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(y), 0, payload, 4, 4);
+            Send((byte)ICD.SET_GIM_SPD, payload);
         }
 
-        public void GimbalPark() { SendA3((byte)ICD.CMD_GIM_PARK); }
+        // CMD_GIM_PARK
+        public void GimbalPark() { Send((byte)ICD.CMD_GIM_PARK); }
 
+        // SET_GIM_POS
+        public void GimbalSetPOS(Int32 x, Int32 y)
+        {
+            byte[] payload = new byte[8];
+            Buffer.BlockCopy(BitConverter.GetBytes(x), 0, payload, 0, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(y), 0, payload, 4, 4);
+            Send((byte)ICD.SET_GIM_POS, payload);
+        }
+
+        // SET_SYS_ATT
         public void SetPlatformATT(Single r, Single p, Single y)
         {
-            byte[] br = BitConverter.GetBytes(r);
-            byte[] bp = BitConverter.GetBytes(p);
-            byte[] by = BitConverter.GetBytes(y);
-            SendA3((byte)ICD.SET_SYS_ATT, new byte[]
-            {
-                br[0], br[1], br[2], br[3],
-                bp[0], bp[1], bp[2], bp[3],
-                by[0], by[1], by[2], by[3]
-            });
+            byte[] payload = new byte[12];
+            Buffer.BlockCopy(BitConverter.GetBytes(r), 0, payload, 0,  4);
+            Buffer.BlockCopy(BitConverter.GetBytes(p), 0, payload, 4,  4);
+            Buffer.BlockCopy(BitConverter.GetBytes(y), 0, payload, 8,  4);
+            Send((byte)ICD.SET_SYS_ATT, payload);
         }
 
-        public void SetPlatformLLA(Single _lat, Single _lng, Single _alt)
+        // SET_SYS_LLA
+        public void SetPlatformLLA(Single lat, Single lng, Single alt)
         {
-            byte[] blat = BitConverter.GetBytes(_lat);
-            byte[] blng = BitConverter.GetBytes(_lng);
-            byte[] balt = BitConverter.GetBytes(_alt);
-            SendA3((byte)ICD.SET_SYS_LLA, new byte[]
-            {
-                blat[0], blat[1], blat[2], blat[3],
-                blng[0], blng[1], blng[2], blng[3],
-                balt[0], balt[1], balt[2], balt[3]
-            });
+            byte[] payload = new byte[12];
+            Buffer.BlockCopy(BitConverter.GetBytes(lat), 0, payload, 0, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(lng), 0, payload, 4, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(alt), 0, payload, 8, 4);
+            Send((byte)ICD.SET_SYS_LLA, payload);
         }
 
-        public void SetPIDGains(byte _which, Single pkp, Single pki, Single pkd,
-                                              Single tkp, Single tki, Single tkd)
+        // SET_PID_GAINS
+        public void SetPIDGains(byte which, Single pkp, Single pki, Single pkd,
+                                            Single tkp, Single tki, Single tkd)
         {
-            byte[] bpkp = BitConverter.GetBytes(pkp);
-            byte[] bpki = BitConverter.GetBytes(pki);
-            byte[] bpkd = BitConverter.GetBytes(pkd);
-            byte[] btkp = BitConverter.GetBytes(tkp);
-            byte[] btki = BitConverter.GetBytes(tki);
-            byte[] btkd = BitConverter.GetBytes(tkd);
-            SendA3((byte)ICD.SET_PID_GAINS, new byte[]
-            {
-                _which,
-                bpkp[0], bpkp[1], bpkp[2], bpkp[3],
-                bpki[0], bpki[1], bpki[2], bpki[3],
-                bpkd[0], bpkd[1], bpkd[2], bpkd[3],
-                btkp[0], btkp[1], btkp[2], btkp[3],
-                btki[0], btki[1], btki[2], btki[3],
-                btkd[0], btkd[1], btkd[2], btkd[3]
-            });
+            byte[] payload = new byte[25];
+            int ndx = 0;
+            payload[ndx] = which; ndx++;
+            Buffer.BlockCopy(BitConverter.GetBytes(pkp), 0, payload, ndx, 4); ndx += 4;
+            Buffer.BlockCopy(BitConverter.GetBytes(pki), 0, payload, ndx, 4); ndx += 4;
+            Buffer.BlockCopy(BitConverter.GetBytes(pkd), 0, payload, ndx, 4); ndx += 4;
+            Buffer.BlockCopy(BitConverter.GetBytes(tkp), 0, payload, ndx, 4); ndx += 4;
+            Buffer.BlockCopy(BitConverter.GetBytes(tki), 0, payload, ndx, 4); ndx += 4;
+            Buffer.BlockCopy(BitConverter.GetBytes(tkd), 0, payload, ndx, 4);
+            Send((byte)ICD.SET_PID_GAINS, payload);
         }
 
-        public bool EnableCUETrack
+        // SET_PID_ENABLE
+        public bool EnableCUETrack   { set { Send((byte)ICD.SET_PID_ENABLE, new byte[] { 0x00, Convert.ToByte(value) }); } }
+        public bool EnableVideoTrack { set { Send((byte)ICD.SET_PID_ENABLE, new byte[] { 0x01, Convert.ToByte(value) }); } }
+
+        // SET_PID_TARGET
+        public void SetPIDCUETargetNED(Single az, Single el, Single spd)
         {
-            set { SendA3((byte)ICD.SET_PID_ENABLE, new byte[] { 0x00, Convert.ToByte(value) }); }
+            byte[] payload = new byte[13];
+            int ndx = 0;
+            payload[ndx] = 0x00; ndx++;
+            Buffer.BlockCopy(BitConverter.GetBytes(az),  0, payload, ndx, 4); ndx += 4;
+            Buffer.BlockCopy(BitConverter.GetBytes(el),  0, payload, ndx, 4); ndx += 4;
+            Buffer.BlockCopy(BitConverter.GetBytes(spd), 0, payload, ndx, 4);
+            Send((byte)ICD.SET_PID_TARGET, payload);
         }
 
-        public bool EnableVideoTrack
+        // Camera commands
+        public void SetAcamMag(byte mag)  { Send((byte)ICD.SET_CAM_MAG,  new byte[] { mag }); }
+        public void SetAcamIris(byte pos) { Send((byte)ICD.SET_CAM_IRIS, new byte[] { pos }); }
+
+        public void SetAcamFocus(ushort pos)
         {
-            set { SendA3((byte)ICD.SET_PID_ENABLE, new byte[] { 0x01, Convert.ToByte(value) }); }
+            Send((byte)ICD.SET_CAM_FOCUS, BitConverter.GetBytes(pos));
         }
 
-        public void SetPIDCUETargetNED(Single x, Single y, Single s)
-        {
-            byte[] bx = BitConverter.GetBytes(x);
-            byte[] by = BitConverter.GetBytes(y);
-            byte[] bs = BitConverter.GetBytes(s);
-            SendA3((byte)ICD.SET_PID_TARGET, new byte[]
-            {
-                0x00,
-                bx[0], bx[1], bx[2], bx[3],
-                by[0], by[1], by[2], by[3],
-                bs[0], bs[1], bs[2], bs[3]
-            });
-        }
+        public bool VIS_FILTER_ENABLE            { set { Send((byte)ICD.CMD_VIS_FILTER_ENABLE,       new byte[] { Convert.ToByte(value) }); } }
+        public bool MWIR_WhiteHot                { set { Send((byte)ICD.SET_MWIR_WHITEHOT,           new byte[] { Convert.ToByte(value) }); } }
+        public AF_MODES MWIR_SET_AF_MODE         { set { Send((byte)ICD.CMD_MWIR_AF_MODE,            new byte[] { Convert.ToByte(value) }); } }
+        public BDC_FOCUS_DIR MWIR_BUMP_FOCUS     { set { Send((byte)ICD.CMD_MWIR_BUMP_FOCUS,         new byte[] { Convert.ToByte(value < 0 ? 0 : 1) }); } }
 
-        public void SetAcamMag(byte _mag)  { SendA3((byte)ICD.SET_CAM_MAG,  new byte[] { _mag }); }
-        public void SetAcamIris(byte _pos) { SendA3((byte)ICD.SET_CAM_IRIS, new byte[] { _pos }); }
-
-        public void SetAcamFocus(ushort _pos)
-        {
-            byte[] b = BitConverter.GetBytes((UInt16)_pos);
-            SendA3((byte)ICD.SET_CAM_FOCUS, new byte[] { b[0], b[1] });
-        }
-
-        public bool VIS_FILTER_ENABLE
-        {
-            set { SendA3((byte)ICD.CMD_VIS_FILTER_ENABLE, new byte[] { Convert.ToByte(value) }); }
-        }
-
-        public bool MWIR_WhiteHot
-        {
-            set { SendA3((byte)ICD.SET_MWIR_WHITEHOT, new byte[] { Convert.ToByte(value) }); }
-        }
-
-        public AF_MODES MWIR_SET_AF_MODE
-        {
-            set { SendA3((byte)ICD.CMD_MWIR_AF_MODE, new byte[] { Convert.ToByte(value) }); }
-        }
-
-        public BDC_FOCUS_DIR MWIR_BUMP_FOCUS
-        {
-            set { SendA3((byte)ICD.CMD_MWIR_BUMP_FOCUS, new byte[] { Convert.ToByte(value < 0 ? 0 : 1) }); }
-        }
-
-        // CMD_MWIR_NUC1 — kept, EXT promotion
-        private DateTime lastNUC_request { get; set; } = DateTime.UtcNow;
+        // CMD_MWIR_NUC1 — rate-gated to 5 minute minimum interval
+        private DateTime _lastNUC_request = DateTime.UtcNow;
         public void MWIR_NUC1()
         {
-            if ((DateTime.UtcNow - lastNUC_request).TotalMinutes > 5)
+            if ((DateTime.UtcNow - _lastNUC_request).TotalMinutes > 5)
             {
-                SendA3((byte)ICD.CMD_MWIR_NUC1);
-                lastNUC_request = DateTime.UtcNow;
+                Send((byte)ICD.CMD_MWIR_NUC1);
+                _lastNUC_request = DateTime.UtcNow;
             }
             else
             {
                 if (isVerboseLogEnabled) Log?.Debug("MWIR_NUC1: too soon — must wait 5 min between NUCs");
+                Debug.WriteLine("BDC: NUC rejected — must wait 5 minutes between NUCs");
             }
         }
 
-        public void SetAcamTrackerEnable(BDC_TRACKERS _tracker, bool _en)
+        // Tracker commands
+        public void SetAcamTrackerEnable(BDC_TRACKERS tracker, bool en)
         {
-            SendA3((byte)ICD.ORIN_ACAM_ENABLE_TRACKERS,
-                   new byte[] { Convert.ToByte(_tracker), Convert.ToByte(_en) });
+            Send((byte)ICD.ORIN_ACAM_ENABLE_TRACKERS,
+                new byte[] { Convert.ToByte(tracker), Convert.ToByte(en) });
         }
 
-        public void SetAITrackPriority(byte _num)
+        public void SetAITrackPriority(byte num)
         {
-            //SendA3((byte)ICD.ORIN_ACAM_SET_AI_TRACK_PRIORITY, new byte[] { _num });
+            Send((byte)ICD.ORIN_ACAM_COCO_CLASS_FILTER, new byte[] { num });
         }
 
-        public bool EnableCUEFlag
+        public bool EnableCUEFlag               { set { Send((byte)ICD.ORIN_ACAM_SET_CUE_FLAG,        new byte[] { Convert.ToByte(value) }); } }
+        public void ResetTrackB()               { Send((byte)ICD.ORIN_ACAM_RESET_TRACKB); }
+        public bool SetAcamFocusScoreActiveFlag { set { Send((byte)ICD.ORIN_ACAM_ENABLE_FOCUSSCORE,   new byte[] { Convert.ToByte(value) }); } }
+
+        public void SetTrackGateSize(Size gate)
         {
-            set { SendA3((byte)ICD.ORIN_ACAM_SET_CUE_FLAG, new byte[] { Convert.ToByte(value) }); }
+            Send((byte)ICD.ORIN_ACAM_SET_TRACKGATE_SIZE,
+                new byte[] { Convert.ToByte(gate.Width), Convert.ToByte(gate.Height) });
         }
 
-        public void ResetTrackB() { SendA3((byte)ICD.ORIN_ACAM_RESET_TRACKB); }
-
-        public void SetOverlayBitmask(byte mask)
+        public void SetTrackGateCenter(Point ctr)
         {
-            SendA3((byte)ICD.ORIN_SET_STREAM_OVERLAYS, new byte[] { mask });
+            byte[] payload = new byte[4];
+            Buffer.BlockCopy(BitConverter.GetBytes((UInt16)ctr.X), 0, payload, 0, 2);
+            Buffer.BlockCopy(BitConverter.GetBytes((UInt16)ctr.Y), 0, payload, 2, 2);
+            Send((byte)ICD.ORIN_ACAM_SET_TRACKGATE_CENTER, payload);
         }
 
-        public void SetViewMode(VIEW_MODES mode)
+        // Offset commands
+        public void SetCUEOffset(float dx, float dy)
         {
-            SendA3((byte)ICD.ORIN_SET_VIEW_MODE, new byte[] { (byte)mode });
+            byte[] payload = new byte[8];
+            Buffer.BlockCopy(BitConverter.GetBytes(dx), 0, payload, 0, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(dy), 0, payload, 4, 4);
+            Send((byte)ICD.SET_CUE_OFFSET, payload);
         }
 
-        /// <summary>
-        /// Toggle OSD overlay on/off. Reads current overlay mask readback, sets or clears
-        /// bit7 (HUD_OVERLAY_FLAGS.OSD), and sends the updated mask.
-        /// </summary>
+        public void SetATOffset(sbyte dx, sbyte dy) { Send((byte)ICD.ORIN_ACAM_SET_ATOFFSET, new byte[] { (byte)dx, (byte)dy }); }
+        public void SetFTOffset(sbyte dx, sbyte dy) { Send((byte)ICD.ORIN_ACAM_SET_FTOFFSET, new byte[] { (byte)dx, (byte)dy }); }
+
+        // Overlay / view commands
+        public void SetOverlayBitmask(byte mask) { Send((byte)ICD.ORIN_SET_STREAM_OVERLAYS, new byte[] { mask }); }
+        public void SetViewMode(VIEW_MODES mode)  { Send((byte)ICD.ORIN_SET_VIEW_MODE, new byte[] { (byte)mode }); }
+
         public void SetOSD(bool enable)
         {
             byte current = LatestMSG.trcMSG.overlayMask;
@@ -432,10 +498,6 @@ namespace CROSSBOW
             SetOverlayBitmask(updated);
         }
 
-        /// <summary>
-        /// Toggle PIP mode. Enable sends PIP4 (1/4 inset); disable returns to
-        /// the currently active camera.
-        /// </summary>
         public void SetPIP(bool enable)
         {
             if (enable)
@@ -446,118 +508,72 @@ namespace CROSSBOW
                     : VIEW_MODES.CAM1);
         }
 
-        public void SetTrackGateSize(Size _gate)
-        {
-            SendA3((byte)ICD.ORIN_ACAM_SET_TRACKGATE_SIZE,
-                   new byte[] { Convert.ToByte(_gate.Width), Convert.ToByte(_gate.Height) });
-        }
-
-        public void SetTrackGateCenter(Point _ctr)
-        {
-            byte[] bx = BitConverter.GetBytes((UInt16)_ctr.X);
-            byte[] by = BitConverter.GetBytes((UInt16)_ctr.Y);
-            SendA3((byte)ICD.ORIN_ACAM_SET_TRACKGATE_CENTER,
-                   new byte[] { bx[0], bx[1], by[0], by[1] });
-        }
-
-        // SET_CUE_OFFSET — kept, EXT promotion
-        public void SetCUEOffset(float dx, float dy)
-        {
-            byte[] bx = BitConverter.GetBytes(dx);
-            byte[] by = BitConverter.GetBytes(dy);
-            SendA3((byte)ICD.SET_CUE_OFFSET, new byte[]
-            {
-                bx[0], bx[1], bx[2], bx[3],
-                by[0], by[1], by[2], by[3]
-            });
-        }
-
-        public void SetATOffset(sbyte dx, sbyte dy)
-        {
-            SendA3((byte)ICD.ORIN_ACAM_SET_ATOFFSET, new byte[] { (byte)dx, (byte)dy });
-        }
-
-        public void SetFTOffset(sbyte dx, sbyte dy)
-        {
-            SendA3((byte)ICD.ORIN_ACAM_SET_FTOFFSET, new byte[] { (byte)dx, (byte)dy });
-        }
-
-        public bool SetAcamFocusScoreActiveFlag
-        {
-            set { SendA3((byte)ICD.ORIN_ACAM_ENABLE_FOCUSSCORE, new byte[] { Convert.ToByte(value) }); }
-        }
-
+        // FSM commands
         public void FMC_SET_FSM_HOME(short x, short y)
         {
-            byte[] bx = BitConverter.GetBytes(x);
-            byte[] by = BitConverter.GetBytes(y);
-            SendA3((byte)ICD.BDC_SET_FSM_HOME,
-                   new byte[] { bx[0], bx[1], by[0], by[1] });
+            byte[] payload = new byte[4];
+            Buffer.BlockCopy(BitConverter.GetBytes(x), 0, payload, 0, 2);
+            Buffer.BlockCopy(BitConverter.GetBytes(y), 0, payload, 2, 2);
+            Send((byte)ICD.BDC_SET_FSM_HOME, payload);
         }
 
         public void FMC_SET_FSM_POS(short x, short y)
         {
-            byte[] bx = BitConverter.GetBytes(x);
-            byte[] by = BitConverter.GetBytes(y);
-            SendA3((byte)ICD.FMC_SET_FSM_POS,
-                   new byte[] { bx[0], bx[1], by[0], by[1] });
+            byte[] payload = new byte[4];
+            Buffer.BlockCopy(BitConverter.GetBytes(x), 0, payload, 0, 2);
+            Buffer.BlockCopy(BitConverter.GetBytes(y), 0, payload, 2, 2);
+            Send((byte)ICD.FMC_SET_FSM_POS, payload);
         }
 
         public void FMC_SET_FSM_IFOVS(float x, float y)
         {
-            byte[] bx = BitConverter.GetBytes(x);
-            byte[] by = BitConverter.GetBytes(y);
-            SendA3((byte)ICD.BDC_SET_FSM_IFOVS, new byte[]
-            {
-                bx[0], bx[1], bx[2], bx[3],
-                by[0], by[1], by[2], by[3]
-            });
+            byte[] payload = new byte[8];
+            Buffer.BlockCopy(BitConverter.GetBytes(x), 0, payload, 0, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(y), 0, payload, 4, 4);
+            Send((byte)ICD.BDC_SET_FSM_IFOVS, payload);
         }
 
-        public void FMC_SET_TRACK_ENABLE(bool _en)
+        public void FMC_SET_TRACK_ENABLE(bool en)
         {
-            SendA3((byte)ICD.BDC_SET_FSM_TRACK_ENABLE, new byte[] { Convert.ToByte(_en) });
+            Send((byte)ICD.BDC_SET_FSM_TRACK_ENABLE, new byte[] { Convert.ToByte(en) });
         }
 
         public void FMC_SET_STAGE_POSITION(UInt32 p)
         {
-            byte[] bx = BitConverter.GetBytes(p);
-            SendA3((byte)ICD.FMC_SET_STAGE_POS, new byte[] { bx[0], bx[1], bx[2], bx[3] });
+            Send((byte)ICD.FMC_SET_STAGE_POS, BitConverter.GetBytes(p));
         }
 
+        // Horizon commands
         public void LoadHorizon(UInt16 iaz, float el)
         {
-            byte[] b1 = BitConverter.GetBytes(iaz);
-            byte[] b2 = BitConverter.GetBytes(el);
-            SendA3((byte)ICD.SET_BDC_HORIZ,
-                   new byte[] { b1[0], b1[1], b2[0], b2[1], b2[2], b2[3] });
+            byte[] payload = new byte[6];
+            Buffer.BlockCopy(BitConverter.GetBytes(iaz), 0, payload, 0, 2);
+            Buffer.BlockCopy(BitConverter.GetBytes(el),  0, payload, 2, 4);
+            Send((byte)ICD.SET_BDC_HORIZ, payload);
         }
 
-        public void PrintHorizon() { SendA3((byte)ICD.SET_BDC_HORIZ); }
+        public void PrintHorizon()        { Send((byte)ICD.SET_BDC_HORIZ); }
 
         public void SET_HORIZON_BUFFER(Single b)
         {
-            byte[] bx = BitConverter.GetBytes(b);
-            SendA3((byte)ICD.SET_BDC_HORIZ, new byte[] { bx[0], bx[1], bx[2], bx[3] });
+            Send((byte)ICD.SET_BDC_HORIZ, BitConverter.GetBytes(b));
         }
 
-        public void SET_LCH_VOTE(LCH.FILETYPE _fileType, bool _operatorValid,
-                                  bool _locationValid, bool _forExec)
+        // LCH commands
+        public void SET_LCH_VOTE(LCH.FILETYPE fileType, bool operatorValid,
+                                  bool locationValid, bool forExec)
         {
-            SendA3((byte)ICD.SET_BDC_PALOS_VOTE, new byte[]
-            {
-                Convert.ToByte(_fileType),
-                Convert.ToByte(_operatorValid),
-                Convert.ToByte(_locationValid),
-                Convert.ToByte(_forExec)
-            });
+            Send((byte)ICD.SET_BDC_PALOS_VOTE,
+                new byte[] { Convert.ToByte(fileType),
+                             Convert.ToByte(operatorValid),
+                             Convert.ToByte(locationValid),
+                             Convert.ToByte(forExec) });
         }
 
         public void SEND_LCH_MISSION_DATA(LCH aLCH)
         {
-            UInt64 t1 = (UInt64)(new DateTimeOffset(aLCH.MissionStartDateTime.ToUniversalTime()).ToUnixTimeSeconds());
-            UInt64 t2 = (UInt64)(new DateTimeOffset(aLCH.MissionEndDateTime.ToUniversalTime()).ToUnixTimeSeconds());
-
+            UInt64 t1  = (UInt64)(new DateTimeOffset(aLCH.MissionStartDateTime.ToUniversalTime()).ToUnixTimeSeconds());
+            UInt64 t2  = (UInt64)(new DateTimeOffset(aLCH.MissionEndDateTime.ToUniversalTime()).ToUnixTimeSeconds());
             UInt16 az1 = Convert.ToUInt16(aLCH.Az1);
             UInt16 az2 = Convert.ToUInt16(aLCH.Az2);
             Int16  el1 = Convert.ToInt16(aLCH.El1);
@@ -565,115 +581,165 @@ namespace CROSSBOW
             UInt16 nt  = Convert.ToUInt16(aLCH.NumberTarget);
             UInt16 nw  = Convert.ToUInt16(aLCH.NumberWindows);
 
-            if (isVerboseLogEnabled)
-            {
-                Log?.Debug("LCH mission t1={T1} t2={T2}", t1, t2);
-            }
+            if (isVerboseLogEnabled) Log?.Debug("LCH mission t1={T1} t2={T2}", t1, t2);
 
-            byte[] msg = new byte[31];
+            byte[] payload = new byte[30];
             int ndx = 0;
-            msg[ndx] = (byte)ICD.SET_LCH_MISSION_DATA; ndx++;
-            msg[ndx] = Convert.ToByte(aLCH.FileType);  ndx++;
-            msg[ndx] = Convert.ToByte(true);            ndx++;
-            Buffer.BlockCopy(BitConverter.GetBytes(t1),  0, msg, ndx, sizeof(UInt64)); ndx += sizeof(UInt64);
-            Buffer.BlockCopy(BitConverter.GetBytes(t2),  0, msg, ndx, sizeof(UInt64)); ndx += sizeof(UInt64);
-            Buffer.BlockCopy(BitConverter.GetBytes(az1), 0, msg, ndx, sizeof(UInt16)); ndx += sizeof(UInt16);
-            Buffer.BlockCopy(BitConverter.GetBytes(el1), 0, msg, ndx, sizeof(Int16));  ndx += sizeof(Int16);
-            Buffer.BlockCopy(BitConverter.GetBytes(az2), 0, msg, ndx, sizeof(UInt16)); ndx += sizeof(UInt16);
-            Buffer.BlockCopy(BitConverter.GetBytes(el2), 0, msg, ndx, sizeof(Int16));  ndx += sizeof(Int16);
-            Buffer.BlockCopy(BitConverter.GetBytes(nt),  0, msg, ndx, sizeof(UInt16)); ndx += sizeof(UInt16);
-            Buffer.BlockCopy(BitConverter.GetBytes(nw),  0, msg, ndx, sizeof(UInt16)); ndx += sizeof(UInt16);
-
-            // Send without CMD byte prefix — mission data frame carries its own ICD.SET_LCH_MISSION_DATA
-            // in msg[0]; A3 wraps the entire msg as payload.
-            SendA3(msg[0], msg[1..]);
+            payload[ndx] = (byte)aLCH.FileType; ndx++;
+            payload[ndx] = 1;                    ndx++;   // isValid
+            Buffer.BlockCopy(BitConverter.GetBytes(t1),  0, payload, ndx, sizeof(UInt64)); ndx += sizeof(UInt64);
+            Buffer.BlockCopy(BitConverter.GetBytes(t2),  0, payload, ndx, sizeof(UInt64)); ndx += sizeof(UInt64);
+            Buffer.BlockCopy(BitConverter.GetBytes(az1), 0, payload, ndx, sizeof(UInt16)); ndx += sizeof(UInt16);
+            Buffer.BlockCopy(BitConverter.GetBytes(el1), 0, payload, ndx, sizeof(Int16));  ndx += sizeof(Int16);
+            Buffer.BlockCopy(BitConverter.GetBytes(az2), 0, payload, ndx, sizeof(UInt16)); ndx += sizeof(UInt16);
+            Buffer.BlockCopy(BitConverter.GetBytes(el2), 0, payload, ndx, sizeof(Int16));  ndx += sizeof(Int16);
+            Buffer.BlockCopy(BitConverter.GetBytes(nt),  0, payload, ndx, sizeof(UInt16)); ndx += sizeof(UInt16);
+            Buffer.BlockCopy(BitConverter.GetBytes(nw),  0, payload, ndx, sizeof(UInt16));
+            Send((byte)ICD.SET_LCH_MISSION_DATA, payload);
         }
 
-        public void SEND_LCH_TARGET_WITH_WINDOWS(LCH aLCH, UInt16 _targetIndex)
+        public void SEND_LCH_TARGET_WITH_WINDOWS(LCH aLCH, UInt16 targetIndex)
         {
-            LCH_TARGET aLCH_TARGET = aLCH.LCH_Targets[_targetIndex];
+            LCH_TARGET aTarget = aLCH.LCH_Targets[targetIndex];
+            UInt16 t1  = (UInt16)((aTarget.StartDateTime - aLCH.MissionStartDateTime).TotalSeconds);
+            UInt16 t2  = (UInt16)((aTarget.EndDateTime   - aLCH.MissionStartDateTime).TotalSeconds);
+            UInt16 az1 = Convert.ToUInt16(aTarget.Az1);
+            UInt16 az2 = Convert.ToUInt16(aTarget.Az2);
+            Int16  el1 = Convert.ToInt16(aTarget.El1);
+            Int16  el2 = Convert.ToInt16(aTarget.El2);
+            float  flat = (Single)aTarget.Latitude;
+            float  flng = (Single)aTarget.Longitude;
+            float  falt = (Single)aTarget.Altitude;
 
-            UInt16 t1  = (UInt16)((aLCH_TARGET.StartDateTime - aLCH.MissionStartDateTime).TotalSeconds);
-            UInt16 t2  = (UInt16)((aLCH_TARGET.EndDateTime   - aLCH.MissionStartDateTime).TotalSeconds);
-            UInt16 az1 = Convert.ToUInt16(aLCH_TARGET.Az1);
-            UInt16 az2 = Convert.ToUInt16(aLCH_TARGET.Az2);
-            Int16  el1 = Convert.ToInt16(aLCH_TARGET.El1);
-            Int16  el2 = Convert.ToInt16(aLCH_TARGET.El2);
-            float flat = (Single)aLCH_TARGET.Latitude;
-            float flng = (Single)aLCH_TARGET.Longitude;
-            float falt = (Single)aLCH_TARGET.Altitude;
-
-            byte[] msg = new byte[18 + 12 + aLCH_TARGET.LCH_Windows.Count * 2 * sizeof(UInt16)];
+            int windowBytes = aTarget.LCH_Windows.Count * 2 * sizeof(UInt16);
+            byte[] payload = new byte[29 + windowBytes];
             int ndx = 0;
-            msg[ndx] = (byte)ICD.SET_LCH_TARGET_DATA; ndx++;
-            msg[ndx] = Convert.ToByte(aLCH.FileType);  ndx++;
-            Buffer.BlockCopy(BitConverter.GetBytes((ushort)aLCH_TARGET.LCH_Windows.Count), 0, msg, ndx, sizeof(UInt16)); ndx += sizeof(UInt16);
-            Buffer.BlockCopy(BitConverter.GetBytes(t1),   0, msg, ndx, sizeof(UInt16)); ndx += sizeof(UInt16);
-            Buffer.BlockCopy(BitConverter.GetBytes(t2),   0, msg, ndx, sizeof(UInt16)); ndx += sizeof(UInt16);
-            Buffer.BlockCopy(BitConverter.GetBytes(az1),  0, msg, ndx, sizeof(UInt16)); ndx += sizeof(UInt16);
-            Buffer.BlockCopy(BitConverter.GetBytes(el1),  0, msg, ndx, sizeof(Int16));  ndx += sizeof(Int16);
-            Buffer.BlockCopy(BitConverter.GetBytes(az2),  0, msg, ndx, sizeof(UInt16)); ndx += sizeof(UInt16);
-            Buffer.BlockCopy(BitConverter.GetBytes(el2),  0, msg, ndx, sizeof(Int16));  ndx += sizeof(Int16);
-            Buffer.BlockCopy(BitConverter.GetBytes(flat), 0, msg, ndx, sizeof(Single)); ndx += sizeof(Single);
-            Buffer.BlockCopy(BitConverter.GetBytes(flng), 0, msg, ndx, sizeof(Single)); ndx += sizeof(Single);
-            Buffer.BlockCopy(BitConverter.GetBytes(falt), 0, msg, ndx, sizeof(Single)); ndx += sizeof(Single);
+            payload[ndx] = (byte)aLCH.FileType; ndx++;
+            Buffer.BlockCopy(BitConverter.GetBytes((ushort)aTarget.LCH_Windows.Count), 0, payload, ndx, sizeof(UInt16)); ndx += sizeof(UInt16);
+            Buffer.BlockCopy(BitConverter.GetBytes(t1),   0, payload, ndx, sizeof(UInt16)); ndx += sizeof(UInt16);
+            Buffer.BlockCopy(BitConverter.GetBytes(t2),   0, payload, ndx, sizeof(UInt16)); ndx += sizeof(UInt16);
+            Buffer.BlockCopy(BitConverter.GetBytes(az1),  0, payload, ndx, sizeof(UInt16)); ndx += sizeof(UInt16);
+            Buffer.BlockCopy(BitConverter.GetBytes(el1),  0, payload, ndx, sizeof(Int16));  ndx += sizeof(Int16);
+            Buffer.BlockCopy(BitConverter.GetBytes(az2),  0, payload, ndx, sizeof(UInt16)); ndx += sizeof(UInt16);
+            Buffer.BlockCopy(BitConverter.GetBytes(el2),  0, payload, ndx, sizeof(Int16));  ndx += sizeof(Int16);
+            Buffer.BlockCopy(BitConverter.GetBytes(flat), 0, payload, ndx, sizeof(Single)); ndx += sizeof(Single);
+            Buffer.BlockCopy(BitConverter.GetBytes(flng), 0, payload, ndx, sizeof(Single)); ndx += sizeof(Single);
+            Buffer.BlockCopy(BitConverter.GetBytes(falt), 0, payload, ndx, sizeof(Single)); ndx += sizeof(Single);
 
-            foreach (LCH_WINDOW aLCH_WINDOW in aLCH_TARGET.LCH_Windows)
+            foreach (LCH_WINDOW win in aTarget.LCH_Windows)
             {
-                UInt16 wt1 = (UInt16)((aLCH_WINDOW.StartDateTime - aLCH.MissionStartDateTime).TotalSeconds);
-                UInt16 wt2 = (UInt16)((aLCH_WINDOW.EndDateTime   - aLCH.MissionStartDateTime).TotalSeconds);
-                Buffer.BlockCopy(BitConverter.GetBytes(wt1), 0, msg, ndx, sizeof(UInt16)); ndx += sizeof(UInt16);
-                Buffer.BlockCopy(BitConverter.GetBytes(wt2), 0, msg, ndx, sizeof(UInt16)); ndx += sizeof(UInt16);
+                UInt16 wt1 = (UInt16)((win.StartDateTime - aLCH.MissionStartDateTime).TotalSeconds);
+                UInt16 wt2 = (UInt16)((win.EndDateTime   - aLCH.MissionStartDateTime).TotalSeconds);
+                Buffer.BlockCopy(BitConverter.GetBytes(wt1), 0, payload, ndx, sizeof(UInt16)); ndx += sizeof(UInt16);
+                Buffer.BlockCopy(BitConverter.GetBytes(wt2), 0, payload, ndx, sizeof(UInt16)); ndx += sizeof(UInt16);
             }
-
-            SendA3(msg[0], msg[1..]);
+            Send((byte)ICD.SET_LCH_TARGET_DATA, payload);
         }
 
-        // Thread.Sleep → await Task.Delay — BDC migration fix
         public async Task LCH_UPLOAD(IProgress<int> progress, LCH aLCH)
         {
             SEND_LCH_MISSION_DATA(aLCH);
             await Task.Delay(20, ct).ConfigureAwait(false);
             progress?.Report(5);
 
-            ushort _targetIndex = 0;
+            ushort ti = 0;
             foreach (LCH_TARGET aTarget in aLCH.LCH_Targets)
             {
-                if (isVerboseLogEnabled) Log?.Debug("LCH upload: sending target {Idx}", _targetIndex);
-                SEND_LCH_TARGET_WITH_WINDOWS(aLCH, _targetIndex);
+                if (isVerboseLogEnabled) Log?.Debug("LCH upload: sending target {Idx}", ti);
+                SEND_LCH_TARGET_WITH_WINDOWS(aLCH, ti);
                 await Task.Delay(20, ct).ConfigureAwait(false);
-                int irpt = 5 + (int)(((double)_targetIndex / aLCH.NumberTarget) * 95);
-                progress?.Report(irpt);
-                _targetIndex++;
+                int pct = 5 + (int)(((double)ti / aLCH.NumberTarget) * 95);
+                progress?.Report(pct);
+                ti++;
             }
         }
 
-        public void GimbalSetPOS(Int32 x, Int32 y)
-        {
-            byte[] px = BitConverter.GetBytes(x);
-            byte[] py = BitConverter.GetBytes(y);
-            SendA3((byte)ICD.SET_GIM_POS, new byte[]
-            {
-                px[0], px[1], px[2], px[3],
-                py[0], py[1], py[2], py[3]
-            });
-        }
-
-        public void Check_PALOS_Vote(LCH.FILETYPE _fileType, DateTime currentTime,
-                                      float az, float el)
+        public void Check_PALOS_Vote(LCH.FILETYPE fileType, DateTime currentTime, float az, float el)
         {
             UInt64 t1 = (UInt64)(new DateTimeOffset(currentTime).ToUnixTimeSeconds());
-
             if (isVerboseLogEnabled) Log?.Debug("BDC PALOS vote check at {T1}", t1);
-
-            byte[] msg = new byte[17];   // everything after the CMD byte
+            byte[] payload = new byte[17];
             int ndx = 0;
-            msg[ndx] = Convert.ToByte(_fileType); ndx++;
-            Buffer.BlockCopy(BitConverter.GetBytes(t1), 0, msg, ndx, sizeof(UInt64)); ndx += sizeof(UInt64);
-            Buffer.BlockCopy(BitConverter.GetBytes(az), 0, msg, ndx, sizeof(Single)); ndx += sizeof(Single);
-            Buffer.BlockCopy(BitConverter.GetBytes(el), 0, msg, ndx, sizeof(Single)); ndx += sizeof(Single);
+            payload[ndx] = (byte)fileType; ndx++;
+            Buffer.BlockCopy(BitConverter.GetBytes(t1), 0, payload, ndx, sizeof(UInt64)); ndx += sizeof(UInt64);
+            Buffer.BlockCopy(BitConverter.GetBytes(az), 0, payload, ndx, sizeof(Single)); ndx += sizeof(Single);
+            Buffer.BlockCopy(BitConverter.GetBytes(el), 0, payload, ndx, sizeof(Single));
+            Send((byte)ICD.GET_BDC_PALOS_VOTE, payload);
+        }
 
-            SendA3((byte)ICD.GET_BDC_PALOS_VOTE, msg);
+        // ── INT_ENG commands — A2 only, guarded ──────────────────────────────
+
+        // SET_BDC_VICOR_ENABLE
+        public bool VicorEnabled
+        {
+            set
+            {
+                if (!AssertIntEng("VicorEnabled")) return;
+                Send((byte)ICD.SET_BDC_VICOR_ENABLE, new byte[] { Convert.ToByte(value) });
+            }
+        }
+
+        // SET_BDC_RELAY_ENABLE
+        public void EnableRelay(int w, bool en)
+        {
+            if (!AssertIntEng("EnableRelay")) return;
+            Send((byte)ICD.SET_BDC_RELAY_ENABLE, new byte[] { (byte)w, Convert.ToByte(en) });
+        }
+
+        // SET_BDC_VOTE_OVERRIDE
+        public void SetOverrideVote(BDC_VOTE_OVERRIDES vote, bool val)
+        {
+            if (!AssertIntEng("SetOverrideVote")) return;
+            Send((byte)ICD.SET_BDC_VOTE_OVERRIDE, new byte[] { (byte)vote, Convert.ToByte(val) });
+        }
+
+        // SET_GIM_HOME
+        public void GimbalSetHome(Int32 x, Int32 y)
+        {
+            if (!AssertIntEng("GimbalSetHome")) return;
+            byte[] payload = new byte[8];
+            Buffer.BlockCopy(BitConverter.GetBytes(x), 0, payload, 0, 4);
+            Buffer.BlockCopy(BitConverter.GetBytes(y), 0, payload, 4, 4);
+            Send((byte)ICD.SET_GIM_HOME, payload);
+        }
+
+        // BDC_SET_FSM_SIGNS
+        public void FMC_SET_FSM_SIGNS(sbyte x, sbyte y)
+        {
+            if (!AssertIntEng("FMC_SET_FSM_SIGNS")) return;
+            Send((byte)ICD.BDC_SET_FSM_SIGNS, new byte[] { (byte)x, (byte)y });
+        }
+
+        // FMC_FSM_TEST_SCAN
+        public void FSMTestScan()
+        {
+            if (!AssertIntEng("FSMTestScan")) return;
+            Send((byte)ICD.FMC_FSM_TEST_SCAN);
+        }
+
+        // FMC_SET_STAGE_ENABLE
+        public bool STAGE_ENABLED
+        {
+            set
+            {
+                if (!AssertIntEng("STAGE_ENABLED")) return;
+                Send((byte)ICD.FMC_SET_STAGE_ENABLE, new byte[] { Convert.ToByte(value) });
+            }
+        }
+
+        // FMC_STAGE_CALIB
+        public void STAGE_CALIBRATE()
+        {
+            if (!AssertIntEng("STAGE_CALIBRATE")) return;
+            Send((byte)ICD.FMC_STAGE_CALIB);
+        }
+
+        // PRINT_LCH_DATA
+        public void SEND_LCH_PRINT(LCH.FILETYPE fileType, bool printDetail)
+        {
+            if (!AssertIntEng("SEND_LCH_PRINT")) return;
+            Send((byte)ICD.PRINT_LCH_DATA,
+                new byte[] { (byte)fileType, Convert.ToByte(printDetail) });
         }
     }
 }
