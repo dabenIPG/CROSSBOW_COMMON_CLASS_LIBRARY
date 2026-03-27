@@ -308,6 +308,17 @@ namespace CROSSBOW
         }
 
         // ── INT_OPS commands — available on both A2 and A3 ───────────────────
+        // 0xA2 SET_NTP_CONFIG (INT only, A2 path only)
+        // 0 bytes  = force resync on current server
+        // 1 byte   = set primary server last octet + resync
+        // 2 bytes  = set primary + fallback last octets + resync
+        public void SetNtpConfig(byte? primaryOctet = null, byte? fallbackOctet = null)
+        {
+            byte[] payload = primaryOctet == null ? Array.Empty<byte>() :
+                             fallbackOctet == null ? new[] { primaryOctet.Value } :
+                                                     new[] { primaryOctet.Value, fallbackOctet.Value };
+            Send(BuildFrame((byte)ICD.SET_NTP_CONFIG, payload));
+        }
 
         // 0xA0 SET_UNSOLICITED
         public bool UnsolicitedMode
