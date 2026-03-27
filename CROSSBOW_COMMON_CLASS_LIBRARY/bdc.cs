@@ -34,7 +34,9 @@ namespace CROSSBOW
         // Transport-dependent computed properties
         private byte   MagicLo    => Transport == TransportPath.A3_External ? (byte)0x58     : (byte)0x49;
         private int    ActivePort => Transport == TransportPath.A3_External ? 10050           : 10018;
-        private string LocalIP    => Transport == TransportPath.A3_External ? "192.168.1.208" : "0.0.0.0";
+        private string LocalIP    => Transport == TransportPath.A3_External
+                                        ? CrossbowNic.GetExternalIP()
+                                        : CrossbowNic.GetInternalIP();
 
         // Keepalive — re-send SET_UNSOLICITED every 30 s to stay within the
         // firmware's 60-second liveness window (frame.hpp CLIENT_TIMEOUT_MS).
@@ -116,8 +118,9 @@ namespace CROSSBOW
                 }
                 else
                 {
-                    // A2: OS assigns local port — connect to remote
+                    // A2: bind to internal NIC (<100) so TMC/FMC firmware accepts source IP
                     udpClient = new UdpClient();
+                    udpClient.Client.Bind(new IPEndPoint(IPAddress.Parse(LocalIP), 0));
                     _remoteEP = new IPEndPoint(IPAddress.Parse(IP), ActivePort);
                     udpClient.Connect(_remoteEP);
 
@@ -316,7 +319,7 @@ namespace CROSSBOW
         public void REQ_REG_01() { Send((byte)ICD.GET_REGISTER1); }
 
         // 0xA2 GET_REGISTER2 — deprecated stub
-        public void REQ_REG_02() { Send((byte)ICD.GET_REGISTER2); }
+        //public void REQ_REG_02() { Send((byte)ICD.GET_REGISTER2); }
 
         // 0xA5 SET_SYSTEM_STATE
         public void SetState(SYSTEM_STATES state)

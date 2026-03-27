@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 // ICD v3.0.0 and defines.hpp v3.X.Y.
 // Do not edit per-application. All changes must be reflected in the ICD document
 // and kept in sync with defines.hpp.
-// Version: 3.X.Y | Date: 2026-03-14
+// Version: 3.2.0 | Date: 2026-03-26
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace CROSSBOW
@@ -154,7 +154,7 @@ namespace CROSSBOW
     {
         SET_UNSOLICITED = 0xA0,  // byte: 0,1
         GET_REGISTER1 = 0xA1,  //
-        GET_REGISTER2 = 0xA2,  // ⚠ DEPRECATED — stub only (1-byte CMD echo). Do not use in new integrations. //
+        SET_NTP_CONFIG = 0xA2,  // NTP config (INT only, A2 only): 0 bytes=resync | byte[p]=set primary last octet | bytes[p,f]=set primary+fallback last octet
         GET_REGISTER3 = 0xA3,  // ⚠ DEPRECATED — stub only (1-byte CMD echo). Do not use in new integrations. // 
         EXT_FRAME_PING = 0xA4,  // No-op ping for external framed port (A3). No state change. //
         SET_SYSTEM_STATE = 0xA5,  //byte (SYSTEM_STATES)

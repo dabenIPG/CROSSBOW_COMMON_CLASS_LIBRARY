@@ -123,7 +123,7 @@ namespace CROSSBOW
             switch (cmd)
             {
                 case ICD.GET_REGISTER1: ndx = ParseMSG01(msg, ndx); break;
-                case ICD.GET_REGISTER2: ndx = ParseMSG02(msg, ndx); break;
+                //case ICD.GET_REGISTER2: ndx = ParseMSG02(msg, ndx); break;
                 default: break;
             }
             return ndx;

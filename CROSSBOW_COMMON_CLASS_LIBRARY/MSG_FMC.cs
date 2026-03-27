@@ -151,8 +151,8 @@ namespace CROSSBOW
             byte cmd = payload[0];
             if (cmd == (byte)ICD.GET_REGISTER1)
                 ParseMSG01(payload, 0);
-            else if (cmd == (byte)ICD.GET_REGISTER2)
-                ParseMSG02(payload, 0);
+            //else if (cmd == (byte)ICD.GET_REGISTER2)
+            //    ParseMSG02(payload, 0);
         }
 
         // -------------------------------------------------------------------
