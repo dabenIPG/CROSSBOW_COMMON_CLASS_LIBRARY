@@ -6,9 +6,23 @@ using System.Diagnostics;
 namespace CROSSBOW
 {
 
-    // MSG_MCC.cs  —  updated for ICD v3.0.0 session 4 register layout
+    // MSG_MCC.cs  —  updated for ICD v3.3.0 session 28
     //
-    // Key changes from previous version:
+    // Session 28 changes (PTP integration):
+    //   - isPTP_DeviceEnabled / isPTP_DeviceReady added (DeviceEnabledBits/DeviceReadyBits bit 4)
+    //     Previously bit 4 was RTCLOCK (deprecated session 4) then RES — now PTP time service.
+    //     ⚠ C# MCC_DEVICES enum still has RTCLOCK=4 — update to PTP=4 when enum is revised.
+    //   - StatusBits2 accessors added: ntpUsingFallback (bit 0), ntpHasFallback (bit 1),
+    //     usingPTP (bit 2). Previously StatusBits2 had no named accessors.
+    //   - TIME_SOURCE enum added: None, PTP, NTP
+    //   - activeTimeSource computed property — derived from isPTP_DeviceReady + usingPTP
+    //   - activeTimeSourceLabel string property — for status display ("PTP" / "NTP" / "NTP (fallback)" / "NONE")
+    //   - epochTime property added — preferred alias for ntpTime. The time field at
+    //     bytes [12–19] reflects whichever source MCC is running on (PTP or NTP).
+    //     ntpTime retained as backward-compatible alias.
+    //   - MCC FW version updated to 3.1.0
+    //
+    // Session 4 changes (preserved for reference):
     //   - ActiveCamID removed (field no longer in REG1)
     //   - HB_TX_us uint32 µs  →  HB_ms ushort ms  (HB_TX_ms / HB_TX_us kept as compat aliases)
     //   - dt uint32           →  dt_us ushort      (dt kept as compat alias)
@@ -17,13 +31,16 @@ namespace CROSSBOW
     //   - TEMPERATURE_CHARGER / TEMPERATURE_AIR: float (4 bytes) → int8 (1 byte each)
     //   - TMCMsg.Parse() enabled — 64-byte embedded block at bytes 66–129
     //   - SW_VERSION_STRING updated for new semver uint32 encoding
-    //   - isRTC_DeviceEnabled / isRTC_DeviceReady deprecated (bit 4 is now RES)
+    //   - isRTC_DeviceEnabled / isRTC_DeviceReady deprecated (bit 4: RTCLOCK → RES → PTP)
     //   - isRelay3_Enabled / isRelay4_Enabled added (StatusBits2 bits 6 and 7)
     //   - TransportPath enum — constructor selects A2 or A3 at construction time.
     //     Callers always use Parse(). ParseA3/ParseA2 are private implementation.
     //     THEIA:    new MSG_MCC(log, TransportPath.A3_External)
     //     ENG GUI:  new MSG_MCC(log, TransportPath.A2_Internal)
     // ---------------------------------------------------------------------------
+
+    /// <summary>Active time source on MCC — derived from register bits.</summary>
+    public enum TIME_SOURCE { None, PTP, NTP }
 
     /// <summary>Transport path — set once at construction, determines Parse() behaviour.</summary>
     public enum TransportPath { A2_Internal, A3_External }
@@ -102,6 +119,36 @@ namespace CROSSBOW
 
         public bool isVerboseLogEnabled { get; set; } = true;
 
+        /// <summary>
+        /// Active time source — derived from register bits.
+        /// PTP: isPTP_DeviceReady=true AND usingPTP=true.
+        /// NTP: isPTP_DeviceReady=false OR usingPTP=false, AND isNTP_DeviceReady=true.
+        /// </summary>
+        public TIME_SOURCE activeTimeSource
+        {
+            get
+            {
+                if (isPTP_DeviceReady && usingPTP) return TIME_SOURCE.PTP;
+                if (isNTP_DeviceReady)             return TIME_SOURCE.NTP;
+                return TIME_SOURCE.None;
+            }
+        }
+
+        /// <summary>Human-readable label for status panels.</summary>
+        public string activeTimeSourceLabel
+        {
+            get
+            {
+                switch (activeTimeSource)
+                {
+                    case TIME_SOURCE.PTP: return "PTP";
+                    case TIME_SOURCE.NTP: return ntpUsingFallback ? "NTP (fallback)" : "NTP";
+                    default:             return "NONE";
+                }
+            }
+        }
+
+
         // ── Vote bits with change logging ─────────────────────────────────────
         private byte _voteBits { get; set; } = 0;
         public  byte LastVoteBits { get; private set; } = 0;
@@ -124,9 +171,12 @@ namespace CROSSBOW
         public double   RX_HB     { get; private set; } = 0;
 
         // ── NTP ───────────────────────────────────────────────────────────────
-        // ICD v3.0.0 session 4: NTP epoch ms only — RTC removed
-        private Int64   _ntpTime { get; set; } = 0;
-        public DateTime ntpTime  { get { return DateTimeOffset.FromUnixTimeMilliseconds(_ntpTime).UtcDateTime; } }
+        // ICD v3.0.0 session 4: epoch ms field (bytes 12-19) — RTC removed.
+        // Session 28: reflects whichever source MCC is running on (PTP or NTP).
+        // Use epochTime (preferred) or ntpTime (backward-compat alias).
+        private Int64   _ntpTime  { get; set; } = 0;
+        public DateTime epochTime { get { return DateTimeOffset.FromUnixTimeMilliseconds(_ntpTime).UtcDateTime; } }
+        public DateTime ntpTime   { get { return epochTime; } }   // backward-compat alias
 
         // ── Temperatures ──────────────────────────────────────────────────────
         // ICD v3.0.0 session 4: Temp1/Temp2 changed from float to int8
@@ -316,6 +366,10 @@ namespace CROSSBOW
         public bool isNotBatLowVoltage        { get { return IsBitSet(StatusBits, 5); } }
         public bool isUnSolicitedMode_Enabled { get { return IsBitSet(StatusBits, 7); } }
 
+        // StatusBits2 [byte 10] — session 28 named accessors
+        public bool ntpUsingFallback  { get { return IsBitSet(StatusBits2, 0); } }   // bit 0: NTP on fallback server
+        public bool ntpHasFallback    { get { return IsBitSet(StatusBits2, 1); } }   // bit 1: fallback server configured
+        public bool usingPTP          { get { return IsBitSet(StatusBits2, 2); } }   // bit 2: PTP active time source (session 28, was RES)
         public bool isVicor_Enabled   { get { return IsBitSet(StatusBits2, 3); } }
         public bool isRelay1_Enabled  { get { return IsBitSet(StatusBits2, 4); } }
         public bool isRelay2_Enabled  { get { return IsBitSet(StatusBits2, 5); } }
@@ -337,11 +391,15 @@ namespace CROSSBOW
         // =========================================================================
         // DeviceEnabled / DeviceReady accessors
         // ICD v3.0.0 session 4: bit 4 changed from RTCLOCK → RES
+        // ICD v3.3.0 session 28: bit 4 changed from RES → PTP (isPTP_DeviceEnabled/Ready)
+        // ⚠ MCC_DEVICES C# enum still has RTCLOCK=4 — update to PTP=4 when enum is revised.
+        //    isPTP accessors use literal 4 to avoid dependency on stale enum value.
         // =========================================================================
         public bool isNTP_DeviceEnabled  { get { return IsBitSet(DeviceEnabledBits, (int)MCC_DEVICES.NTP);  } }
         public bool isTMC_DeviceEnabled  { get { return IsBitSet(DeviceEnabledBits, (int)MCC_DEVICES.TMC);  } }
         public bool isHEL_DeviceEnabled  { get { return IsBitSet(DeviceEnabledBits, (int)MCC_DEVICES.HEL);  } }
         public bool isBAT_DeviceEnabled  { get { return IsBitSet(DeviceEnabledBits, (int)MCC_DEVICES.BAT);  } }
+        public bool isPTP_DeviceEnabled  { get { return IsBitSet(DeviceEnabledBits, 4); } }   // bit 4: PTP time service (session 28, was RES/RTCLOCK)
         public bool isCRG_DeviceEnabled  { get { return IsBitSet(DeviceEnabledBits, (int)MCC_DEVICES.CRG);  } }
         public bool isGNSS_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, (int)MCC_DEVICES.GNSS); } }
         public bool isBDC_DeviceEnabled  { get { return IsBitSet(DeviceEnabledBits, (int)MCC_DEVICES.BDC);  } }
@@ -350,6 +408,7 @@ namespace CROSSBOW
         public bool isTMC_DeviceReady    { get { return IsBitSet(DeviceReadyBits, (int)MCC_DEVICES.TMC);  } }
         public bool isHEL_DeviceReady    { get { return IsBitSet(DeviceReadyBits, (int)MCC_DEVICES.HEL);  } }
         public bool isBAT_DeviceReady    { get { return IsBitSet(DeviceReadyBits, (int)MCC_DEVICES.BAT);  } }
+        public bool isPTP_DeviceReady    { get { return IsBitSet(DeviceReadyBits,  4); } }   // bit 4: PTP synched (session 28, was RES/RTCLOCK)
         public bool isCRG_DeviceReady    { get { return IsBitSet(DeviceReadyBits, (int)MCC_DEVICES.CRG);  } }
         public bool isGNSS_DeviceReady   { get { return IsBitSet(DeviceReadyBits, (int)MCC_DEVICES.GNSS); } }
         public bool isBDC_DeviceReady    { get { return IsBitSet(DeviceReadyBits, (int)MCC_DEVICES.BDC);  } }
