@@ -381,14 +381,14 @@ namespace CROSSBOW
         // ── INT_ENG commands — A2 only, guarded ──────────────────────────────
 
         // 0xE2 PMS_SOL_ENABLE
-        public void EnableSolenoid(int w, bool en)
+        public void EnableSolenoid(MCC_SOLENOIDS w, bool en)
         {
             if (!AssertIntEng("EnableSolenoid")) return;
             Send((byte)ICD.PMS_SOL_ENABLE, new byte[] { (byte)w, (byte)(en ? 1 : 0) });
         }
 
         // 0xE4 PMS_RELAY_ENABLE
-        public void EnableRelay(int w, bool en)
+        public void EnableRelay(MCC_RELAYS w, bool en)
         {
             if (!AssertIntEng("EnableRelay")) return;
             Send((byte)ICD.PMS_RELAY_ENABLE, new byte[] { (byte)w, (byte)(en ? 1 : 0) });

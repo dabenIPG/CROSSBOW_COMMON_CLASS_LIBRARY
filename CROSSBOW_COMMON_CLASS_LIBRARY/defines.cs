@@ -10,7 +10,7 @@ using System.Threading.Tasks;
 // ICD v3.0.0 and defines.hpp v3.X.Y.
 // Do not edit per-application. All changes must be reflected in the ICD document
 // and kept in sync with defines.hpp.
-// Version: 3.2.0 | Date: 2026-03-26
+// Version: 3.3.1 | Date: 2026-03-28
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace CROSSBOW
@@ -58,11 +58,26 @@ namespace CROSSBOW
         TMC = 1,
         HEL = 2,
         BAT = 3,
-        RTCLOCK = 4,
+        PTP = 4,        // IEEE 1588 PTP slave — GNSS master 192.168.1.30 (was RTCLOCK, deprecated session 4)
         CRG = 5,
         GNSS = 6,
         BDC = 7,
     };
+    // MCC solenoid identifiers — used with ICD.PMS_SOL_ENABLE (0xE2)
+    public enum MCC_SOLENOIDS
+    {
+        HEL = 0,  // D5 — laser shutter solenoid
+        BDA = 1,  // D8 — BDA solenoid
+    };
+
+    // MCC relay identifiers — used with ICD.PMS_RELAY_ENABLE (0xE4)
+    public enum MCC_RELAYS
+    {
+        GPS = 1,  // D83 — GNSS power relay
+        HEL = 2,  // D20 — laser power relay
+        TMS = 3,  // TMS power relay
+    };
+
     public enum BDC_DEVICES
     {
         NTP = 0,
@@ -224,8 +239,8 @@ namespace CROSSBOW
         ORIN_ACAM_COCO_ENABLE = 0xDF,  // enable/disable COCO intra-trackbox inference  uint8 op [, uint8 param]
 
         // RESERVED 0xE (MAYBE TMS/PMS STUFF?)
-        SET_MCC_REINIT = 0xE0,  // uint8: 0=NTP, 1=TMC, 2=HEL, 3=BAT, 4=RTCLOCK, 5=CRG, 6=GNSS, 7=BDC
-        SET_MCC_DEVICES_ENABLE = 0xE1,  // uint8: 0=NTP, 1=TMC, 2=HEL, 3=BAT, 4=RTCLOCK, 5=CRG, 6=GNSS, 7=BDC; uint8 0/1
+        SET_MCC_REINIT = 0xE0,  // uint8: 0=NTP, 1=TMC, 2=HEL, 3=BAT, 4=PTP, 5=CRG, 6=GNSS, 7=BDC
+        SET_MCC_DEVICES_ENABLE = 0xE1,  // uint8: 0=NTP, 1=TMC, 2=HEL, 3=BAT, 4=PTP, 5=CRG, 6=GNSS, 7=BDC; uint8 0/1 — device 4 (PTP) enable/disable PTP slave; device 0 (NTP) controls NTP only
         PMS_SOL_ENABLE = 0xE2,  //	ENABLE SOLENOID 1/2	which byte 0/1, on/off byte 0/1
         PMS_CHARGER_ENABLE = 0xE3,  // ENABLE CHARGER	on/off byte 0/1
         PMS_RELAY_ENABLE = 0xE4,  //	RELAY X ON/OFF	byte 1,2,3,4; byte 0/1	relay 1 based 

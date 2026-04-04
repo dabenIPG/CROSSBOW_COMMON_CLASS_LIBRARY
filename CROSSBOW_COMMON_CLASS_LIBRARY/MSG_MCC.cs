@@ -11,9 +11,11 @@ namespace CROSSBOW
     // Session 28 changes (PTP integration):
     //   - isPTP_DeviceEnabled / isPTP_DeviceReady added (DeviceEnabledBits/DeviceReadyBits bit 4)
     //     Previously bit 4 was RTCLOCK (deprecated session 4) then RES — now PTP time service.
-    //     ⚠ C# MCC_DEVICES enum still has RTCLOCK=4 — update to PTP=4 when enum is revised.
+    //     MCC_DEVICES.PTP = 4 (renamed from RTCLOCK session 29 — resolved)
     //   - StatusBits2 accessors added: ntpUsingFallback (bit 0), ntpHasFallback (bit 1),
     //     usingPTP (bit 2). Previously StatusBits2 had no named accessors.
+    //     Session 32: these bits moved to TimeBits byte 253 — bits 0-2 now RES.
+    //     ntpUsingFallback / ntpHasFallback / usingPTP now redirect to tb_* for compat.
     //   - TIME_SOURCE enum added: None, PTP, NTP
     //   - activeTimeSource computed property — derived from isPTP_DeviceReady + usingPTP
     //   - activeTimeSourceLabel string property — for status display ("PTP" / "NTP" / "NTP (fallback)" / "NONE")
@@ -199,6 +201,18 @@ namespace CROSSBOW
         // MCU die temperature
         public double TEMP_MCU { get; private set; } = 0;
 
+        // TIME_BITS [byte 253] — session 32, mirrors TMC STATUS_BITS3 exactly
+        // Single authoritative time source byte. Named tb_ accessors below.
+        // The existing accessors (isPTP_DeviceReady, usingPTP, etc.) remain valid —
+        // TimeBits consolidates the same information into one register byte.
+        public byte TimeBits { get; private set; } = 0;
+        public bool tb_isPTP_Enabled    { get { return IsBitSet(TimeBits, 0); } }
+        public bool tb_isPTP_Synched    { get { return IsBitSet(TimeBits, 1); } }
+        public bool tb_usingPTP         { get { return IsBitSet(TimeBits, 2); } }
+        public bool tb_isNTP_Synched    { get { return IsBitSet(TimeBits, 3); } }
+        public bool tb_ntpUsingFallback { get { return IsBitSet(TimeBits, 4); } }
+        public bool tb_ntpHasFallback   { get { return IsBitSet(TimeBits, 5); } }
+
         // Last STATUS byte received from A3 frame — useful for diagnostics
         public byte LastFrameStatus { get; private set; } = 0xFF;
 
@@ -301,7 +315,8 @@ namespace CROSSBOW
         //   [213-244] Charger data     (MSG_CMC — 32 bytes)
         //   [245-248] VERSION_WORD     uint32
         //   [249-252] MCU Temp         float
-        //   [253-255] RESERVED
+        //   [253]      TIME_BITS (session 32) — isPTP_En, ptp.isSynched, usingPTP, ntp.isSynched, ntpUsingFB, ntpHasFB
+        //   [254-255]  RESERVED
         // =========================================================================
         private void ParseMSG01(byte[] msg, int ndx)
         {
@@ -348,6 +363,9 @@ namespace CROSSBOW
             SW_VERSION_WORD = BitConverter.ToUInt32(msg, ndx); ndx += sizeof(UInt32);
             TEMP_MCU        = BitConverter.ToSingle(msg, ndx); ndx += sizeof(Single);
 
+            // [253] TIME_BITS (session 32) — consolidated time source status
+            TimeBits = msg[ndx]; ndx++;
+
             if (dt_us > dtmax)
             {
                 dtmax = dt_us;
@@ -366,10 +384,11 @@ namespace CROSSBOW
         public bool isNotBatLowVoltage        { get { return IsBitSet(StatusBits, 5); } }
         public bool isUnSolicitedMode_Enabled { get { return IsBitSet(StatusBits, 7); } }
 
-        // StatusBits2 [byte 10] — session 28 named accessors
-        public bool ntpUsingFallback  { get { return IsBitSet(StatusBits2, 0); } }   // bit 0: NTP on fallback server
-        public bool ntpHasFallback    { get { return IsBitSet(StatusBits2, 1); } }   // bit 1: fallback server configured
-        public bool usingPTP          { get { return IsBitSet(StatusBits2, 2); } }   // bit 2: PTP active time source (session 28, was RES)
+        // StatusBits2 [byte 10] — session 32: bits 0-2 now RES (moved to TimeBits byte 253)
+        // Named properties below redirect to TimeBits for backward compatibility.
+        public bool ntpUsingFallback  { get { return tb_ntpUsingFallback; } }   // → TimeBits bit 4
+        public bool ntpHasFallback    { get { return tb_ntpHasFallback;   } }   // → TimeBits bit 5
+        public bool usingPTP          { get { return tb_usingPTP;         } }   // → TimeBits bit 2
         public bool isVicor_Enabled   { get { return IsBitSet(StatusBits2, 3); } }
         public bool isRelay1_Enabled  { get { return IsBitSet(StatusBits2, 4); } }
         public bool isRelay2_Enabled  { get { return IsBitSet(StatusBits2, 5); } }
@@ -391,15 +410,14 @@ namespace CROSSBOW
         // =========================================================================
         // DeviceEnabled / DeviceReady accessors
         // ICD v3.0.0 session 4: bit 4 changed from RTCLOCK → RES
-        // ICD v3.3.0 session 28: bit 4 changed from RES → PTP (isPTP_DeviceEnabled/Ready)
-        // ⚠ MCC_DEVICES C# enum still has RTCLOCK=4 — update to PTP=4 when enum is revised.
-        //    isPTP accessors use literal 4 to avoid dependency on stale enum value.
+        // ICD v3.3.1 session 29: bit 4 = MCC_DEVICES.PTP (renamed from RTCLOCK — resolved)
+        // isPTP accessors use (int)MCC_DEVICES.PTP
         // =========================================================================
         public bool isNTP_DeviceEnabled  { get { return IsBitSet(DeviceEnabledBits, (int)MCC_DEVICES.NTP);  } }
         public bool isTMC_DeviceEnabled  { get { return IsBitSet(DeviceEnabledBits, (int)MCC_DEVICES.TMC);  } }
         public bool isHEL_DeviceEnabled  { get { return IsBitSet(DeviceEnabledBits, (int)MCC_DEVICES.HEL);  } }
         public bool isBAT_DeviceEnabled  { get { return IsBitSet(DeviceEnabledBits, (int)MCC_DEVICES.BAT);  } }
-        public bool isPTP_DeviceEnabled  { get { return IsBitSet(DeviceEnabledBits, 4); } }   // bit 4: PTP time service (session 28, was RES/RTCLOCK)
+        public bool isPTP_DeviceEnabled  { get { return IsBitSet(DeviceEnabledBits, (int)MCC_DEVICES.PTP); } }   // bit 4: MCC_DEVICES.PTP (was RTCLOCK)
         public bool isCRG_DeviceEnabled  { get { return IsBitSet(DeviceEnabledBits, (int)MCC_DEVICES.CRG);  } }
         public bool isGNSS_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, (int)MCC_DEVICES.GNSS); } }
         public bool isBDC_DeviceEnabled  { get { return IsBitSet(DeviceEnabledBits, (int)MCC_DEVICES.BDC);  } }
@@ -408,7 +426,7 @@ namespace CROSSBOW
         public bool isTMC_DeviceReady    { get { return IsBitSet(DeviceReadyBits, (int)MCC_DEVICES.TMC);  } }
         public bool isHEL_DeviceReady    { get { return IsBitSet(DeviceReadyBits, (int)MCC_DEVICES.HEL);  } }
         public bool isBAT_DeviceReady    { get { return IsBitSet(DeviceReadyBits, (int)MCC_DEVICES.BAT);  } }
-        public bool isPTP_DeviceReady    { get { return IsBitSet(DeviceReadyBits,  4); } }   // bit 4: PTP synched (session 28, was RES/RTCLOCK)
+        public bool isPTP_DeviceReady    { get { return IsBitSet(DeviceReadyBits,  (int)MCC_DEVICES.PTP); } }   // bit 4: MCC_DEVICES.PTP (ptp.isSynched)
         public bool isCRG_DeviceReady    { get { return IsBitSet(DeviceReadyBits, (int)MCC_DEVICES.CRG);  } }
         public bool isGNSS_DeviceReady   { get { return IsBitSet(DeviceReadyBits, (int)MCC_DEVICES.GNSS); } }
         public bool isBDC_DeviceReady    { get { return IsBitSet(DeviceReadyBits, (int)MCC_DEVICES.BDC);  } }

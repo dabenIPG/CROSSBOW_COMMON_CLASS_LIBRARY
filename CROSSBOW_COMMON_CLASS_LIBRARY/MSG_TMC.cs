@@ -7,6 +7,16 @@ namespace CROSSBOW
     // -----------------------------------------------------------------------
     // MSG_TMC — parses a framed A2 response from the TMC controller.
     //
+    // Session 30 changes (PTP integration):
+    //   - TmcReg1.StatBits3 added at byte 61 (was RESERVED)
+    //   - STATUS_BITS3 raw property + full accessor set added
+    //   - isNTPSynched moved: STAT_BITS1 bit 5 → STAT_BITS3 bit 3
+    //   - ntpUsingFallback added: STAT_BITS3 bit 4 (was RES in BITS1 bit 6)
+    //   - ntpHasFallback added: STAT_BITS3 bit 5
+    //   - isPTP_Enabled, isPTP_Synched, usingPTP added: STAT_BITS3 bits 0-2
+    //   - epochTime added — preferred alias for ntpTime (field reflects active source post-FW update)
+    //   - TIME_SOURCE enum (from MSG_MCC.cs/defines) — activeTimeSource + activeTimeSourceLabel
+    //
     // Wire format (521 bytes total):
     //   [0]      MAGIC_HI  = 0xCB
     //   [1]      MAGIC_LO  = 0x49  (internal A2)
@@ -71,7 +81,8 @@ namespace CROSSBOW
             public float  TphHumidity;    // [49–52] %
             public uint   VersionWord;    // [53–56] VERSION_PACK(maj,min,pat)
             public float  McuTemp;        // [57–60] STM32F7 die temp °C
-            // [61–63] RESERVED — not mapped; struct reads 61 bytes, block advances 64
+            public byte   StatBits3;      // [61]    PTP + NTP time status (session 30, was RESERVED)
+            // [62–63] RESERVED — 2 bytes padding to 64-byte block
         }
 
         // -------------------------------------------------------------------
@@ -84,6 +95,7 @@ namespace CROSSBOW
         public uint          SW_VERSION_WORD     { get; private set; } = 0;
         public byte          STATUS_BITS1        { get; private set; } = 0;
         public byte          STATUS_BITS2        { get; private set; } = 0;
+        public byte          STATUS_BITS3        { get; private set; } = 0;   // byte 61 — PTP+NTP time status (session 30)
 
         public DateTime      lastMsgRx           { get; private set; } = DateTime.UtcNow;
 
@@ -100,14 +112,23 @@ namespace CROSSBOW
         }
 
         // STAT BITS1
+        // STAT BITS1 [byte 7] — session 30: bits 5/6 vacated, NTP/PTP state moved to BITS3
         public bool isReady               { get { return IsBitSet(STATUS_BITS1, 0); } }
         public bool isPumpEnabled         { get { return IsBitSet(STATUS_BITS1, 1); } }
         public bool isHeaterEnabled       { get { return IsBitSet(STATUS_BITS1, 2); } }
         public bool isInputFan1Enabled    { get { return IsBitSet(STATUS_BITS1, 3); } }
         public bool isInputFan2Enabled    { get { return IsBitSet(STATUS_BITS1, 4); } }
-        public bool isNTPSynched          { get { return IsBitSet(STATUS_BITS1, 5); } }
-        // bit 6 = RES (was isRTCInit, deprecated)
+        // bit 5 = RES (was isNTPSynched — moved to STATUS_BITS3 bit 3)
+        // bit 6 = RES (was ntpUsingFallback/isRTCInit — moved to STATUS_BITS3 bit 4)
         public bool isUnsolicitedEnabled  { get { return IsBitSet(STATUS_BITS1, 7); } }
+
+        // STAT BITS3 [byte 61] — session 30 — PTP + NTP time status
+        public bool isPTP_Enabled         { get { return IsBitSet(STATUS_BITS3, 0); } }   // PTP client enabled
+        public bool isPTP_Synched         { get { return IsBitSet(STATUS_BITS3, 1); } }   // ptp.isSynched
+        public bool usingPTP              { get { return IsBitSet(STATUS_BITS3, 2); } }   // PTP is active time source
+        public bool isNTPSynched          { get { return IsBitSet(STATUS_BITS3, 3); } }   // moved from BITS1 bit 5
+        public bool ntpUsingFallback      { get { return IsBitSet(STATUS_BITS3, 4); } }   // moved from BITS1 bit 6
+        public bool ntpHasFallback        { get { return IsBitSet(STATUS_BITS3, 5); } }   // new — fallback server configured
 
         // STAT BITS2
         public bool isVicor1Enabled { get { return IsBitSet(STATUS_BITS2, 0); } }
@@ -119,9 +140,36 @@ namespace CROSSBOW
         public bool isLCM2Error     { get { return IsBitSet(STATUS_BITS2, 6); } }
         public bool isFlow2Error    { get { return IsBitSet(STATUS_BITS2, 7); } }
 
-        // NTP time
+        // Epoch time — post FW session 30 update, field reflects active source (PTP or NTP).
+        // Use epochTime (preferred) or ntpTime (backward-compat alias).
         private long _ntpTime { get; set; } = 0;
-        public DateTime ntpTime { get { return DateTimeOffset.FromUnixTimeMilliseconds(_ntpTime).UtcDateTime; } }
+        public DateTime epochTime { get { return DateTimeOffset.FromUnixTimeMilliseconds(_ntpTime).UtcDateTime; } }
+        public DateTime ntpTime   { get { return epochTime; } }   // backward-compat alias
+
+        /// <summary>Active time source — derived from STATUS_BITS3.</summary>
+        public TIME_SOURCE activeTimeSource
+        {
+            get
+            {
+                if (isPTP_Synched && usingPTP) return TIME_SOURCE.PTP;
+                if (isNTPSynched)              return TIME_SOURCE.NTP;
+                return TIME_SOURCE.None;
+            }
+        }
+
+        /// <summary>Human-readable label for status panels.</summary>
+        public string activeTimeSourceLabel
+        {
+            get
+            {
+                switch (activeTimeSource)
+                {
+                    case TIME_SOURCE.PTP: return "PTP";
+                    case TIME_SOURCE.NTP: return ntpUsingFallback ? "NTP (fallback)" : "NTP";
+                    default:             return "NONE";
+                }
+            }
+        }
 
         // Actuator readbacks
         public ushort PumpSpeed       { get; private set; } = 0;
@@ -283,6 +331,7 @@ namespace CROSSBOW
             dt_us             = reg.dt_us;
             STATUS_BITS1      = reg.StatBits1;
             STATUS_BITS2      = reg.StatBits2;
+            STATUS_BITS3      = reg.StatBits3;
             _ntpTime          = (long)reg.NtpEpochMs;
 
             PumpSpeed         = reg.PumpSpeed;

@@ -1,33 +1,32 @@
-// MSG_FMC.cs  —  ICD v3.0.0 session 4 FMC REG1 parser
+// MSG_FMC.cs  —  ICD v3.3.5 session 33 FMC REG1 parser
 //
 // Receives a 521-byte framed response from fmc.cs BackgroundUDPRead.
 // Parse(byte[] frame) validates magic, CRC, STATUS then extracts
 // the 512-byte payload and calls ParseMSG01().
 //
-// FMC REG1 payload layout (ICD v3.0.0 session 4, 64 bytes defined):
+// FMC REG1 payload layout (ICD v3.3.5 session 33, 45 bytes defined):
 //   [0]      CMD BYTE        uint8   = 0xA1
 //   [1]      System State    uint8
 //   [2]      System Mode     uint8
 //   [3–4]    HB_ms           uint16 LE   ms between firmware sends
 //   [5–6]    dt_us           uint16 LE   µs in firmware processing loop
-//   [7]      FSM STAT BITS   uint8
+//   [7]      FSM STAT BITS   uint8       bit0:isReady bit1:isFSM_Powered bit2-5:RES bit6:isStageEnabled bit7:isUnsolicited
 //   [8–11]   Stage Pos       uint32 LE
 //   [12–15]  Stage Err       uint32 LE
 //   [16–19]  Stage Status    uint32 LE
 //   [20–23]  FSM Pos X       int32 LE    ADC readback counts
 //   [24–27]  FSM Pos Y       int32 LE    ADC readback counts
-//   [28–35]  NTP epoch ms    int64 LE
+//   [28–35]  epoch ms        int64 LE    PTP when synched, NTP otherwise
 //   [36–39]  VERSION WORD    uint32 LE   semver: [major:8][minor:12][patch:12]
 //   [40–43]  MCU Temp        float LE    °C
-//   [44–63]  RESERVED        0x00
+//   [44]     TIME_BITS       uint8       bit0:isPTP_Enabled bit1:ptp.isSynched bit2:usingPTP
+//                                        bit3:ntp.isSynched bit4:ntpUsingFallback bit5:ntpHasFallback
+//   [45–63]  RESERVED        0x00
 //
-// Session 4 changes from previous version:
-//   HB_TX_us uint32 µs  → HB_ms uint16 ms
-//   dt        uint32 µs  → dt_us uint16 µs
-//   NTP moved → [28–35]
-//   VERSION WORD → [36–39], new semver format
-//   MCU Temp float NEW at [40–43]
-//   Fixed block 128 → 64 bytes
+// Session 33 changes:
+//   Byte 28-35: NTP epoch ms → epoch ms (PTP/NTP) — routes through GetCurrentTime()
+//   Byte 44: RESERVED → TIME_BITS (same layout as MCC/BDC/TMC)
+//   FSM STAT BITS bits 2-3 vacated (ntp.isSynched/ntpUsingFallback moved to TIME_BITS)
 
 using System;
 using System.Diagnostics;
@@ -75,9 +74,45 @@ namespace CROSSBOW
         public Int32 FSM_PosX { get; private set; } = 0;   // ADC readback counts
         public Int32 FSM_PosY { get; private set; } = 0;
 
-        // NTP
-        private Int64   _ntpTime = 0;
-        public DateTime ntpTime { get { return DateTimeOffset.FromUnixTimeMilliseconds(_ntpTime).UtcDateTime; } }
+        // NTP / PTP epoch (session 33: routes through GetCurrentTime — PTP when synched)
+        private Int64   _ntpTime  = 0;
+        public DateTime epochTime { get { return DateTimeOffset.FromUnixTimeMilliseconds(_ntpTime).UtcDateTime; } }
+        public DateTime ntpTime   { get { return epochTime; } }   // backward-compat alias
+
+        // TIME_BITS — byte 44 (session 33)
+        // Identical layout to MCC (byte 253), BDC (byte 391), TMC (STATUS_BITS3 byte 61)
+        public byte TimeBits { get; private set; } = 0;
+
+        public bool tb_isPTP_Enabled    { get { return IsBitSet(TimeBits, 0); } }
+        public bool tb_isPTP_Synched    { get { return IsBitSet(TimeBits, 1); } }
+        public bool tb_usingPTP         { get { return IsBitSet(TimeBits, 2); } }
+        public bool tb_isNTP_Synched    { get { return IsBitSet(TimeBits, 3); } }
+        public bool tb_ntpUsingFallback { get { return IsBitSet(TimeBits, 4); } }
+        public bool tb_ntpHasFallback   { get { return IsBitSet(TimeBits, 5); } }
+
+        // Active time source — derived from TIME_BITS
+        public enum TIME_SOURCE { None, PTP, NTP }
+        public TIME_SOURCE activeTimeSource
+        {
+            get
+            {
+                if (tb_isPTP_Enabled && tb_isPTP_Synched && tb_usingPTP) return TIME_SOURCE.PTP;
+                if (tb_isNTP_Synched)                                     return TIME_SOURCE.NTP;
+                return TIME_SOURCE.None;
+            }
+        }
+        public string activeTimeSourceLabel
+        {
+            get
+            {
+                switch (activeTimeSource)
+                {
+                    case TIME_SOURCE.PTP: return "PTP";
+                    case TIME_SOURCE.NTP: return tb_ntpUsingFallback ? "NTP (fallback)" : "NTP";
+                    default:             return "NONE";
+                }
+            }
+        }
 
         // VERSION WORD — semver: [major:8][minor:12][patch:12]
         public UInt32 FW_VERSION { get; private set; } = 0;
@@ -180,7 +215,8 @@ namespace CROSSBOW
             _ntpTime   = BitConverter.ToInt64(msg, ndx);  ndx += sizeof(Int64);     // [28–35]
             FW_VERSION = BitConverter.ToUInt32(msg, ndx); ndx += sizeof(UInt32);    // [36–39]
             MCU_Temp   = BitConverter.ToSingle(msg, ndx); ndx += sizeof(Single);    // [40–43]
-            // [44–63] RESERVED — skip to end of 64-byte block
+            TimeBits   = msg[ndx];                         ndx++;                    // [44] TIME_BITS
+            // [45–63] RESERVED — skip to end of 64-byte block
 
             return startNdx + 64;
         }
