@@ -184,7 +184,7 @@ namespace CROSSBOW
             Array.Copy(frame, PAYLOAD_OFFSET, payload, 0, PAYLOAD_LEN);
 
             byte cmd = payload[0];
-            if (cmd == (byte)ICD.GET_REGISTER1)
+            if (cmd == (byte)ICD.RES_A1)
                 ParseMSG01(payload, 0);
             //else if (cmd == (byte)ICD.GET_REGISTER2)
             //    ParseMSG02(payload, 0);

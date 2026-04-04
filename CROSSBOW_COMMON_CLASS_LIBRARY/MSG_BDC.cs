@@ -287,7 +287,7 @@ namespace CROSSBOW
             lastMsgRx = now;
 
             ICD cmd = (ICD)frame[3];
-            if (cmd == ICD.GET_REGISTER1)
+            if (cmd == ICD.RES_A1)
                 ParseMSG01(frame, PAYLOAD_OFFSET + 1);
         }
 
@@ -302,7 +302,7 @@ namespace CROSSBOW
             int ndx = 0;
             ICD cmd = (ICD)msg[ndx]; ndx++;
 
-            if (cmd == ICD.GET_REGISTER1)
+            if (cmd == ICD.RES_A1)
                 ParseMSG01(msg, ndx);
         }
 

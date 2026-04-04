@@ -7,10 +7,10 @@ using System.Threading.Tasks;
 // ─── CROSSBOW ICD defines.cs ──────────────────────────────────────────────────
 // Authoritative shared enum and command byte definitions for all CROSSBOW C#
 // applications (THEIA HMI, TRC3_ENG_GUI). Canonical source of truth — matches
-// ICD v3.0.0 and defines.hpp v3.X.Y.
+// ICD v3.4.0 and defines.hpp v3.X.Y.
 // Do not edit per-application. All changes must be reflected in the ICD document
 // and kept in sync with defines.hpp.
-// Version: 3.3.1 | Date: 2026-03-28
+// Version: 3.4.0 | Date: 2026-04-04 | Session 35
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace CROSSBOW
@@ -87,7 +87,7 @@ namespace CROSSBOW
         FSM = 4,
         JETSON = 5,
         INCL = 6,
-        RTCLOCK = 7,
+        PTP = 7,        // IEEE 1588 PTP slave — GNSS master 192.168.1.30 (was RTCLOCK, session 32)
     };
     public enum BDC_VOTE_OVERRIDES
     {
@@ -167,11 +167,11 @@ namespace CROSSBOW
 
     public enum ICD
     {
-        SET_UNSOLICITED = 0xA0,  // byte: 0,1
-        GET_REGISTER1 = 0xA1,  //
+        SET_UNSOLICITED = 0xA0,  // Subscribe/unsubscribe to unsolicited 100 Hz push. {0x01}=subscribe, {0x00}=unsubscribe. Any accepted command auto-registers the sender. Does NOT affect A1 stream.
+        RES_A1 = 0xA1,  // ⚠ RETIRED inbound (session 35) — returns STATUS_CMD_REJECTED. Value 0xA1 still appears as CMD_BYTE in received unsolicited REG1 frames; parsers must still accept it on RX.
         SET_NTP_CONFIG = 0xA2,  // NTP config (INT only, A2 only): 0 bytes=resync | byte[p]=set primary last octet | bytes[p,f]=set primary+fallback last octet
-        GET_REGISTER3 = 0xA3,  // ⚠ DEPRECATED — stub only (1-byte CMD echo). Do not use in new integrations. // 
-        EXT_FRAME_PING = 0xA4,  // No-op ping for external framed port (A3). No state change. //
+        RES_A3 = 0xA3,  // ⚠ RETIRED (session 35) — returns STATUS_CMD_REJECTED. Was GET_REGISTER3 deprecated stub.
+        FRAME_KEEPALIVE = 0xA4,  // Register/keep-alive. Empty = register + ACK (ping fields: version, echo_seq, uptime_ms). Payload {0x01} = register + return REG1 now (rate-gated: max 1 Hz per client; suppressed if wantsUnsolicited). INT_ENG: all 5 controllers. INT_OPS: MCC/BDC only. Session 35: was EXT_FRAME_PING (A3/MCC/BDC only).
         SET_SYSTEM_STATE = 0xA5,  //byte (SYSTEM_STATES)
         SET_GIMBAL_MODE = 0xA6,  //byte (BDC_MODES)
         SET_LCH_MISSION_DATA = 0xA7,  // Loads LCH mission data and clears all windows (see ICD)
@@ -185,7 +185,7 @@ namespace CROSSBOW
         RES_AF = 0xAF,  // SYSTEM REGISTER RESPONSE
 
         // RESERVING 0xB FOR BDC COMMAND
-        SET_BDC_REINIT = 0xB0,  // uint8: 0=NTP, 1=GIMBAL, 2=FUJI, 3=MWIR, 4=FSM, 5=JETSON, 6=INCL, 7=RTC
+        SET_BDC_REINIT = 0xB0,  // uint8: 0=NTP, 1=GIMBAL, 2=FUJI, 3=MWIR, 4=FSM, 5=JETSON, 6=INCL, 7=PTP
         SET_GIM_HOME = 0xB1,  // HOME POSITION (PAN/TILT)
         SET_GIM_POS = 0xB2,  // POSITION (PAN/TILT)
         SET_GIM_SPD = 0xB3,  // SPEED (PAN/TILT)

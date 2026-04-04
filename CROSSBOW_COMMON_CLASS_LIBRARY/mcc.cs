@@ -65,7 +65,8 @@ namespace CROSSBOW
         private DateTime                 _lastKeepalive = DateTime.MinValue;
 
         public DateTime lastMsgRx  { get; private set; } = DateTime.UtcNow;
-        public double   HB_RX_us   { get; private set; } = 0;
+        //public double   HB_RX_us   { get; private set; } = 0;
+        public double HB_RX_ms { get; private set; } = 0;
         public bool     isConnected { get; private set; } = false;
 
         public MSG_MCC       LatestMSG    { get; private set; }
@@ -134,8 +135,8 @@ namespace CROSSBOW
 
                     // Registration burst — advance past any stale replay window
                     for (int i = 0; i < 3; i++)
-                        Send(BuildFrame((byte)ICD.SET_UNSOLICITED, new[] { (byte)1 }));
-                    Debug.WriteLine("MCC: A2 registration burst sent");
+                        Send(BuildFrame((byte)ICD.FRAME_KEEPALIVE, new[] { (byte)1 }));
+                    Debug.WriteLine("MCC: A2 registration burst sent (0xA4 ×3)");
                 }
             }
             catch (Exception ex)
@@ -169,7 +170,8 @@ namespace CROSSBOW
                         {
                             isConnected = true;
                             var now   = DateTime.UtcNow;
-                            HB_RX_us  = (now - lastMsgRx).TotalMicroseconds;
+                            //HB_RX_us  = (now - lastMsgRx).TotalMicroseconds;
+                            HB_RX_ms = (now - lastMsgRx).TotalMilliseconds;
                             lastMsgRx = now;
                             LatestMSG.Parse(rxBuff);
                         }
@@ -185,7 +187,8 @@ namespace CROSSBOW
                                == (ushort)((frame[519] << 8) | frame[520]))
                         {
                             isConnected = true;
-                            HB_RX_us  = (DateTime.UtcNow - lastMsgRx).TotalMicroseconds;
+                            //HB_RX_us  = (DateTime.UtcNow - lastMsgRx).TotalMicroseconds;
+                            HB_RX_ms = (DateTime.UtcNow - lastMsgRx).TotalMilliseconds;
                             lastMsgRx = DateTime.UtcNow;
                             byte[] payload = new byte[PAYLOAD_LEN];
                             Array.Copy(frame, PAYLOAD_OFFSET, payload, 0, PAYLOAD_LEN);
@@ -295,8 +298,8 @@ namespace CROSSBOW
 
         private void SendKeepalive()
         {
-            Send((byte)ICD.SET_UNSOLICITED, new byte[] { 1 });
-            Log?.Information("MCC: keepalive sent");
+            Send(BuildFrame((byte)ICD.FRAME_KEEPALIVE));
+            Log?.Information("MCC: keepalive (0xA4) sent");
         }
 
         // ── INT_OPS commands — available on both A2 and A3 ───────────────────
@@ -318,12 +321,6 @@ namespace CROSSBOW
         {
             set { Send((byte)ICD.SET_UNSOLICITED, new byte[] { Convert.ToByte(value) }); }
         }
-
-        // 0xA1 GET_REGISTER1
-        public void REQ_REG_01() { Send((byte)ICD.GET_REGISTER1); }
-
-        // 0xA2 GET_REGISTER2 — deprecated stub
-        //public void REQ_REG_02() { Send((byte)ICD.GET_REGISTER2); }
 
         // 0xA5 SET_SYSTEM_STATE
         public void SetState(SYSTEM_STATES state)

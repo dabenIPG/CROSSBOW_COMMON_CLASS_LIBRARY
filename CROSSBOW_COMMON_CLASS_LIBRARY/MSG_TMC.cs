@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.Linq;
 using System.Runtime.InteropServices;
 
@@ -6,6 +7,12 @@ namespace CROSSBOW
 {
     // -----------------------------------------------------------------------
     // MSG_TMC — parses a framed A2 response from the TMC controller.
+    //
+    // Session 35 changes (unified client model):
+    //   - Parse(frame): CMD_BYTE check now accepts both 0xA1 (unsolicited) and
+    //     0xA4 (FRAME_KEEPALIVE poll response) as valid REG1 data frames.
+    //   - isUnsolicitedEnabled: STATUS_BITS1 bit 7 retired in FW — property
+    //     preserved for backward compat but marked Obsolete (always returns false).
     //
     // Session 30 changes (PTP integration):
     //   - TmcReg1.StatBits3 added at byte 61 (was RESERVED)
@@ -21,10 +28,10 @@ namespace CROSSBOW
     //   [0]      MAGIC_HI  = 0xCB
     //   [1]      MAGIC_LO  = 0x49  (internal A2)
     //   [2]      SEQ_NUM   uint8
-    //   [3]      CMD_BYTE  uint8   (echoes request)
+    //   [3]      CMD_BYTE  uint8   0xA1 = unsolicited REG1; 0xA4 = keepalive poll REG1; other = ACK only
     //   [4]      STATUS    uint8   0x00 = OK
     //   [5–6]    PAYLOAD_LEN uint16 LE  always 512
-    //   [7–518]  PAYLOAD   512 bytes   (TMC REG1 at [7–70], rest 0x00)
+    //   [7–518]  PAYLOAD   512 bytes   (TMC REG1 at [7–70] when CMD_BYTE is 0xA1 or 0xA4 with data; rest 0x00)
     //   [519–520] CRC-16/CCITT uint16 BE
     //
     // REG1 layout (64 bytes at payload offset 0, i.e. frame bytes 7–70):
@@ -49,7 +56,7 @@ namespace CROSSBOW
         [StructLayout(LayoutKind.Sequential, Pack = 1)]
         public struct TmcReg1
         {
-            public byte   CmdByte;        // [0]    always 0xA1
+            public byte   CmdByte;        // [0]    0xA1 in unsolicited frames; echoes request CMD_BYTE in solicited responses (0xA4 for keepalive poll with data)
             public byte   SystemState;    // [1]    SYSTEM_STATES enum
             public byte   SystemMode;     // [2]    BDC_MODES enum
             public ushort HB_ms;          // [3–4]  ms between sends
@@ -120,6 +127,11 @@ namespace CROSSBOW
         public bool isInputFan2Enabled    { get { return IsBitSet(STATUS_BITS1, 4); } }
         // bit 5 = RES (was isNTPSynched — moved to STATUS_BITS3 bit 3)
         // bit 6 = RES (was ntpUsingFallback/isRTCInit — moved to STATUS_BITS3 bit 4)
+        // Session 35: STATUS_BITS1 bit 7 retired in firmware (was isUnSolicitedEnabled).
+        // A2 subscription state is now per-client in FrameClient.wantsUnsolicited and
+        // is not exposed in REG1. This property is preserved for build compatibility
+        // but will always return false against session 35+ firmware.
+        [Obsolete("STATUS_BITS1 bit 7 retired session 35. Always returns false against current firmware.")]
         public bool isUnsolicitedEnabled  { get { return IsBitSet(STATUS_BITS1, 7); } }
 
         // STAT BITS3 [byte 61] — session 30 — PTP + NTP time status
@@ -276,8 +288,12 @@ namespace CROSSBOW
                 return false;
             }
 
-            // Only parse REG1 responses — other ACKs have zero-filled payloads
-            if (frame[3] != (byte)ICD.GET_REGISTER1)
+            // Parse REG1 payload for unsolicited frames (CMD_BYTE = 0xA1) and
+            // keepalive poll responses with data (CMD_BYTE = 0xA4, payload {0x01}).
+            // All other CMD_BYTEs (0xA0 subscribe ACK, 0xA4 bare ACK, etc.) have
+            // zero-filled payloads — update liveness only, no REG1 parse.
+            byte cmdByte = frame[3];
+            if (cmdByte != (byte)ICD.RES_A1 && cmdByte != (byte)ICD.FRAME_KEEPALIVE)
             {
                 lastMsgRx = DateTime.UtcNow;
                 return true;
@@ -323,6 +339,8 @@ namespace CROSSBOW
         // ParseBlock — shared field extraction from a TmcReg1 struct.
         // Called by both Parse(frame) and Parse(msg, ndx).
         // -------------------------------------------------------------------
+        public uint dtmax = 0;
+
         private void ParseBlock(TmcReg1 reg)
         {
             System_State      = (SYSTEM_STATES)reg.SystemState;
@@ -362,6 +380,14 @@ namespace CROSSBOW
 
             SW_VERSION_WORD   = reg.VersionWord;
             TEMP_MCU          = reg.McuTemp;
+
+            if (dt_us > 1000)
+            {
+                dtmax = dt_us;
+                Debug.WriteLine($"MSG_TMC: dt us = {dt_us}");
+                //if (isVerboseLogEnabled) Log?.Debug("MSG_MCC: dt max = {Dt}", dtmax);
+            }
+
         }
 
         private static bool IsBitSet(byte b, int pos) => (b & (1 << pos)) != 0;

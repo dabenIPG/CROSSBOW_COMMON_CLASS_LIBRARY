@@ -326,12 +326,6 @@ namespace CROSSBOW
             set { Send((byte)ICD.SET_UNSOLICITED, new byte[] { Convert.ToByte(value) }); }
         }
 
-        // 0xA1 GET_REGISTER1
-        public void REQ_REG_01() { Send((byte)ICD.GET_REGISTER1); }
-
-        // 0xA2 GET_REGISTER2 — deprecated stub
-        //public void REQ_REG_02() { Send((byte)ICD.GET_REGISTER2); }
-
         // 0xA5 SET_SYSTEM_STATE
         public void SetState(SYSTEM_STATES state)
         {
