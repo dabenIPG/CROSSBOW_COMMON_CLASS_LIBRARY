@@ -21,9 +21,8 @@ namespace   CROSSBOW
 
         public bool isUnsolicitedEnabled { get; set; } = false;
         public int PORT { get; private set; } = 10009;
-        private UdpClient? udpClient;
-        private UdpClient? udpClient2;
-        private IPEndPoint iPEndPoint;
+        private UdpClient? udpClient { get; set; }
+        public IPEndPoint? LastSenderEndPoint { get; private set; }
 
         private CancellationTokenSource ts = new CancellationTokenSource();
         private CancellationToken ct;
@@ -98,6 +97,8 @@ namespace   CROSSBOW
             Debug.WriteLine($"Stopping {BaseICAO} Listener");
             ts2.Cancel();
             ts.Cancel();
+            try { udpClient?.Close(); udpClient?.Dispose(); } catch { }
+            udpClient = null;
         }
         private void backgroundUDPRead()
         {
@@ -107,15 +108,18 @@ namespace   CROSSBOW
             {
                 try
                 {
-                    //udpClient.Close();
+                    udpClient?.Close();
+                    udpClient?.Dispose();
                     udpClient = null;
-                    GC.Collect();
-                    udpClient = new UdpClient(PORT);
+
+                    udpClient = new UdpClient();
+                    udpClient.Client.SetSocketOption(SocketOptionLevel.Socket,
+                        SocketOptionName.ReuseAddress, true);
+                    udpClient.Client.Bind(new IPEndPoint(IPAddress.Any, PORT));
                 }
-                catch
+                catch (Exception ex)
                 {
-                    //udpClient.Close();
-                    Debug.WriteLine($"{BaseICAO} Listener Socket Error");
+                    Debug.WriteLine($"{BaseICAO} Listener Socket Error: {ex.Message}");
                     return;
                 }
 
@@ -132,15 +136,21 @@ namespace   CROSSBOW
                         break;
                     }
 
-                    var res = await udpClient.ReceiveAsync();
-                    iPEndPoint = res.RemoteEndPoint;
-                    isUnsolicitedEnabled = true;
-                    isConnected = true;
-                    byte[] rxBuff = res.Buffer;
-
-                    //byte[] rxBuff = udpClient.Receive(ref iPEndPoint);
-
-                    ParseMsg(rxBuff);
+                    // AFTER:
+                    try
+                    {
+                        var res = await udpClient.ReceiveAsync();
+                        LastSenderEndPoint = res.RemoteEndPoint;
+                        isUnsolicitedEnabled = true;
+                        isConnected = true;
+                        ParseMsg(res.Buffer);
+                    }
+                    catch (SocketException ex)
+                    {
+                        if (ct.IsCancellationRequested) break;
+                        Debug.WriteLine($"{BaseICAO} SocketException (continuing): {ex.Message}");
+                    }
+                    catch (ObjectDisposedException) { break; }
 
                 }
                 while (!ct.IsCancellationRequested);
