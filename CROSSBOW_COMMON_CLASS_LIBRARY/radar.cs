@@ -52,7 +52,7 @@ namespace   CROSSBOW
 
         public RADAR(ConcurrentDictionary<string, trackLOG> _trackLogs, ptLLA _bs,
                      CB _cb,
-                     int _port = 10009, TRACK_TYPES _trackType = TRACK_TYPES.KALMAN_PREDICTED,
+                     int _port = 15009, TRACK_TYPES _trackType = TRACK_TYPES.KALMAN_PREDICTED,
                      string _baseICAO = "RADAR", bool _vzPositiveUp = true)
         {
             trackLogs    = _trackLogs;
