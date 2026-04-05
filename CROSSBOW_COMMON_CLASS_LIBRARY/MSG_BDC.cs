@@ -182,7 +182,6 @@ namespace CROSSBOW
         // ICD v3.0.0 session 4: RTC removed — uint64 ms only
         private UInt64  _epochTime { get; set; } = 0;
         public DateTime epochTime  { get { return DateTimeOffset.FromUnixTimeMilliseconds((long)_epochTime).UtcDateTime; } }
-        public DateTime ntpTime    { get { return epochTime; } }   // legacy alias
 
         // ── Temperatures ──────────────────────────────────────────────────────
         // ICD v3.0.0 session 4: TEMPERATURE_VICOR is int8 (was float)
@@ -223,7 +222,7 @@ namespace CROSSBOW
         public float  HorizonBuffer { get; private set; } = -1.5f;
 
         // ICD v3.0.0 session 4: MCU Temp float at BDC REG1 [387-390]
-        public float MCU_TEMP { get; private set; } = 0;
+        public float TEMP_MCU { get; private set; } = 0;
 
         // TIME_BITS [byte 391] — session 32, mirrors TMC STATUS_BITS3 exactly
         // Single authoritative time source byte. Named tb_ accessors below.
@@ -287,7 +286,7 @@ namespace CROSSBOW
             lastMsgRx = now;
 
             ICD cmd = (ICD)frame[3];
-            if (cmd == ICD.RES_A1)
+            if (cmd == ICD.RES_A1 || cmd == ICD.FRAME_KEEPALIVE)
                 ParseMSG01(frame, PAYLOAD_OFFSET + 1);
         }
 
@@ -302,7 +301,7 @@ namespace CROSSBOW
             int ndx = 0;
             ICD cmd = (ICD)msg[ndx]; ndx++;
 
-            if (cmd == ICD.RES_A1)
+            if (cmd == ICD.RES_A1 || cmd == ICD.FRAME_KEEPALIVE)
                 ParseMSG01(msg, ndx);
         }
 
@@ -483,7 +482,7 @@ namespace CROSSBOW
             FW_VERSION = BitConverter.ToUInt32(msg, ndx); ndx += sizeof(UInt32);
 
             // [387-390] MCU temp float
-            MCU_TEMP = BitConverter.ToSingle(msg, ndx); ndx += sizeof(Single);
+            TEMP_MCU = BitConverter.ToSingle(msg, ndx); ndx += sizeof(Single);
 
             // [391] TIME_BITS (session 32) — consolidated time source status
             TimeBits = msg[ndx]; ndx++;
@@ -494,41 +493,40 @@ namespace CROSSBOW
         // ICD v3.0.0 session 4: bit 7 changed from RTC → RES
         // Session 32: bit 7 = PTP
         // =========================================================================
-        public bool isNTPEnabled    { get { return IsBitSet(DeviceEnabledBits, 0); } }
-        public bool isGimbalEnabled { get { return IsBitSet(DeviceEnabledBits, 1); } }
-        public bool isFujiEnabled   { get { return IsBitSet(DeviceEnabledBits, 2); } }
-        public bool isMWIREnabled   { get { return IsBitSet(DeviceEnabledBits, 3); } }
-        public bool isFSMEnabled    { get { return IsBitSet(DeviceEnabledBits, 4); } }
-        public bool isFMCEnabled    { get { return isFSMEnabled; } }   // legacy alias
-        public bool isTRCEnabled    { get { return IsBitSet(DeviceEnabledBits, 5); } }
-        public bool isINCEnabled    { get { return IsBitSet(DeviceEnabledBits, 6); } }
-        public bool isPTP_Enabled   { get { return IsBitSet(DeviceEnabledBits, 7); } }   // session 32
+        public bool isNTP_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, 0); } }
+        public bool isGimbal_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, 1); } }
+        public bool isFuji_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, 2); } }
+        public bool isMWIR_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, 3); } }
+        public bool isFSM_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, 4); } }
+        public bool isFMC_DeviceEnabled { get { return isFSM_DeviceEnabled; } }   // alias
+        public bool isTRC_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, 5); } }
+        public bool isINC_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, 6); } }
+        public bool isPTP_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, 7); } }
 
-        public bool isNTPReady       { get { return IsBitSet(DeviceReadyBits, 0); } }
-        public bool isGimbalReady    { get { return IsBitSet(DeviceReadyBits, 1); } }
-        public bool isFujiReady      { get { return IsBitSet(DeviceReadyBits, 2); } }
-        public bool isMWIRReady      { get { return IsBitSet(DeviceReadyBits, 3); } }
-        public bool isFSMReady       { get { return IsBitSet(DeviceReadyBits, 4); } }
-        public bool isFMCReady       { get { return isFSMReady; } }       // legacy alias
-        public bool isTRCReady       { get { return IsBitSet(DeviceReadyBits, 5); } }
-        public bool isINCReady       { get { return IsBitSet(DeviceReadyBits, 6); } }
-        public bool isPTP_DeviceReady { get { return IsBitSet(DeviceReadyBits, 7); } }   // session 32
+        public bool isNTP_DeviceReady { get { return IsBitSet(DeviceReadyBits, 0); } }
+        public bool isGimbal_DeviceReady { get { return IsBitSet(DeviceReadyBits, 1); } }
+        public bool isFuji_DeviceReady { get { return IsBitSet(DeviceReadyBits, 2); } }
+        public bool isMWIR_DeviceReady { get { return IsBitSet(DeviceReadyBits, 3); } }
+        public bool isFSM_DeviceReady { get { return IsBitSet(DeviceReadyBits, 4); } }
+        public bool isFMC_DeviceReady { get { return isFSM_DeviceReady; } }   // alias
+        public bool isTRC_DeviceReady { get { return IsBitSet(DeviceReadyBits, 5); } }
+        public bool isINC_DeviceReady { get { return IsBitSet(DeviceReadyBits, 6); } }
+        public bool isPTP_DeviceReady { get { return IsBitSet(DeviceReadyBits, 7); } }
 
-        // =========================================================================
         // StatusBits accessors  (byte 10)
         // bit 0: isReady  bits 1-6: RES (time bits moved to TimeBits byte 391 — session 32)
-        // bit 7: isUnSolicitedEnabled
+        // bit 7: RES (was isUnSolicitedEnabled — retired session 35)
         // Named time properties below redirect to TimeBits for backward compatibility.
         // =========================================================================
-        public bool isBDCReady                { get { return IsBitSet(StatusBits,  0); } }
-        public bool isUnSolicitedMode_Enabled { get { return IsBitSet(StatusBits,  7); } }
+        public bool isBDCReady { get { return IsBitSet(StatusBits, 0); } }
+        // isUnSolicitedMode_Enabled retired session 35 — bit 7 always 0
 
         public bool ntpUsingFallback { get { return tb_ntpUsingFallback; } }   // → TimeBits bit 4
         public bool ntpHasFallback   { get { return tb_ntpHasFallback;   } }   // → TimeBits bit 5
         public bool usingPTP         { get { return tb_usingPTP;         } }   // → TimeBits bit 2
 
         // Derived: active time source label — mirrors firmware TIME_SOURCE enum
-        public string activeTimeSource { get { return usingPTP ? "PTP" : (isNTPReady ? "NTP" : "NONE"); } }
+        public string activeTimeSourceLabel { get { return usingPTP ? "PTP" : (isNTP_DeviceReady ? "NTP" : "NONE"); } }
 
         public bool isPID_Enabled    { get { return IsBitSet(StatusBits2, 0); } }
         public bool isVPID_Enabled   { get { return IsBitSet(StatusBits2, 1); } }

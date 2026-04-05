@@ -99,7 +99,6 @@ namespace CROSSBOW
         public BDC_MODES     BDC_Mode            { get; private set; } = BDC_MODES.OFF;
         public ushort        HB_TX_ms            { get; private set; } = 0;
         public ushort        dt_us               { get; private set; } = 0;
-        public uint          SW_VERSION_WORD     { get; private set; } = 0;
         public byte          STATUS_BITS1        { get; private set; } = 0;
         public byte          STATUS_BITS2        { get; private set; } = 0;
         public byte          STATUS_BITS3        { get; private set; } = 0;   // byte 61 — PTP+NTP time status (session 30)
@@ -107,14 +106,15 @@ namespace CROSSBOW
         public DateTime      lastMsgRx           { get; private set; } = DateTime.UtcNow;
 
         // Version — semver layout: bits[31:24]=major  [23:12]=minor  [11:0]=patch
-        public string SW_VERSION_STRING
+        public UInt32 FW_VERSION { get; private set; } = 0;
+        public string FW_VERSION_STRING
         {
             get
             {
-                uint maj   = (SW_VERSION_WORD >> 24) & 0xFF;
-                uint minor = (SW_VERSION_WORD >> 12) & 0xFFF;
-                uint patch =  SW_VERSION_WORD        & 0xFFF;
-                return $"{maj}.{minor}.{patch}";
+                uint major = (FW_VERSION >> 24) & 0xFF;
+                uint minor = (FW_VERSION >> 12) & 0xFFF;
+                uint patch = FW_VERSION & 0xFFF;
+                return $"{major}.{minor}.{patch}";
             }
         }
 
@@ -378,7 +378,7 @@ namespace CROSSBOW
             PRESSURE          = reg.TphPressure;
             HUMIDITY          = reg.TphHumidity;
 
-            SW_VERSION_WORD   = reg.VersionWord;
+            FW_VERSION        = reg.VersionWord;
             TEMP_MCU          = reg.McuTemp;
 
             if (dt_us > 1000)

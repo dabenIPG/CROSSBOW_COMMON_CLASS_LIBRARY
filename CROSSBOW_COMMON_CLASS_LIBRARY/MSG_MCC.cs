@@ -96,19 +96,14 @@ namespace CROSSBOW
         public UInt32 dt       { get { return (UInt32)dt_us; } }
 
         // ── Version ───────────────────────────────────────────────────────────
-        public UInt32 SW_VERSION_WORD { get; private set; } = 0;
-        public string SW_VERSION_STRING
+        public UInt32 FW_VERSION { get; private set; } = 0;
+        public string FW_VERSION_STRING
         {
             get
             {
-                // ICD v3.0.0 session 4 semver encoding:
-                //   bits[31:24] = major  (8 bits,  0-255)
-                //   bits[23:12] = minor  (12 bits, 0-4095)
-                //   bits[11:0]  = patch  (12 bits, 0-4095)
-                // e.g. VERSION_PACK(3,0,1) = 0x03000001  ->  "3.0.1"
-                UInt32 major = (SW_VERSION_WORD >> 24) & 0xFF;
-                UInt32 minor = (SW_VERSION_WORD >> 12) & 0xFFF;
-                UInt32 patch =  SW_VERSION_WORD        & 0xFFF;
+                uint major = (FW_VERSION >> 24) & 0xFF;
+                uint minor = (FW_VERSION >> 12) & 0xFFF;
+                uint patch = FW_VERSION & 0xFFF;
                 return $"{major}.{minor}.{patch}";
             }
         }
@@ -360,7 +355,7 @@ namespace CROSSBOW
             ndx = GNSSMsg.ParseMsg(msg, ndx);
             ndx = CMCMsg.Parse(msg, ndx);       // embedded entry point — Parse() not ParseMsg()
 
-            SW_VERSION_WORD = BitConverter.ToUInt32(msg, ndx); ndx += sizeof(UInt32);
+            FW_VERSION = BitConverter.ToUInt32(msg, ndx); ndx += sizeof(UInt32);
             TEMP_MCU        = BitConverter.ToSingle(msg, ndx); ndx += sizeof(Single);
 
             // [253] TIME_BITS (session 32) — consolidated time source status
