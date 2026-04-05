@@ -41,7 +41,7 @@ namespace CROSSBOW
         public string ECHO_IP_ADDRESS { get; set; } = "192.168.1.150";
         public int ECHO_PORT { get; set; } = 29982;
 
-        public STELLARIUM aStella { get; set; } = new STELLARIUM("localhost", 8090);
+        public STELLARIUM aStella { get; set; } = new STELLARIUM();
         public ECHO aECHO { get; set; } = new ECHO();
 
         public LCH aLCH { get; set; } = new LCH();

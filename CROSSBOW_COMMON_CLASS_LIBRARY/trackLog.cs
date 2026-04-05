@@ -62,6 +62,23 @@ namespace CROSSBOW
         public double Elevation { get { return COMMON.GetElevation(BaseStation, Position); } }
         public double Rangekm { get { return COMMON.geoDist(BaseStation, Position) / 1000.0; } }
 
+        /// <summary>
+        /// 3D slant range from BaseStation to current Position, metres.
+        /// Combines geodesic surface distance with altitude delta.
+        /// Use for targets with significant elevation angle (e.g. Stellarium).
+        /// </summary>
+        public double SlantRange_m
+        {
+            get
+            {
+                double groundDist = COMMON.geoDist(BaseStation, Position);    // horizontal m
+                double altDelta = Position.alt - BaseStation.alt;           // vertical m
+                return Math.Sqrt(groundDist * groundDist + altDelta * altDelta);
+            }
+        }
+
+        public double SlantRange_km => SlantRange_m / 1000.0;
+
         public ptLLA LatestPosition { get { return PositionLog.Count > 0 ? PositionLog.Values[PositionLog.Count - 1] : new ptLLA(0, 0, 0); } }
         public ptLLA PredictedPosition { get { return COMMON.projectLLA(LatestPosition, TrackAge / 1000.0 * Speed_mps, Heading_deg); } }
 
