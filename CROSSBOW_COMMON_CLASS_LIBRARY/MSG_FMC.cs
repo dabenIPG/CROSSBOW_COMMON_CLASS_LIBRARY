@@ -128,7 +128,7 @@ namespace CROSSBOW
         }
 
         // MCU Temperature
-        public float MCU_Temp { get; private set; } = 0;
+        public float TEMP_MCU { get; private set; } = 0;
 
         // REG2 / BDC REG1 calibration fields — set externally
         public UInt32 StageHome  { get;  set; } = 0;
@@ -214,7 +214,7 @@ namespace CROSSBOW
 
             _ntpTime   = BitConverter.ToInt64(msg, ndx);  ndx += sizeof(Int64);     // [28–35]
             FW_VERSION = BitConverter.ToUInt32(msg, ndx); ndx += sizeof(UInt32);    // [36–39]
-            MCU_Temp   = BitConverter.ToSingle(msg, ndx); ndx += sizeof(Single);    // [40–43]
+            TEMP_MCU   = BitConverter.ToSingle(msg, ndx); ndx += sizeof(Single);    // [40–43]
             TimeBits   = msg[ndx];                         ndx++;                    // [44] TIME_BITS
             // [45–63] RESERVED — skip to end of 64-byte block
 
