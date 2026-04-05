@@ -283,8 +283,7 @@ namespace   CROSSBOW
 
         private void SendResponse()
         {
-            if (_aCB == null || iPEndPoint == null) return;
-
+            if (_aCB == null || LastSenderEndPoint == null) return;
             try
             {
                 byte[] payload = new byte[ExtOpsFrame.PAYLOAD_LEN_STATUS];
@@ -306,7 +305,7 @@ namespace   CROSSBOW
 
                 byte[] frame = ExtOpsFrame.BuildFrame(ExtOpsFrame.CMD_STATUS_RESPONSE,
                                                        _txSeq++, payload);
-                udpClient?.Send(frame, frame.Length, iPEndPoint);
+                udpClient?.Send(frame, frame.Length, LastSenderEndPoint);
             }
             catch (Exception ex)
             {
