@@ -164,7 +164,7 @@ namespace   CROSSBOW
                         trackLogs.TryRemove(aLog.Key, out _);
                     Thread.Sleep(1);
                 }
-                udpClient.Close();
+                try { udpClient?.Close(); } catch { }  // ← null-guard, swallow if already closed
                 isConnected = false;
             }, ct);
 

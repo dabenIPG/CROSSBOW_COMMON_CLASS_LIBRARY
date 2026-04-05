@@ -92,7 +92,7 @@ namespace CROSSBOW
     public class CueSender : IDisposable
     {
         // ── Configuration ────────────────────────────────────────────────────
-        private const int THEIA_PORT    = 10009;
+        private const int THEIA_PORT    = 15009;
         private const int RECV_TIMEOUT  = 1000;
 
         // ── State ────────────────────────────────────────────────────────────
