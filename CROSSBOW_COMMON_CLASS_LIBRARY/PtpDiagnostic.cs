@@ -29,6 +29,7 @@ using System.Net;
 using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Threading.Channels;
 
 namespace CROSSBOW
 {
@@ -83,6 +84,8 @@ namespace CROSSBOW
         private ushort _syncSeq     = 0;
         private ushort _delayReqSeq = 0;
 
+        // ── Exchange progress tracking (visible on timeout) ───────────────────────
+        public string LastState { get; private set; } = "NOT_STARTED";
         // ── Static factory ────────────────────────────────────────────────────
         public static async Task<PtpDiagnostic> QueryAsync(
             string serverIP,
@@ -98,9 +101,8 @@ namespace CROSSBOW
             catch (OperationCanceledException)
             {
                 if (string.IsNullOrEmpty(diag.Error))
-                    diag.Error = $"Timeout ({timeoutMs} ms) — no PTP response. " +
-                                 "Check: master running? firewall ports 319/320 open? " +
-                                 "multicast route to 224.0.1.129 present?";
+                    diag.Error = $"Timeout ({timeoutMs} ms) — stopped at: {diag.LastState}. " +
+                                 $"AnnounceReceived={diag.AnnounceReceived}";
             }
             catch (Exception ex)
             {
@@ -109,51 +111,185 @@ namespace CROSSBOW
             return diag;
         }
 
+        // ── Passive sniffer — confirms socket receives multicast before attempting exchange
+        public static async Task<string> PassiveSniffAsync(int durationMs = 5000)
+        {
+            var sb = new System.Text.StringBuilder();
+            var localIP = IPAddress.Parse(CrossbowNic.GetInternalIP());
+            sb.AppendLine($"Passive PTP sniff for {durationMs}ms...");
+            sb.AppendLine($"Local NIC: {localIP}");
+            sb.AppendLine($"Joining 224.0.1.129 on {localIP}");
+
+            UdpClient udp319 = null;
+            UdpClient udp320 = null;
+            try
+            {
+                udp319 = CreateMulticastSocket(319);
+                udp320 = CreateMulticastSocket(320);
+                sb.AppendLine("Sockets bound OK — listening...");
+            }
+            catch (Exception ex)
+            {
+                sb.AppendLine($"Socket bind FAILED: {ex.Message}");
+                udp319?.Dispose();
+                udp320?.Dispose();
+                return sb.ToString();
+            }
+
+            using (udp319)
+            using (udp320)
+            using (var cts = new CancellationTokenSource(durationMs))
+            {
+                int count = 0;
+                try
+                {
+                    while (!cts.IsCancellationRequested)
+                    {
+                        var t319 = udp319.ReceiveAsync(cts.Token).AsTask();
+                        var t320 = udp320.ReceiveAsync(cts.Token).AsTask();
+                        var done = await Task.WhenAny(t319, t320);
+                        var result = await done;
+                        int port = done == t319 ? 319 : 320;
+                        byte[] buf = result.Buffer;
+                        byte msgType = (byte)(buf[0] & 0x0F);
+                        string name = msgType switch
+                        {
+                            0x0 => "SYNC",
+                            0x1 => "DELAY_REQ",
+                            0x8 => "FOLLOW_UP",
+                            0x9 => "DELAY_RESP",
+                            0xB => "ANNOUNCE",
+                            _ => $"0x{msgType:X}"
+                        };
+                        sb.AppendLine($"  [{count++}] port {port}: {name} " +
+                                      $"({buf.Length}B) domain={buf[4]} " +
+                                      $"from {result.RemoteEndPoint}");
+                    }
+                }
+                catch (OperationCanceledException) { }
+                catch (Exception ex)
+                {
+                    sb.AppendLine($"Receive error: {ex.Message}");
+                }
+
+                sb.AppendLine(count == 0
+                    ? "NO packets received — socket not seeing multicast."
+                    : $"{count} packets received OK.");
+            }
+            return sb.ToString();
+        }
+
         // ── Exchange state machine ────────────────────────────────────────────
         private async Task RunExchange(string serverIP, int timeoutMs, int announceWaitMs)
         {
-            // Open event socket (port 319) and general socket (port 320)
-            using var udpEvent   = CreateMulticastSocket(EVENT_PORT);
+            using var udpEvent = CreateMulticastSocket(EVENT_PORT);
             using var udpGeneral = CreateMulticastSocket(GENERAL_PORT);
-
-            // Phase 1: Optionally capture ANNOUNCE (no request needed — master broadcasts)
-            using var announceCts = new CancellationTokenSource(announceWaitMs);
-            try
-            {
-                await WaitForAnnounce(udpGeneral, announceCts.Token);
-            }
-            catch (OperationCanceledException)
-            {
-                // ANNOUNCE not received in time — not fatal, continue with exchange
-            }
-
-            // Phase 2 onwards: full exchange must complete within remaining timeout
+            using var udpUnicast = CreateUnicastSocket(GENERAL_PORT);   // catch unicast DELAY_RESP
             using var cts = new CancellationTokenSource(timeoutMs);
 
-            // Wait for SYNC → record t2, save sequenceId
-            await WaitForSync(udpEvent, cts.Token);
+            var masterEP = new IPEndPoint(MULTICAST_IP, EVENT_PORT);
 
-            // Wait for matching FOLLOW_UP → extract t1
-            await WaitForFollowUp(udpGeneral, cts.Token);
+            // Feed both sockets into a single channel — avoids Task.WhenAny packet loss
+            var channel = System.Threading.Channels.Channel.CreateUnbounded<(int port, byte[] data)>();
 
-            // Send DELAY_REQ → record t3
-            _delayReqSeq = (ushort)Interlocked.Increment(ref _seqCounter);
-            byte[] delayReqFrame = BuildDelayReq(_delayReqSeq);
-            T3 = DateTime.UtcNow;
-            var masterEP = new IPEndPoint(IPAddress.Parse(serverIP), EVENT_PORT);
-            await udpEvent.SendAsync(delayReqFrame, delayReqFrame.Length, masterEP);
+            async Task ReadSocket(UdpClient udp, int port)
+            {
+                try
+                {
+                    while (!cts.IsCancellationRequested)
+                    {
+                        var res = await udp.ReceiveAsync(cts.Token);
+                        await channel.Writer.WriteAsync((port, res.Buffer), cts.Token);
+                    }
+                }
+                catch (OperationCanceledException) { }
+                finally { channel.Writer.TryComplete(); }
+            }
 
-            // Wait for DELAY_RESP matching our clockId + seq → extract t4
-            await WaitForDelayResp(udpGeneral, cts.Token);
+            _ = ReadSocket(udpEvent, EVENT_PORT);
+            _ = ReadSocket(udpGeneral, GENERAL_PORT);
+            _ = ReadSocket(udpUnicast, GENERAL_PORT);
 
-            // Calculate timing
-            double t1ms = T1.Subtract(PTP_EPOCH).TotalMilliseconds;
-            double t2ms = T2.Subtract(PTP_EPOCH).TotalMilliseconds;
-            double t3ms = T3.Subtract(PTP_EPOCH).TotalMilliseconds;
-            double t4ms = T4.Subtract(PTP_EPOCH).TotalMilliseconds;
+            bool syncReceived = false;
+            bool followUpReceived = false;
+            bool delayReqSent = false;
+            bool delayRespReceived = false;
 
-            RoundTripMs = (t4ms - t1ms) - (t3ms - t2ms);
-            OffsetMs    = ((t2ms - t1ms) + (t3ms - t4ms)) / 2.0;
+            await foreach (var (port, p) in channel.Reader.ReadAllAsync(cts.Token))
+            {
+                if (p.Length < 34) continue;
+
+                byte msgType = (byte)(p[0] & 0x0F);
+
+                switch (msgType)
+                {
+                    case MSG_ANNOUNCE when !AnnounceReceived && p.Length >= 64 && p[4] == 0:
+                        Domain = p[4];
+                        CurrentUtcOffset = (short)((p[44] << 8) | p[45]);
+                        GrandmasterPriority1 = p[47];
+                        ClockClass = p[48];
+                        ClockAccuracy = p[49];
+                        OffsetScaledLogVariance = (ushort)((p[50] << 8) | p[51]);
+                        GrandmasterPriority2 = p[52];
+                        Array.Copy(p, 53, GrandmasterIdentity, 0, 8);
+                        StepsRemoved = (ushort)((p[61] << 8) | p[62]);
+                        TimeSource = p[63];
+                        AnnounceReceived = true;
+                        LastState = "ANNOUNCE_OK";
+                        break;
+
+                    case MSG_SYNC when p[4] == 0:
+                        T2 = DateTime.UtcNow;
+                        _syncSeq = (ushort)((p[30] << 8) | p[31]);
+                        syncReceived = true;
+                        followUpReceived = false;   // reset — previous cycle's FOLLOW_UP may have been missed
+                        delayReqSent = false;
+                        delayRespReceived = false;
+                        LastState = $"SYNC_OK seq={_syncSeq}";
+                        break;
+
+                    case MSG_FOLLOW_UP when syncReceived && !followUpReceived && p[4] == 0:
+                        ushort fuSeq = (ushort)((p[30] << 8) | p[31]);
+                        if (fuSeq != _syncSeq) break;
+                        T1 = ExtractTimestamp(p, 34);
+                        followUpReceived = true;
+                        LastState = "FOLLOWUP_OK";
+
+                        // Send DELAY_REQ immediately after FOLLOW_UP
+                        _delayReqSeq = (ushort)Interlocked.Increment(ref _seqCounter);
+                        byte[] dreq = BuildDelayReq(_delayReqSeq);
+                        T3 = DateTime.UtcNow;
+                        int bytesSent = await udpEvent.SendAsync(dreq, dreq.Length, masterEP);
+                        delayReqSent = true;
+                        LastState = $"DELAYREQ_SENT bytes={bytesSent} to={masterEP}";
+                        break;
+
+                    case MSG_DELAY_RESP:
+                        LastState = $"DELAYRESP_RAW domain={p[4]} len={p.Length} delayReqSent={delayReqSent}";
+                        if (!delayReqSent || delayRespReceived || p[4] != 0 || p.Length < 54) break;
+                        ushort drSeq = (ushort)((p[30] << 8) | p[31]);
+                        if (drSeq != _delayReqSeq) { LastState = $"DELAYRESP_SEQ_MISMATCH got={drSeq} want={_delayReqSeq}"; break; }
+                        bool match = true;
+                        for (int i = 0; i < 8; i++)
+                            if (p[44 + i] != CLIENT_CLOCK_ID[i]) { match = false; break; }
+                        if (!match) break;
+                        T4 = ExtractTimestamp(p, 34);
+                        delayRespReceived = true;
+                        LastState = "DELAYRESP_OK";
+                        break;
+                }
+
+                if (followUpReceived && delayRespReceived)
+                {
+                    double t1ms = T1.Subtract(PTP_EPOCH).TotalMilliseconds;
+                    double t2ms = T2.Subtract(PTP_EPOCH).TotalMilliseconds;
+                    double t3ms = T3.Subtract(PTP_EPOCH).TotalMilliseconds;
+                    double t4ms = T4.Subtract(PTP_EPOCH).TotalMilliseconds;
+                    RoundTripMs = (t4ms - t1ms) - (t3ms - t2ms);
+                    OffsetMs = ((t2ms - t1ms) + (t3ms - t4ms)) / 2.0;
+                    return;
+                }
+            }
         }
 
         // ── Phase 1: ANNOUNCE ─────────────────────────────────────────────────
@@ -288,11 +424,31 @@ namespace CROSSBOW
         // ── Socket factory ────────────────────────────────────────────────────
         private static UdpClient CreateMulticastSocket(int port)
         {
+            //var udp = new UdpClient();
+            //udp.Client.SetSocketOption(SocketOptionLevel.Socket,
+            //                           SocketOptionName.ReuseAddress, true);
+            //udp.Client.Bind(new IPEndPoint(IPAddress.Any, port));
+            //udp.JoinMulticastGroup(MULTICAST_IP);
+            //udp.MulticastLoopback = false;
+            //return udp;
+
+
+            var localIP = IPAddress.Parse(CrossbowNic.GetInternalIP());
             var udp = new UdpClient();
             udp.Client.SetSocketOption(SocketOptionLevel.Socket,
                                        SocketOptionName.ReuseAddress, true);
             udp.Client.Bind(new IPEndPoint(IPAddress.Any, port));
-            udp.JoinMulticastGroup(MULTICAST_IP);
+            udp.JoinMulticastGroup(MULTICAST_IP, localIP);
+            udp.MulticastLoopback = false;
+            return udp;
+        }
+        private static UdpClient CreateUnicastSocket(int port)
+        {
+            var localIP = IPAddress.Parse(CrossbowNic.GetInternalIP());
+            var udp = new UdpClient(AddressFamily.InterNetwork);
+            udp.Client.SetSocketOption(SocketOptionLevel.Socket,
+                                       SocketOptionName.ReuseAddress, true);
+            udp.Client.Bind(new IPEndPoint(localIP, port));
             udp.MulticastLoopback = false;
             return udp;
         }

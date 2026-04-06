@@ -139,10 +139,10 @@ namespace CROSSBOW
                     _remoteEP = new IPEndPoint(IPAddress.Parse(IP), ActivePort);
                     udpClient.Connect(_remoteEP);
 
-                    // Registration burst — advance past any stale replay window
-                    for (int i = 0; i < 3; i++)
-                        Send(BuildFrame((byte)ICD.FRAME_KEEPALIVE, new[] { (byte)1 }));
-                    Debug.WriteLine("MCC: A2 registration burst sent (0xA4 ×3)");
+                    // Single registration frame — firmware replay fix handles reconnects cleanly
+                    Send(BuildFrame((byte)ICD.FRAME_KEEPALIVE));
+                    _lastKeepalive = DateTime.UtcNow;
+                    Debug.WriteLine("MCC: A2 registration sent (0xA4)");
                 }
             }
             catch (Exception ex)
@@ -154,8 +154,9 @@ namespace CROSSBOW
 
             if (Transport == TransportPath.A3_External)
             {
-                await Task.Delay(50, ct).ConfigureAwait(false);
-                UnsolicitedMode = true;
+                Send(BuildFrame((byte)ICD.FRAME_KEEPALIVE));
+                _lastKeepalive = DateTime.UtcNow;
+                Debug.WriteLine("MCC: A3 registration sent (0xA4)");
             }
 
             Log?.Information("MCC UDP connected ({LocalIp}:{Port} → {RemoteIp})",
@@ -172,22 +173,25 @@ namespace CROSSBOW
                         // A3: pass full 521-byte frame — MSG_MCC.ParseA3 validates internally
                         if (!res.RemoteEndPoint.Address.Equals(IPAddress.Parse(IP))) continue;
                         byte[] rxBuff = res.Buffer;
-                        if (rxBuff.Length > 0)
+                        if (rxBuff.Length == FRAME_RESPONSE_LEN)
                         {
-                            // Only mark connected and update liveness on actual REG1 frames.
-                            // A3 ParseA3 validates CMD_BYTE internally so we check here too.
-                            if (rxBuff.Length == FRAME_RESPONSE_LEN && rxBuff[3] == (byte)ICD.RES_A1)
+                            // Any valid frame from firmware counts as liveness
+                            isConnected = true;
+                            if (!_wasConnected)
                             {
-                                isConnected = true;
-                                var now = DateTime.UtcNow;
-                                HB_RX_ms = (now - lastMsgRx).TotalMilliseconds;
-                                lastMsgRx = now;
+                                _wasConnected = true;
+                                _connectedSince = DateTime.UtcNow;
+                                Log?.Information("MCC: connection established");
+                                Debug.WriteLine("MCC: connection established");
+                            }
+                            var now = DateTime.UtcNow;
+                            HB_RX_ms = (now - lastMsgRx).TotalMilliseconds;
+                            lastMsgRx = now;
+
+                            if (rxBuff[3] == (byte)ICD.RES_A1)
                                 LatestMSG.Parse(rxBuff);
-                            }
                             else
-                            {
                                 Debug.WriteLine($"MCC: A3 ACK rx CMD=0x{rxBuff[3]:X2}");
-                            }
                         }
                     }
                     else
@@ -200,11 +204,20 @@ namespace CROSSBOW
                             && CrcHelper.Crc16(frame, FRAME_RESPONSE_LEN - 2)
                                == (ushort)((frame[519] << 8) | frame[520]))
                         {
+                            // Any valid frame from firmware counts as liveness
+                            isConnected = true;
+                            if (!_wasConnected)
+                            {
+                                _wasConnected = true;
+                                _connectedSince = DateTime.UtcNow;
+                                Log?.Information("MCC: connection established");
+                                Debug.WriteLine("MCC: connection established");
+                            }
+                            HB_RX_ms = (DateTime.UtcNow - lastMsgRx).TotalMilliseconds;
+                            lastMsgRx = DateTime.UtcNow;
+
                             if (frame[3] == (byte)ICD.RES_A1)
                             {
-                                isConnected = true;
-                                HB_RX_ms = (DateTime.UtcNow - lastMsgRx).TotalMilliseconds;
-                                lastMsgRx = DateTime.UtcNow;
                                 byte[] payload = new byte[PAYLOAD_LEN];
                                 Array.Copy(frame, PAYLOAD_OFFSET, payload, 0, PAYLOAD_LEN);
                                 LatestMSG.Parse(payload);
@@ -273,7 +286,6 @@ namespace CROSSBOW
                     udpClient.Send(frame, frame.Length, ipEndPoint);
                 else
                     udpClient.Send(frame);
-                _lastKeepalive = DateTime.UtcNow;
             }
             catch (Exception ex)
             {
@@ -306,8 +318,7 @@ namespace CROSSBOW
             {
                 while (await timer.WaitForNextTickAsync(ct))
                 {
-                    if ((DateTime.UtcNow - _lastKeepalive).TotalMilliseconds >= KEEPALIVE_INTERVAL_MS)
-                        SendKeepalive();
+                    SendKeepalive();
 
                     // ── Connection state tracking ─────────────────────────────
                     bool stale = isConnected &&
@@ -325,11 +336,6 @@ namespace CROSSBOW
                             Log?.Information("MCC: connection restored — was down {DownTime:0.0}s",
                                 downTime);
                             Debug.WriteLine($"MCC: connection restored — was down {downTime:0.0}s");
-                        }
-                        else
-                        {
-                            Log?.Information("MCC: connection established");
-                            Debug.WriteLine("MCC: connection established");
                         }
                     }
 
@@ -352,6 +358,7 @@ namespace CROSSBOW
         private void SendKeepalive()
         {
             Send(BuildFrame((byte)ICD.FRAME_KEEPALIVE));
+            _lastKeepalive = DateTime.UtcNow;
             Log?.Information("MCC: keepalive (0xA4) sent");
         }
 
