@@ -8,21 +8,20 @@
 //   NovAtel GNSS grandmaster at 192.168.1.30
 //   Multicast 224.0.1.129, domain 0, ports 319 (event) / 320 (general)
 //   2-step clock — SYNC + FOLLOW_UP, then DELAY_REQ → DELAY_RESP
-//   PTPTIMESCALE UTC_TIME assumed (PTP_GPS_UTC_OFFSET_SEC = 0)
-//   DELAY_REQ sent unicast to grandmaster (matches firmware behaviour)
+//   DELAY_REQ sent multicast to 224.0.1.129:319
+//   DELAY_RESP received on event socket (unicast or multicast)
 //
 // Exchange sequence:
 //   [optional] ANNOUNCE → grandmaster identity + clock quality
 //   SYNC         (port 319 multicast) → record t2 (local arrival)
 //   FOLLOW_UP    (port 320 multicast) → extract t1 (grandmaster origin)
-//   DELAY_REQ TX (port 319 unicast)   → record t3 (local departure)
-//   DELAY_RESP   (port 320 multicast) → extract t4 (grandmaster arrival)
+//   DELAY_REQ TX (port 319 multicast) → record t3 (local departure)
+//   DELAY_RESP   (port 319 unicast)   → extract t4 (grandmaster arrival)
 //
 //   offset    = ((t2-t1) + (t3-t4)) / 2
 //   roundtrip = (t4-t1) - (t3-t2)
 //
-// ⚠️  Windows firewall note: ports 319 and 320 may need inbound UDP rules.
-//     Run as administrator or add rules for the ENG GUI executable.
+// Windows firewall: ports 319 and 320 need inbound UDP rules.
 
 using System;
 using System.Net;
@@ -36,22 +35,22 @@ namespace CROSSBOW
     public class PtpDiagnostic
     {
         // ── Result metadata ───────────────────────────────────────────────────
-        public string ServerIP  { get; private set; }
-        public bool   Success   { get; private set; }
-        public string Error     { get; private set; }
+        public string ServerIP { get; private set; }
+        public bool   Success  { get; private set; }
+        public string Error    { get; private set; }
 
         // ── ANNOUNCE fields (grandmaster identity) ────────────────────────────
-        public bool   AnnounceReceived            { get; private set; }
-        public byte[] GrandmasterIdentity         { get; private set; } = new byte[8];
-        public byte   GrandmasterPriority1        { get; private set; }
-        public byte   GrandmasterPriority2        { get; private set; }
-        public byte   ClockClass                  { get; private set; }
-        public byte   ClockAccuracy               { get; private set; }
-        public ushort OffsetScaledLogVariance      { get; private set; }
-        public short  CurrentUtcOffset            { get; private set; }   // seconds
-        public byte   TimeSource                  { get; private set; }
-        public ushort StepsRemoved                { get; private set; }
-        public int    Domain                      { get; private set; }
+        public bool   AnnounceReceived           { get; private set; }
+        public byte[] GrandmasterIdentity        { get; private set; } = new byte[8];
+        public byte   GrandmasterPriority1       { get; private set; }
+        public byte   GrandmasterPriority2       { get; private set; }
+        public byte   ClockClass                 { get; private set; }
+        public byte   ClockAccuracy              { get; private set; }
+        public ushort OffsetScaledLogVariance     { get; private set; }
+        public short  CurrentUtcOffset           { get; private set; }
+        public byte   TimeSource                 { get; private set; }
+        public ushort StepsRemoved               { get; private set; }
+        public int    Domain                     { get; private set; }
 
         // ── Four-timestamp exchange ───────────────────────────────────────────
         public DateTime T1 { get; private set; }   // SYNC origin at master  (FOLLOW_UP body)
@@ -63,34 +62,31 @@ namespace CROSSBOW
         public double OffsetMs    { get; private set; }
 
         // ── PTP constants ─────────────────────────────────────────────────────
-        private const int   EVENT_PORT   = 319;
-        private const int   GENERAL_PORT = 320;
-        private const byte  MSG_SYNC        = 0x0;
-        private const byte  MSG_DELAY_REQ   = 0x1;
-        private const byte  MSG_FOLLOW_UP   = 0x8;
-        private const byte  MSG_DELAY_RESP  = 0x9;
-        private const byte  MSG_ANNOUNCE    = 0xB;
-        private const ushort FLAG_TWO_STEP  = 0x0200;
+        private const int  EVENT_PORT   = 319;
+        private const int  GENERAL_PORT = 320;
+        private const byte MSG_SYNC       = 0x0;
+        private const byte MSG_DELAY_REQ  = 0x1;
+        private const byte MSG_FOLLOW_UP  = 0x8;
+        private const byte MSG_DELAY_RESP = 0x9;
+        private const byte MSG_ANNOUNCE   = 0xB;
 
         private static readonly IPAddress MULTICAST_IP = IPAddress.Parse("224.0.1.129");
         private static readonly DateTime  PTP_EPOCH    = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
         // Diagnostic tool clock identity — arbitrary EUI-64, distinct from firmware
-        private static readonly byte[] CLIENT_CLOCK_ID = { 0xDE, 0xAD, 0x00, 0xFF, 0xFE, 0x00, 0xEE, 0x01 };
-        private const ushort CLIENT_PORT_NUM = 1;
-        private static int _seqCounter = 0;
+        private static readonly byte[] CLIENT_CLOCK_ID  = { 0xDE, 0xAD, 0x00, 0xFF, 0xFE, 0x00, 0xEE, 0x01 };
+        private const ushort           CLIENT_PORT_NUM  = 1;
+        private static int             _seqCounter      = 0;
 
-        // ── State machine fields (used during QueryAsync) ─────────────────────
+        // ── State machine fields ──────────────────────────────────────────────
         private ushort _syncSeq     = 0;
         private ushort _delayReqSeq = 0;
 
-        // ── Exchange progress tracking (visible on timeout) ───────────────────────
-        public string LastState { get; private set; } = "NOT_STARTED";
         // ── Static factory ────────────────────────────────────────────────────
         public static async Task<PtpDiagnostic> QueryAsync(
             string serverIP,
-            int timeoutMs       = 6000,
-            int announceWaitMs  = 2000)
+            int timeoutMs      = 6000,
+            int announceWaitMs = 2000)
         {
             var diag = new PtpDiagnostic { ServerIP = serverIP };
             try
@@ -101,8 +97,9 @@ namespace CROSSBOW
             catch (OperationCanceledException)
             {
                 if (string.IsNullOrEmpty(diag.Error))
-                    diag.Error = $"Timeout ({timeoutMs} ms) — stopped at: {diag.LastState}. " +
-                                 $"AnnounceReceived={diag.AnnounceReceived}";
+                    diag.Error = $"Timeout ({timeoutMs} ms) — no PTP response. " +
+                                 "Check: master running? firewall ports 319/320 open? " +
+                                 "multicast route to 224.0.1.129 present?";
             }
             catch (Exception ex)
             {
@@ -111,10 +108,12 @@ namespace CROSSBOW
             return diag;
         }
 
-        // ── Passive sniffer — confirms socket receives multicast before attempting exchange
+        // ── Passive sniffer ───────────────────────────────────────────────────
+        // Confirms socket receives multicast before attempting a full exchange.
+        // Useful for field diagnostics and NIC binding verification.
         public static async Task<string> PassiveSniffAsync(int durationMs = 5000)
         {
-            var sb = new System.Text.StringBuilder();
+            var sb      = new System.Text.StringBuilder();
             var localIP = IPAddress.Parse(CrossbowNic.GetInternalIP());
             sb.AppendLine($"Passive PTP sniff for {durationMs}ms...");
             sb.AppendLine($"Local NIC: {localIP}");
@@ -148,29 +147,26 @@ namespace CROSSBOW
                         var t319 = udp319.ReceiveAsync(cts.Token).AsTask();
                         var t320 = udp320.ReceiveAsync(cts.Token).AsTask();
                         var done = await Task.WhenAny(t319, t320);
-                        var result = await done;
-                        int port = done == t319 ? 319 : 320;
-                        byte[] buf = result.Buffer;
+                        var res  = await done;
+                        int  port    = done == t319 ? 319 : 320;
+                        byte[] buf   = res.Buffer;
                         byte msgType = (byte)(buf[0] & 0x0F);
-                        string name = msgType switch
+                        string name  = msgType switch
                         {
                             0x0 => "SYNC",
                             0x1 => "DELAY_REQ",
                             0x8 => "FOLLOW_UP",
                             0x9 => "DELAY_RESP",
                             0xB => "ANNOUNCE",
-                            _ => $"0x{msgType:X}"
+                            _   => $"0x{msgType:X}"
                         };
                         sb.AppendLine($"  [{count++}] port {port}: {name} " +
                                       $"({buf.Length}B) domain={buf[4]} " +
-                                      $"from {result.RemoteEndPoint}");
+                                      $"from {res.RemoteEndPoint}");
                     }
                 }
                 catch (OperationCanceledException) { }
-                catch (Exception ex)
-                {
-                    sb.AppendLine($"Receive error: {ex.Message}");
-                }
+                catch (Exception ex) { sb.AppendLine($"Receive error: {ex.Message}"); }
 
                 sb.AppendLine(count == 0
                     ? "NO packets received — socket not seeing multicast."
@@ -182,15 +178,15 @@ namespace CROSSBOW
         // ── Exchange state machine ────────────────────────────────────────────
         private async Task RunExchange(string serverIP, int timeoutMs, int announceWaitMs)
         {
-            using var udpEvent = CreateMulticastSocket(EVENT_PORT);
+            using var udpEvent   = CreateMulticastSocket(EVENT_PORT);
             using var udpGeneral = CreateMulticastSocket(GENERAL_PORT);
             using var udpUnicast = CreateUnicastSocket(GENERAL_PORT);   // catch unicast DELAY_RESP
-            using var cts = new CancellationTokenSource(timeoutMs);
+            using var cts        = new CancellationTokenSource(timeoutMs);
 
-            var masterEP = new IPEndPoint(MULTICAST_IP, EVENT_PORT);
+            var masterEP = new IPEndPoint(MULTICAST_IP, EVENT_PORT);   // DELAY_REQ → multicast
 
-            // Feed both sockets into a single channel — avoids Task.WhenAny packet loss
-            var channel = System.Threading.Channels.Channel.CreateUnbounded<(int port, byte[] data)>();
+            // Feed all three sockets into a single channel — avoids Task.WhenAny packet loss
+            var channel = Channel.CreateUnbounded<(int port, byte[] data)>();
 
             async Task ReadSocket(UdpClient udp, int port)
             {
@@ -206,13 +202,13 @@ namespace CROSSBOW
                 finally { channel.Writer.TryComplete(); }
             }
 
-            _ = ReadSocket(udpEvent, EVENT_PORT);
+            _ = ReadSocket(udpEvent,   EVENT_PORT);
             _ = ReadSocket(udpGeneral, GENERAL_PORT);
             _ = ReadSocket(udpUnicast, GENERAL_PORT);
 
-            bool syncReceived = false;
-            bool followUpReceived = false;
-            bool delayReqSent = false;
+            bool syncReceived      = false;
+            bool followUpReceived  = false;
+            bool delayReqSent      = false;
             bool delayRespReceived = false;
 
             await foreach (var (port, p) in channel.Reader.ReadAllAsync(cts.Token))
@@ -224,58 +220,52 @@ namespace CROSSBOW
                 switch (msgType)
                 {
                     case MSG_ANNOUNCE when !AnnounceReceived && p.Length >= 64 && p[4] == 0:
-                        Domain = p[4];
-                        CurrentUtcOffset = (short)((p[44] << 8) | p[45]);
-                        GrandmasterPriority1 = p[47];
-                        ClockClass = p[48];
-                        ClockAccuracy = p[49];
+                        Domain                  = p[4];
+                        CurrentUtcOffset        = (short)((p[44] << 8) | p[45]);
+                        GrandmasterPriority1    = p[47];
+                        ClockClass              = p[48];
+                        ClockAccuracy           = p[49];
                         OffsetScaledLogVariance = (ushort)((p[50] << 8) | p[51]);
-                        GrandmasterPriority2 = p[52];
+                        GrandmasterPriority2    = p[52];
                         Array.Copy(p, 53, GrandmasterIdentity, 0, 8);
-                        StepsRemoved = (ushort)((p[61] << 8) | p[62]);
-                        TimeSource = p[63];
-                        AnnounceReceived = true;
-                        LastState = "ANNOUNCE_OK";
+                        StepsRemoved            = (ushort)((p[61] << 8) | p[62]);
+                        TimeSource              = p[63];
+                        AnnounceReceived        = true;
                         break;
 
                     case MSG_SYNC when p[4] == 0:
-                        T2 = DateTime.UtcNow;
-                        _syncSeq = (ushort)((p[30] << 8) | p[31]);
-                        syncReceived = true;
-                        followUpReceived = false;   // reset — previous cycle's FOLLOW_UP may have been missed
-                        delayReqSent = false;
+                        T2                = DateTime.UtcNow;
+                        _syncSeq          = (ushort)((p[30] << 8) | p[31]);
+                        syncReceived      = true;
+                        followUpReceived  = false;   // restart on each SYNC cycle
+                        delayReqSent      = false;
                         delayRespReceived = false;
-                        LastState = $"SYNC_OK seq={_syncSeq}";
                         break;
 
                     case MSG_FOLLOW_UP when syncReceived && !followUpReceived && p[4] == 0:
                         ushort fuSeq = (ushort)((p[30] << 8) | p[31]);
                         if (fuSeq != _syncSeq) break;
-                        T1 = ExtractTimestamp(p, 34);
+                        T1               = ExtractTimestamp(p, 34);
                         followUpReceived = true;
-                        LastState = "FOLLOWUP_OK";
 
-                        // Send DELAY_REQ immediately after FOLLOW_UP
+                        // Send DELAY_REQ immediately after matching FOLLOW_UP
                         _delayReqSeq = (ushort)Interlocked.Increment(ref _seqCounter);
-                        byte[] dreq = BuildDelayReq(_delayReqSeq);
-                        T3 = DateTime.UtcNow;
-                        int bytesSent = await udpEvent.SendAsync(dreq, dreq.Length, masterEP);
+                        byte[] dreq  = BuildDelayReq(_delayReqSeq);
+                        T3           = DateTime.UtcNow;
+                        await udpEvent.SendAsync(dreq, dreq.Length, masterEP);
                         delayReqSent = true;
-                        LastState = $"DELAYREQ_SENT bytes={bytesSent} to={masterEP}";
                         break;
 
-                    case MSG_DELAY_RESP:
-                        LastState = $"DELAYRESP_RAW domain={p[4]} len={p.Length} delayReqSent={delayReqSent}";
-                        if (!delayReqSent || delayRespReceived || p[4] != 0 || p.Length < 54) break;
+                    case MSG_DELAY_RESP when delayReqSent && !delayRespReceived
+                                         && p[4] == 0 && p.Length >= 54:
                         ushort drSeq = (ushort)((p[30] << 8) | p[31]);
-                        if (drSeq != _delayReqSeq) { LastState = $"DELAYRESP_SEQ_MISMATCH got={drSeq} want={_delayReqSeq}"; break; }
+                        if (drSeq != _delayReqSeq) break;
                         bool match = true;
                         for (int i = 0; i < 8; i++)
                             if (p[44 + i] != CLIENT_CLOCK_ID[i]) { match = false; break; }
                         if (!match) break;
                         T4 = ExtractTimestamp(p, 34);
                         delayRespReceived = true;
-                        LastState = "DELAYRESP_OK";
                         break;
                 }
 
@@ -286,112 +276,9 @@ namespace CROSSBOW
                     double t3ms = T3.Subtract(PTP_EPOCH).TotalMilliseconds;
                     double t4ms = T4.Subtract(PTP_EPOCH).TotalMilliseconds;
                     RoundTripMs = (t4ms - t1ms) - (t3ms - t2ms);
-                    OffsetMs = ((t2ms - t1ms) + (t3ms - t4ms)) / 2.0;
+                    OffsetMs    = ((t2ms - t1ms) + (t3ms - t4ms)) / 2.0;
                     return;
                 }
-            }
-        }
-
-        // ── Phase 1: ANNOUNCE ─────────────────────────────────────────────────
-        private async Task WaitForAnnounce(UdpClient udp, CancellationToken ct)
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                var res = await udp.ReceiveAsync(ct);
-                byte[] p = res.Buffer;
-                if (p.Length < 64) continue;
-                if ((p[0] & 0x0F) != MSG_ANNOUNCE) continue;
-                if (p[4] != 0) continue;   // domain 0 only
-
-                // ANNOUNCE body starts at byte 34 (after 34-byte header)
-                // [34-43] originTimestamp — skip
-                // [44-45] currentUtcOffset
-                // [46]    reserved
-                // [47]    grandmasterPriority1
-                // [48]    grandmasterClockClass
-                // [49]    grandmasterClockAccuracy
-                // [50-51] grandmasterOffsetScaledLogVariance
-                // [52]    grandmasterPriority2
-                // [53-60] grandmasterIdentity
-                // [61-62] stepsRemoved
-                // [63]    timeSource
-
-                Domain                   = p[4];
-                CurrentUtcOffset         = (short)((p[44] << 8) | p[45]);
-                GrandmasterPriority1     = p[47];
-                ClockClass               = p[48];
-                ClockAccuracy            = p[49];
-                OffsetScaledLogVariance  = (ushort)((p[50] << 8) | p[51]);
-                GrandmasterPriority2     = p[52];
-                Array.Copy(p, 53, GrandmasterIdentity, 0, 8);
-                StepsRemoved             = (ushort)((p[61] << 8) | p[62]);
-                TimeSource               = p[63];
-                AnnounceReceived         = true;
-                return;
-            }
-        }
-
-        // ── Phase 2: SYNC ─────────────────────────────────────────────────────
-        private async Task WaitForSync(UdpClient udp, CancellationToken ct)
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                var res = await udp.ReceiveAsync(ct);
-                byte[] p = res.Buffer;
-                if (p.Length < 44) continue;
-                if ((p[0] & 0x0F) != MSG_SYNC) continue;
-                if (p[4] != 0) continue;  // domain 0
-
-                T2       = DateTime.UtcNow;   // t2 — as close to arrival as possible
-                _syncSeq = (ushort)((p[30] << 8) | p[31]);
-                return;
-            }
-        }
-
-        // ── Phase 3: FOLLOW_UP ────────────────────────────────────────────────
-        private async Task WaitForFollowUp(UdpClient udp, CancellationToken ct)
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                var res = await udp.ReceiveAsync(ct);
-                byte[] p = res.Buffer;
-                if (p.Length < 44) continue;
-                if ((p[0] & 0x0F) != MSG_FOLLOW_UP) continue;
-                if (p[4] != 0) continue;  // domain 0
-
-                ushort seq = (ushort)((p[30] << 8) | p[31]);
-                if (seq != _syncSeq) continue;   // must match our SYNC
-
-                // preciseOriginTimestamp at [34] — 6B seconds + 4B nanoseconds
-                T1 = ExtractTimestamp(p, 34);
-                return;
-            }
-        }
-
-        // ── Phase 5: DELAY_RESP ───────────────────────────────────────────────
-        private async Task WaitForDelayResp(UdpClient udp, CancellationToken ct)
-        {
-            while (!ct.IsCancellationRequested)
-            {
-                var res = await udp.ReceiveAsync(ct);
-                byte[] p = res.Buffer;
-                if (p.Length < 54) continue;
-                if ((p[0] & 0x0F) != MSG_DELAY_RESP) continue;
-                if (p[4] != 0) continue;  // domain 0
-
-                ushort seq = (ushort)((p[30] << 8) | p[31]);
-                if (seq != _delayReqSeq) continue;
-
-                // requestingPortIdentity at [44] — 8B clockId + 2B portNum
-                // Verify it's addressed to us
-                bool match = true;
-                for (int i = 0; i < 8; i++)
-                    if (p[44 + i] != CLIENT_CLOCK_ID[i]) { match = false; break; }
-                if (!match) continue;
-
-                // receiveTimestamp at [34] — 6B seconds + 4B nanoseconds = t4
-                T4 = ExtractTimestamp(p, 34);
-                return;
             }
         }
 
@@ -400,15 +287,10 @@ namespace CROSSBOW
         {
             // 34-byte header + 10-byte originTimestamp (zeroed) = 44 bytes
             byte[] p = new byte[44];
-
             p[0]  = MSG_DELAY_REQ;    // transportSpecific=0, messageType=0x1
             p[1]  = 0x02;             // versionPTP = 2
             p[2]  = 0x00; p[3] = 44; // messageLength
             p[4]  = 0x00;             // domainNumber = 0
-            // p[5]  = 0x00 reserved
-            // p[6-7] = 0x0000 flags (no two-step)
-            // p[8-15] = 0 correctionField
-            // p[16-19] = 0 reserved
             Array.Copy(CLIENT_CLOCK_ID, 0, p, 20, 8);  // sourcePortIdentity.clockIdentity
             p[28] = (byte)(CLIENT_PORT_NUM >> 8);
             p[29] = (byte)(CLIENT_PORT_NUM & 0xFF);     // sourcePortIdentity.portNumber
@@ -416,25 +298,15 @@ namespace CROSSBOW
             p[31] = (byte)(seq & 0xFF);                 // sequenceId
             p[32] = 0x01;                               // controlField = 1 (DELAY_REQ)
             p[33] = 0x7F;                               // logMessageInterval = 0x7F (unspecified)
-            // p[34-43] = 0 originTimestamp (zeroed — t3 recorded locally)
-
+            // p[34-43] originTimestamp zeroed — t3 recorded locally
             return p;
         }
 
-        // ── Socket factory ────────────────────────────────────────────────────
+        // ── Socket factories ──────────────────────────────────────────────────
         private static UdpClient CreateMulticastSocket(int port)
         {
-            //var udp = new UdpClient();
-            //udp.Client.SetSocketOption(SocketOptionLevel.Socket,
-            //                           SocketOptionName.ReuseAddress, true);
-            //udp.Client.Bind(new IPEndPoint(IPAddress.Any, port));
-            //udp.JoinMulticastGroup(MULTICAST_IP);
-            //udp.MulticastLoopback = false;
-            //return udp;
-
-
             var localIP = IPAddress.Parse(CrossbowNic.GetInternalIP());
-            var udp = new UdpClient();
+            var udp     = new UdpClient(AddressFamily.InterNetwork);
             udp.Client.SetSocketOption(SocketOptionLevel.Socket,
                                        SocketOptionName.ReuseAddress, true);
             udp.Client.Bind(new IPEndPoint(IPAddress.Any, port));
@@ -442,10 +314,11 @@ namespace CROSSBOW
             udp.MulticastLoopback = false;
             return udp;
         }
+
         private static UdpClient CreateUnicastSocket(int port)
         {
             var localIP = IPAddress.Parse(CrossbowNic.GetInternalIP());
-            var udp = new UdpClient(AddressFamily.InterNetwork);
+            var udp     = new UdpClient(AddressFamily.InterNetwork);
             udp.Client.SetSocketOption(SocketOptionLevel.Socket,
                                        SocketOptionName.ReuseAddress, true);
             udp.Client.Bind(new IPEndPoint(localIP, port));
@@ -455,7 +328,6 @@ namespace CROSSBOW
 
         // ── PTP timestamp decoder ─────────────────────────────────────────────
         // 10-byte PTP timestamp: 6 bytes seconds (BE) + 4 bytes nanoseconds (BE)
-        // Matches firmware extractTimestamp() in ptpClient.hpp
         private static DateTime ExtractTimestamp(byte[] p, int offset)
         {
             ulong secs = 0;

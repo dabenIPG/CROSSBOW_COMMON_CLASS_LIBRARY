@@ -131,10 +131,10 @@ namespace CROSSBOW
                     _remoteEP = new IPEndPoint(IPAddress.Parse(IP), ActivePort);
                     udpClient.Connect(_remoteEP);
 
-                    // Registration burst — advance past any stale replay window
-                    for (int i = 0; i < 3; i++)
-                        Send(BuildFrame((byte)ICD.FRAME_KEEPALIVE, new[] { (byte)1 }));
-                    Debug.WriteLine("BDC: A2 registration burst sent (0xA4 ×3)");
+                    // Single registration frame — firmware replay fix handles reconnects cleanly
+                    Send(BuildFrame((byte)ICD.FRAME_KEEPALIVE));
+                    _lastKeepalive = DateTime.UtcNow;
+                    Debug.WriteLine("BDC: A2 registration sent (0xA4)");
                 }
             }
             catch (Exception ex)
@@ -146,8 +146,9 @@ namespace CROSSBOW
 
             if (Transport == TransportPath.A3_External)
             {
-                await Task.Delay(50, ct).ConfigureAwait(false);
-                UnsolicitedMode = true;
+                Send(BuildFrame((byte)ICD.FRAME_KEEPALIVE));
+                _lastKeepalive = DateTime.UtcNow;
+                Debug.WriteLine("BDC: A3 registration sent (0xA4)");
             }
 
             Log?.Information("BDC UDP connected ({LocalIp}:{Port} → {RemoteIp})",
@@ -164,11 +165,18 @@ namespace CROSSBOW
                         // A3: pass full frame — MSG_BDC.ParseA3 validates internally
                         if (!res.RemoteEndPoint.Address.Equals(IPAddress.Parse(IP))) continue;
                         byte[] rxBuff = res.Buffer;
-                        if (rxBuff.Length > 0)
+                        if (rxBuff.Length == FRAME_RESPONSE_LEN)
                         {
                             isConnected = true;
-                            var now   = DateTime.UtcNow;
-                            HB_RX_ms  = (now - lastMsgRx).TotalMilliseconds;
+                            if (!_wasConnected)
+                            {
+                                _wasConnected = true;
+                                _connectedSince = DateTime.UtcNow;
+                                Log?.Information("BDC: connection established");
+                                Debug.WriteLine("BDC: connection established");
+                            }
+                            var now = DateTime.UtcNow;
+                            HB_RX_ms = (now - lastMsgRx).TotalMilliseconds;
                             lastMsgRx = now;
                             LatestMSG.Parse(rxBuff);
                         }
@@ -184,10 +192,18 @@ namespace CROSSBOW
                                == (ushort)((frame[519] << 8) | frame[520]))
                         {
                             isConnected = true;
+                            if (!_wasConnected)
+                            {
+                                _wasConnected = true;
+                                _connectedSince = DateTime.UtcNow;
+                                Log?.Information("BDC: connection established");
+                                Debug.WriteLine("BDC: connection established");
+                            }
+                            HB_RX_ms = (DateTime.UtcNow - lastMsgRx).TotalMilliseconds;
+                            lastMsgRx = DateTime.UtcNow;
+
                             if (frame[3] == (byte)ICD.RES_A1)
                             {
-                                HB_RX_ms = (DateTime.UtcNow - lastMsgRx).TotalMilliseconds;
-                                lastMsgRx = DateTime.UtcNow;
                                 byte[] payload = new byte[PAYLOAD_LEN];
                                 Array.Copy(frame, PAYLOAD_OFFSET, payload, 0, PAYLOAD_LEN);
                                 LatestMSG.Parse(payload);
@@ -256,7 +272,6 @@ namespace CROSSBOW
                     udpClient.Send(frame, frame.Length, ipEndPoint);
                 else
                     udpClient.Send(frame);
-                _lastKeepalive = DateTime.UtcNow;
             }
             catch (Exception ex)
             {
@@ -287,8 +302,7 @@ namespace CROSSBOW
             {
                 while (await timer.WaitForNextTickAsync(ct))
                 {
-                    if ((DateTime.UtcNow - _lastKeepalive).TotalMilliseconds >= KEEPALIVE_INTERVAL_MS)
-                        SendKeepalive();
+                    SendKeepalive();
 
                     // ── Connection state tracking ─────────────────────────────
                     bool stale = isConnected &&
@@ -306,11 +320,6 @@ namespace CROSSBOW
                             Log?.Information("BDC: connection restored — was down {DownTime:0.0}s",
                                 downTime);
                             Debug.WriteLine($"BDC: connection restored — was down {downTime:0.0}s");
-                        }
-                        else
-                        {
-                            Log?.Information("BDC: connection established");
-                            Debug.WriteLine("BDC: connection established");
                         }
                     }
 
@@ -332,6 +341,7 @@ namespace CROSSBOW
         private void SendKeepalive()
         {
             Send(BuildFrame((byte)ICD.FRAME_KEEPALIVE));
+            _lastKeepalive = DateTime.UtcNow;
             Log?.Information("BDC: keepalive (0xA4) sent");
         }
 
