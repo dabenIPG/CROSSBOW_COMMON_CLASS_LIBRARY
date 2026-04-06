@@ -126,6 +126,7 @@ namespace CROSSBOW
                 $"  Transmit Time:    {TransmitTime:HH:mm:ss.fff} UTC\r\n" +
                 $"  Round Trip:       {RoundTripMs:F3} ms\r\n" +
                 $"  Clock Offset:     {OffsetMs:F3} ms\r\n" +
+                $"  Precision:        {Precision * 1e6:F3} µs\r\n" +
                 $"=====================================\r\n";
         }
 
