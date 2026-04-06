@@ -59,7 +59,13 @@ namespace CROSSBOW
         private bool                     _isStarted     = false;
         private byte                     _seq           = 0;
         private DateTime                 _lastKeepalive = DateTime.MinValue;
+        private bool _wasConnected = false;
+        private DateTime _connectedSince = DateTime.MinValue;
+        private DateTime _dropTime = DateTime.MinValue; 
+        private int _dropCount = 0;
 
+        public DateTime ConnectedSince { get { return _connectedSince; } }
+        public int DropCount { get { return _dropCount; } }
         public DateTime lastMsgRx  { get; private set; } = DateTime.UtcNow;
         public double HB_RX_ms { get; private set; } = 0;
         public bool     isConnected { get; private set; } = false;
@@ -178,11 +184,18 @@ namespace CROSSBOW
                                == (ushort)((frame[519] << 8) | frame[520]))
                         {
                             isConnected = true;
-                            HB_RX_ms  = (DateTime.UtcNow - lastMsgRx).TotalMilliseconds;
-                            lastMsgRx = DateTime.UtcNow;
-                            byte[] payload = new byte[PAYLOAD_LEN];
-                            Array.Copy(frame, PAYLOAD_OFFSET, payload, 0, PAYLOAD_LEN);
-                            LatestMSG.Parse(payload);
+                            if (frame[3] == (byte)ICD.RES_A1)
+                            {
+                                HB_RX_ms = (DateTime.UtcNow - lastMsgRx).TotalMilliseconds;
+                                lastMsgRx = DateTime.UtcNow;
+                                byte[] payload = new byte[PAYLOAD_LEN];
+                                Array.Copy(frame, PAYLOAD_OFFSET, payload, 0, PAYLOAD_LEN);
+                                LatestMSG.Parse(payload);
+                            }
+                            else
+                            {
+                                Debug.WriteLine($"BDC: A2 ACK rx CMD=0x{frame[3]:X2}");
+                            }
                         }
                         else
                         {
@@ -265,6 +278,8 @@ namespace CROSSBOW
         }
 
         // ── Keepalive / staleness watchdog ────────────────────────────────────
+        private const double STALE_WARN_MS = 2000.0;   // warn after 2 s of no telemetry
+
         private async Task KeepaliveLoop()
         {
             using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(KEEPALIVE_INTERVAL_MS));
@@ -275,10 +290,40 @@ namespace CROSSBOW
                     if ((DateTime.UtcNow - _lastKeepalive).TotalMilliseconds >= KEEPALIVE_INTERVAL_MS)
                         SendKeepalive();
 
-                    if (isConnected &&
-                        (DateTime.UtcNow - lastMsgRx).TotalMilliseconds > KEEPALIVE_INTERVAL_MS * 2)
-                        Log?.Warning("BDC: no telemetry for >{Seconds}s — firmware stream may have dropped",
-                            KEEPALIVE_INTERVAL_MS * 2 / 1000);
+                    // ── Connection state tracking ─────────────────────────────
+                    bool stale = isConnected &&
+                        (DateTime.UtcNow - lastMsgRx).TotalMilliseconds > STALE_WARN_MS;
+
+                    if (isConnected && !_wasConnected)
+                    {
+                        var downTime = (_dropCount > 0 && _dropTime != DateTime.MinValue)
+                            ? (DateTime.UtcNow - _dropTime).TotalSeconds
+                            : 0.0;
+                        _connectedSince = DateTime.UtcNow;
+                        _wasConnected = true;
+                        if (_dropCount > 0)
+                        {
+                            Log?.Information("BDC: connection restored — was down {DownTime:0.0}s",
+                                downTime);
+                            Debug.WriteLine($"BDC: connection restored — was down {downTime:0.0}s");
+                        }
+                        else
+                        {
+                            Log?.Information("BDC: connection established");
+                            Debug.WriteLine("BDC: connection established");
+                        }
+                    }
+
+                    if (stale && _wasConnected)
+                    {
+                        _dropTime = DateTime.UtcNow;
+                        _dropCount++;
+                        _wasConnected = false;
+                        Log?.Warning("BDC: connection lost — drop #{Count} after {Uptime:0.0}s uptime",
+                            _dropCount,
+                            (DateTime.UtcNow - _connectedSince).TotalSeconds);
+                        Debug.WriteLine($"BDC: connection lost — drop #{_dropCount} after {(DateTime.UtcNow - _connectedSince).TotalSeconds:0.0}s uptime");
+                    }
                 }
             }
             catch (OperationCanceledException) { /* normal shutdown */ }
@@ -695,12 +740,21 @@ namespace CROSSBOW
             Send((byte)ICD.SET_BDC_RELAY_ENABLE, new byte[] { (byte)w, Convert.ToByte(en) });
         }
 
+        // 0xBE SET_BDC_DEVICES_ENABLE
+        public void EnableDevice(BDC_DEVICES dev, bool en)
+        {
+            if (!AssertIntEng("EnableDevice")) return;
+            Send((byte)ICD.SET_BDC_DEVICES_ENABLE, new byte[] { (byte)dev, (byte)(en ? 1 : 0) });
+        }
+
         // SET_BDC_VOTE_OVERRIDE
         public void SetOverrideVote(BDC_VOTE_OVERRIDES vote, bool val)
         {
             if (!AssertIntEng("SetOverrideVote")) return;
             Send((byte)ICD.SET_BDC_VOTE_OVERRIDE, new byte[] { (byte)vote, Convert.ToByte(val) });
         }
+
+
 
         // SET_GIM_HOME
         public void GimbalSetHome(Int32 x, Int32 y)

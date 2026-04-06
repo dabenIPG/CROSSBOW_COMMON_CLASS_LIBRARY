@@ -31,6 +31,11 @@ namespace CROSSBOW
 {
     public class MSG_GIMBAL
     {
+        // Place Holders
+        // Place Holders
+        public string FW_VERSION_STRING { get; private set; } = "NA";
+        public float TEMP { get; private set; } = 0;
+
         // -------------------------------------------------------------------
         // Encoder constants — firmware-defined, not in ICD
         // -------------------------------------------------------------------

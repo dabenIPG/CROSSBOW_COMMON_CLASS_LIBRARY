@@ -62,8 +62,14 @@ namespace CROSSBOW
         private CancellationToken        ct;
         private bool                     _isStarted     = false;
         private byte                     _seq           = 0;
-        private DateTime                 _lastKeepalive = DateTime.MinValue;
+        private DateTime _lastKeepalive = DateTime.MinValue;
+        private bool _wasConnected = false;
+        private DateTime _connectedSince = DateTime.MinValue;
+        private DateTime _dropTime = DateTime.MinValue;
+        private int _dropCount = 0;
 
+        public DateTime ConnectedSince { get { return _connectedSince; } }
+        public int DropCount { get { return _dropCount; } }
         public DateTime lastMsgRx  { get; private set; } = DateTime.UtcNow;
         //public double   HB_RX_us   { get; private set; } = 0;
         public double HB_RX_ms { get; private set; } = 0;
@@ -168,12 +174,20 @@ namespace CROSSBOW
                         byte[] rxBuff = res.Buffer;
                         if (rxBuff.Length > 0)
                         {
-                            isConnected = true;
-                            var now   = DateTime.UtcNow;
-                            //HB_RX_us  = (now - lastMsgRx).TotalMicroseconds;
-                            HB_RX_ms = (now - lastMsgRx).TotalMilliseconds;
-                            lastMsgRx = now;
-                            LatestMSG.Parse(rxBuff);
+                            // Only mark connected and update liveness on actual REG1 frames.
+                            // A3 ParseA3 validates CMD_BYTE internally so we check here too.
+                            if (rxBuff.Length == FRAME_RESPONSE_LEN && rxBuff[3] == (byte)ICD.RES_A1)
+                            {
+                                isConnected = true;
+                                var now = DateTime.UtcNow;
+                                HB_RX_ms = (now - lastMsgRx).TotalMilliseconds;
+                                lastMsgRx = now;
+                                LatestMSG.Parse(rxBuff);
+                            }
+                            else
+                            {
+                                Debug.WriteLine($"MCC: A3 ACK rx CMD=0x{rxBuff[3]:X2}");
+                            }
                         }
                     }
                     else
@@ -186,13 +200,19 @@ namespace CROSSBOW
                             && CrcHelper.Crc16(frame, FRAME_RESPONSE_LEN - 2)
                                == (ushort)((frame[519] << 8) | frame[520]))
                         {
-                            isConnected = true;
-                            //HB_RX_us  = (DateTime.UtcNow - lastMsgRx).TotalMicroseconds;
-                            HB_RX_ms = (DateTime.UtcNow - lastMsgRx).TotalMilliseconds;
-                            lastMsgRx = DateTime.UtcNow;
-                            byte[] payload = new byte[PAYLOAD_LEN];
-                            Array.Copy(frame, PAYLOAD_OFFSET, payload, 0, PAYLOAD_LEN);
-                            LatestMSG.Parse(payload);
+                            if (frame[3] == (byte)ICD.RES_A1)
+                            {
+                                isConnected = true;
+                                HB_RX_ms = (DateTime.UtcNow - lastMsgRx).TotalMilliseconds;
+                                lastMsgRx = DateTime.UtcNow;
+                                byte[] payload = new byte[PAYLOAD_LEN];
+                                Array.Copy(frame, PAYLOAD_OFFSET, payload, 0, PAYLOAD_LEN);
+                                LatestMSG.Parse(payload);
+                            }
+                            else
+                            {
+                                Debug.WriteLine($"MCC: A2 ACK rx CMD=0x{frame[3]:X2}");
+                            }
                         }
                         else
                         {
@@ -277,6 +297,8 @@ namespace CROSSBOW
         }
 
         // ── Keepalive / staleness watchdog ────────────────────────────────────
+        private const double STALE_WARN_MS = 2000.0;   // warn after 2 s of no telemetry
+
         private async Task KeepaliveLoop()
         {
             using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(KEEPALIVE_INTERVAL_MS));
@@ -287,10 +309,41 @@ namespace CROSSBOW
                     if ((DateTime.UtcNow - _lastKeepalive).TotalMilliseconds >= KEEPALIVE_INTERVAL_MS)
                         SendKeepalive();
 
-                    if (isConnected &&
-                        (DateTime.UtcNow - lastMsgRx).TotalMilliseconds > KEEPALIVE_INTERVAL_MS * 2)
-                        Log?.Warning("MCC: no telemetry for >{Seconds}s — firmware stream may have dropped",
-                            KEEPALIVE_INTERVAL_MS * 2 / 1000);
+                    // ── Connection state tracking ─────────────────────────────
+                    bool stale = isConnected &&
+                        (DateTime.UtcNow - lastMsgRx).TotalMilliseconds > STALE_WARN_MS;
+
+                    if (isConnected && !_wasConnected)
+                    {
+                        var downTime = (_dropCount > 0 && _dropTime != DateTime.MinValue)
+                            ? (DateTime.UtcNow - _dropTime).TotalSeconds
+                            : 0.0;
+                        _connectedSince = DateTime.UtcNow;
+                        _wasConnected = true;
+                        if (_dropCount > 0)
+                        {
+                            Log?.Information("MCC: connection restored — was down {DownTime:0.0}s",
+                                downTime);
+                            Debug.WriteLine($"MCC: connection restored — was down {downTime:0.0}s");
+                        }
+                        else
+                        {
+                            Log?.Information("MCC: connection established");
+                            Debug.WriteLine("MCC: connection established");
+                        }
+                    }
+
+                    if (stale && _wasConnected && _connectedSince != DateTime.MinValue
+                        && (DateTime.UtcNow - _connectedSince).TotalMilliseconds > KEEPALIVE_INTERVAL_MS)
+                    {
+                        _dropTime = DateTime.UtcNow;
+                        _dropCount++;
+                        _wasConnected = false;
+                        Log?.Warning("MCC: connection lost — drop #{Count} after {Uptime:0.0}s uptime",
+                            _dropCount,
+                            (DateTime.UtcNow - _connectedSince).TotalSeconds);
+                        Debug.WriteLine($"MCC: connection lost — drop #{_dropCount} after {(DateTime.UtcNow - _connectedSince).TotalSeconds:0.0}s uptime");
+                    }
                 }
             }
             catch (OperationCanceledException) { /* normal shutdown */ }
