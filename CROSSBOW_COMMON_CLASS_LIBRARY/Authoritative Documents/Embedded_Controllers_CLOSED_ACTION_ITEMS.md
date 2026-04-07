@@ -1,5 +1,5 @@
 # CROSSBOW — Closed Action Items
-**Last updated:** 2026-04-06 (session 28)
+**Last updated:** 2026-04-06 (session 30)
 **Purpose:** Archive of all resolved action items. Merged from EmbeddedControllerUpdate_CLOSED_ACTION_ITEMS.md and PTP_CLOSED_ACTIONS.md
 **Open items:** see `Embedded_Controllers_ACTION_ITEMS.md`
 
@@ -84,15 +84,6 @@
 
 ---
 
-## Session 28 Closures
-
-| ID | Item | Resolution | Session |
-|----|------|------------|---------|
-| SAMD-NTP | FMC SAMD21 NTP/USB CDC conflict | ✅ Root cause identified — `ntp.PrintTime()` and `ptp.PrintTime()` call `Serial` not `SerialUSB`, causing USB CDC conflict. All `PrintTime()` calls removed from FMC serial command handlers (`TIME` command now prints `[not synced]` / `[see PTPDEBUG]`). `isNTP_Enabled` default changed `false` → `true`. NTP confirmed working on bench with USB CDC active simultaneously. | S28 |
-| NEW-39 | LCH/KIZ `operatorValid` hardcoded true | ✅ Closed S28 — implementation confirmed complete | S28 |
-
----
-
 ## Session 28/29 Closures
 
 | ID | Item | Resolution | Session |
@@ -143,3 +134,25 @@
 | NEW-10 | `MSG_BDC.cs` HW verify | ✅ All fields confirmed correct on live hardware | S36 |
 | NEW-18 | CRC cross-platform wire verification | ✅ CRC-16/CCITT confirmed correct across all five controllers and C# | S36 |
 | NEW-31 | `frmMain.cs` SET_LCH_VOTE arg swap — `operatorValid` duplicated | ✅ Fixed — `operatorValid` hardcoded true pending proper implementation; NEW-39 opened to track full implementation | S36 |
+| NEW-39 | LCH/KIZ `operatorValid` hardcoded true | ✅ Closed S28 — implementation confirmed complete | S28 |
+
+---
+
+## Session 30 Closures — HMI Stats / CommHealth
+
+| ID | Item | Resolution | Session |
+|----|------|------------|---------|
+| HMI-STATS-1 | HMI controller timing stats | ✅ Implemented. `MSG_MCC` and `MSG_BDC` now own all stats: `dtmax`, `HbMax`, `DtAvg`, `HbAvg`, `DUtcMax`, thresholds `DT_WARN_US/DT_BAD_US/HB_WARN_MS/HB_BAD_MS/DUTC_WARN_MS/DUTC_BAD_MS`, `EWMA_ALPHA`. `CommHealth` property returns instantaneous `READY_STATUS` from live `dt_us`/`HB_ms`. IBIT labels expanded: `mb_MCC_Connected_rb` → `dt: 000.00 <00000> [00000] us`, `mb_MCC_UnSol_Enabled_rb` → `HB: 000.00 <00000> [00000] ms` and BDC equivalents. Double-click dt label resets dt stats, double-click HB label resets HB stats (via `MouseDown` e.Clicks==2). | S30 |
+| HMI-STATS-TIME | Time source status strip split into three controls | ✅ `tss_*_TimeSrc` (source label, colored: Green=PTP, Blue=NTP, Orange=fallback, Red=NONE), `tss_*_NTPTime` (date/time), `tss_*_dUTC` (dUTC colored: Green<3ms, Orange 3–10ms, Red>10ms). `DUtcMax` tracked in `MSG_MCC`/`MSG_BDC`. Applied to MCC and BDC strips. | S30 |
+| CB-COMMHEALTH | `CB.MCC_STATUS` / `CB.BDC_STATUS` simplified | ✅ Before STANDBY: ping only (ALIVE/ERROR). At/after STANDBY: `CommHealth` exclusively — old `aMCC.MCC_STATUS` (HB_ms<200) and `aBDC.BDC_STATUS` (RX_HB window) removed from logic path. `WorstStatus()` added then removed — not needed after simplification. | S30 |
+| MSG-BDC-DTMAX | `MSG_BDC` dtmax logic bug fixed | ✅ Was `if (dt_us > 25000) dtmax = dt_us` — only updated when dt exceeded threshold, not true running max. Fixed to `if (dt_us > dtmax)` matching MCC pattern. EWMA `DtAvg`/`HbAvg` added. | S30 |
+| MSG-BDC-TIMESRC | `MSG_BDC.activeTimeSourceLabel` NTP fallback case added | ✅ Was `usingPTP ? "PTP" : (isNTP_DeviceReady ? "NTP" : "NONE")` — missing fallback. Fixed to match MCC: returns `"NTP (fallback)"` when `ntpUsingFallback` set. | S30 |
+| ICD-AF | `SET_TIMESRC = 0xAF` assigned | ✅ Slot reserved in ICD. Payload: `0=OFF, 1=NTP, 2=PTP, 3=AUTO`. INT_ENG only, all five controllers. Implementation tracked under FW-C7. | S30 |
+
+---
+
+## Session 29 Closures
+
+| ID | Item | Resolution | Session |
+|----|------|------------|---------|
+| GUI-1 | MCC + BDC ENG GUI A2/A3 timeout | ✅ Root cause: (1) firmware replay window checked before new client detection — reconnecting clients permanently locked out. Fixed in all 6 handlers (MCC A2/A3, BDC A2/A3, TMC A2, FMC A2) — new client detection now before replay check. (2) C# `_lastKeepalive` updated on every `Send()` — suppressed keepalive timer. Fixed: `_lastKeepalive` only in `SendKeepalive()`. (3) `isConnected`/`lastMsgRx` only updated on `0xA1` frames — keepalive ACKs ignored. Fixed: any valid frame updates liveness. (4) `connection established` delayed 30s in KeepaliveLoop. Fixed: moved to receive loop on first valid frame. Applied fleet-wide: `mcc.cs`, `bdc.cs`, `tmc.cs`, `fmc.cs` | S29 |
