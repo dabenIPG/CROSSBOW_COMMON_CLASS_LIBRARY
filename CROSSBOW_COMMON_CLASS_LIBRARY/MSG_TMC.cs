@@ -89,7 +89,8 @@ namespace CROSSBOW
             public uint   VersionWord;    // [53–56] VERSION_PACK(maj,min,pat)
             public float  McuTemp;        // [57–60] STM32F7 die temp °C
             public byte   StatBits3;      // [61]    PTP + NTP time status (session 30, was RESERVED)
-            // [62–63] RESERVED — 2 bytes padding to 64-byte block
+            public byte   HW_REV;         // [62]    self-detecting hardware revision for MSG_TMC.cs
+            // [63] RESERVED — 1 byte padding to 64-byte block
         }
 
         // -------------------------------------------------------------------
@@ -102,6 +103,7 @@ namespace CROSSBOW
         public byte          STATUS_BITS1        { get; private set; } = 0;
         public byte          STATUS_BITS2        { get; private set; } = 0;
         public byte          STATUS_BITS3        { get; private set; } = 0;   // byte 61 — PTP+NTP time status (session 30)
+        public byte HW_REV { get; private set; } = 0;                         // byte 62 — HW VS
 
         public DateTime      lastMsgRx           { get; private set; } = DateTime.UtcNow;
 
@@ -380,7 +382,7 @@ namespace CROSSBOW
 
             FW_VERSION        = reg.VersionWord;
             TEMP_MCU          = reg.McuTemp;
-
+            HW_REV            = reg.HW_REV;
             if (dt_us > 1000)
             {
                 dtmax = dt_us;
