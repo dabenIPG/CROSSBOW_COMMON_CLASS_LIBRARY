@@ -254,16 +254,8 @@ namespace CROSSBOW
             get
             {
                 if (System_State < SYSTEM_STATES.STNDBY)
-                {
-                    // ping only
-                    return (PING_STATUS_MCC ? READY_STATUS.ALIVE : READY_STATUS.ERROR);
-                }
-                else if (System_State >= SYSTEM_STATES.STNDBY)
-                {
-                    return PING_STATUS_MCC ? (aMCC.MCC_STATUS ? READY_STATUS.READY : READY_STATUS.WARN) : READY_STATUS.ERROR;
-                }
-                else
-                    return READY_STATUS.NA;
+                    return PING_STATUS_MCC ? READY_STATUS.ALIVE : READY_STATUS.ERROR;
+                return aMCC.LatestMSG.CommHealth;
             }
         }
         public READY_STATUS TMC_STATUS
@@ -307,16 +299,8 @@ namespace CROSSBOW
             get
             {
                 if (System_State < SYSTEM_STATES.STNDBY)
-                {
-                    // ping only
-                    return (PING_STATUS_BDC ? READY_STATUS.ALIVE : READY_STATUS.ERROR);
-                }
-                else if (System_State >= SYSTEM_STATES.STNDBY)
-                {
-                    return PING_STATUS_BDC ? (aBDC.BDC_STATUS ? READY_STATUS.READY : READY_STATUS.WARN) : READY_STATUS.ERROR;
-                }
-                else
-                    return READY_STATUS.NA;
+                    return PING_STATUS_BDC ? READY_STATUS.ALIVE : READY_STATUS.ERROR;
+                return aBDC.LatestMSG.CommHealth;
             }
         }
         public READY_STATUS GIM_STATUS
@@ -388,6 +372,19 @@ namespace CROSSBOW
                 case READY_STATUS.ERROR:
                     return Color.Red;
             }
+        }
+        public READY_STATUS WorstStatus(READY_STATUS a, READY_STATUS b)
+        {
+            int Rank(READY_STATUS s) => s switch
+            {
+                READY_STATUS.ERROR => 0,
+                READY_STATUS.WARN => 1,
+                READY_STATUS.ALIVE => 2,
+                READY_STATUS.READY => 3,
+                READY_STATUS.NA => 4,
+                _ => 5
+            };
+            return Rank(a) <= Rank(b) ? a : b;
         }
 
         // this will be on the BDC

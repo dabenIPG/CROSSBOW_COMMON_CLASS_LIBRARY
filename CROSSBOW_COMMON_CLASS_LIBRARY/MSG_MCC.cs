@@ -277,7 +277,44 @@ namespace CROSSBOW
                 ParseMSG01(msg, ndx);
         }
 
+        // maxes + avgs
         public uint dtmax = 0;
+        public double HbMax = 0;
+        public double DtAvg = 0;
+        public double HbAvg = 0;
+        public double DUtcMax = 0;
+
+        // thresholds
+        public const double DT_WARN_US = 15000.0;
+        public const double DT_BAD_US = 30000.0;
+        public const double HB_WARN_MS = 15000.0;
+        public const double HB_BAD_MS = 30000.0;
+        public const double DUTC_WARN_MS = 10.0;
+        public const double DUTC_BAD_MS = 30.0;
+        private const double EWMA_ALPHA = 0.10;
+
+        public CB.READY_STATUS CommHealth
+        {
+            get
+            {
+                if (dt_us > DT_BAD_US || HB_ms > HB_BAD_MS) return CB.READY_STATUS.ERROR;
+                if (dt_us > DT_WARN_US || HB_ms > HB_WARN_MS) return CB.READY_STATUS.WARN;
+                if (dt_us == 0 && HB_ms == 0) return CB.READY_STATUS.NA;
+                return CB.READY_STATUS.READY;
+            }
+        }
+
+        public CB.READY_STATUS DUtcHealth(double dUtcAbsMs)
+        {
+            if (dUtcAbsMs > DUTC_BAD_MS) return CB.READY_STATUS.ERROR;
+            if (dUtcAbsMs > DUTC_WARN_MS) return CB.READY_STATUS.WARN;
+            return CB.READY_STATUS.READY;
+        }
+
+        public void ResetDt() { dtmax = 0; DtAvg = 0; }
+        public void ResetHb() { HbMax = 0; HbAvg = 0; }
+        public void ResetDUtc() { DUtcMax = 0; }
+        public void ResetCommHealth() { ResetDt(); ResetHb(); ResetDUtc(); }
 
         // =========================================================================
         // ParseMSG01  —  ICD v3.0.0 session 4 layout
@@ -367,6 +404,9 @@ namespace CROSSBOW
                 Debug.WriteLine($"MSG_MCC: dt max = {dtmax}");
                 if (isVerboseLogEnabled) Log?.Debug("MSG_MCC: dt max = {Dt}", dtmax);
             }
+            if (HB_ms > HbMax) HbMax = HB_ms;
+            DtAvg = (DtAvg == 0) ? dt_us : DtAvg + EWMA_ALPHA * (dt_us - DtAvg);
+            HbAvg = (HbAvg == 0) ? HB_ms : HbAvg + EWMA_ALPHA * (HB_ms - HbAvg);
         }
 
         // =========================================================================
