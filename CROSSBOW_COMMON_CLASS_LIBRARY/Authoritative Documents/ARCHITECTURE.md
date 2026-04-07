@@ -1,9 +1,15 @@
 # CROSSBOW System Architecture
 
-**Document Version:** 3.3.1
+**Document Version:** 3.3.2
 **Date:** 2026-04-06
 **ICD Reference:** ICD v3.3.7
-**Status:** Session 28 — Serial debug standardization fleet-wide; BDC boot sequence updated; FMC NTP enabled.
+**Status:** Session 29 — C# client model standardized fleet-wide; firmware replay window fix; ENG GUI connection stability resolved.
+
+**v3.3.2 changes (session 29):**
+- §4.2 (new): C# ENG GUI client connect sequence — authoritative standard for all four controllers (A2 and A3). Single `0xA4` registration on connect (burst retired — firmware replay fix makes it unnecessary). `_lastKeepalive` only updated in `SendKeepalive()` — not on every `Send()`. Any valid frame updates `isConnected` and `lastMsgRx` — not just `0xA1`. `connection established` logged immediately in receive loop on first valid frame. `KeepaliveLoop` redundant elapsed check removed — `SendKeepalive()` called directly on every timer tick.
+- §4.2 Firmware replay window fix (all six A2/A3 handlers): new client detection (`isNewClient` check + `a_seq_init = false`) moved **before** `frameCheckReplay()` in all handlers — MCC A2/A3, BDC A2/A3, TMC A2, FMC A2. Prevents permanent lockout of reconnecting clients. Fixes `drop #2 after 0.0s` on BDC A3 (THEIA). Firmware version bumped to v3.2.3.
+- §4.2 A3 connect sequence: auto-subscribe (`UnsolicitedMode = true`) removed from A3 connect path on MCC and BDC — user controls via checkbox. A3 now sends single `0xA4` registration on connect matching A2 pattern.
+- §17 Open items: GUI-1 closed. FMC-NTP added (FMC dt elevated — suspected NTP/USB CDC loop blocking). GUI-8 added (TRC C# client model pending).
 
 **v3.3.1 changes (session 28):**
 - §10.1 BDC boot sequence: `FUJI_WAIT(5s)` step added between `PTP_INIT` and `DONE`. Non-blocking — advances when `fuji.isConnected` or after 5s timeout. `DONE` delay reduced to 0.5s. Boot completion print now shows subsystem status: `gimbal`, `trc`, `fmc`, `fuji`, `ntp`. Note: `fuji.SETUP()` and `fuji.UPDATE()` run post-boot only — `fuji=---` always shown at DONE regardless of physical connection (FW-C3 open).
@@ -351,7 +357,87 @@ external IP range. THEIA never communicates with TMC, FMC, or TRC directly.
 A1 streams are always-on from boot — no registration or `0xA0` enable required.
 The BDC→TRC fire control status is raw 5 bytes with no frame wrapper or CRC.
 
-### 4.2 ParseA3 vs ParseA2
+### 4.2 C# ENG GUI Client Connect Sequence (Session 29)
+
+This is the authoritative standard for all four C# controller classes (`mcc.cs`, `bdc.cs`,
+`tmc.cs`, `fmc.cs`). Any new controller client must follow this exact pattern.
+
+#### Connect Sequence
+```
+Start()
+  → Send 0xA4 FRAME_KEEPALIVE          // register with firmware — single frame, no burst
+  → _lastKeepalive = DateTime.UtcNow   // seed keepalive timer from connect
+  (A3 path only: same — no auto 0xA0 subscribe, user controls via checkbox)
+```
+
+The registration **burst** (`0xA4 ×3`) is retired. The firmware replay window fix
+(session 29) resets `a_seq_init` when a new client is detected — making the burst
+unnecessary. A single `0xA4` is sufficient.
+
+#### Keepalive
+```
+KeepaliveLoop()  — PeriodicTimer every KEEPALIVE_INTERVAL_MS (30s)
+  → SendKeepalive()  unconditionally on every tick
+      → Send(0xA4)
+      → _lastKeepalive = DateTime.UtcNow
+```
+
+`_lastKeepalive` is updated **only in `SendKeepalive()`** — not in `Send()`. This
+ensures the timer fires reliably every 30s regardless of other TX activity. The
+redundant elapsed check (`if (UtcNow - _lastKeepalive) >= interval`) is removed —
+the `PeriodicTimer` is the gate.
+
+#### Liveness
+```
+Receive loop — any valid frame (any CMD_BYTE):
+  → isConnected = true
+  → HB_RX_ms = (UtcNow - lastMsgRx).TotalMs
+  → lastMsgRx = UtcNow
+  → if (!_wasConnected): log "connection established", set _connectedSince
+
+0xA1 frames additionally:
+  → LatestMSG.Parse(frame)
+```
+
+All other frames (ACKs, keepalive responses) still update `isConnected` and
+`lastMsgRx`. Connection state does not depend on unsolicited being enabled.
+
+#### Connection Established
+`connection established` is logged immediately in the receive loop on the first
+valid frame — not in `KeepaliveLoop` (which would delay it by up to 30s).
+
+`connection restored` (after a drop) is still logged in `KeepaliveLoop` since
+it requires `_dropCount > 0` context which is managed there.
+
+#### Connection Lost / Drop Detection
+```
+KeepaliveLoop — on each tick:
+  stale = isConnected && (UtcNow - lastMsgRx) > STALE_WARN_MS
+  if stale && _wasConnected && uptime > KEEPALIVE_INTERVAL_MS:
+    → _dropCount++, _wasConnected = false
+    → log "connection lost — drop #N after Xs uptime"
+```
+
+`STALE_WARN_MS = 2000ms` — appropriate when unsolicited is enabled (frames at
+50–100 Hz). When unsolicited is disabled, keepalive ACKs every 30s keep
+`lastMsgRx` fresh — connection loss is not declared between keepalives.
+
+#### Firmware Side — Replay Window Fix
+All six frame handlers have new client detection before replay check (session 29):
+```cpp
+// Moved BEFORE frameCheckReplay():
+bool isNewClient = (frameClientFind(...) == -1);
+int8_t clientIdx = frameClientRegister(...);
+if (isNewClient && clientIdx >= 0)
+    a_seq_init = false;   // clean replay window for reconnecting client
+
+// Replay check AFTER:
+if (frameCheckReplay(seq, a_last_seq, a_seq_init)) { ... return; }
+```
+Affected handlers: MCC `handleA2Frame`, MCC `handleA3Frame`, BDC `handleA2Frame`,
+BDC `handleA3Frame`, TMC `handleA2Frame`, FMC `handleA2Frame`.
+
+### 4.3 ParseA3 vs ParseA2
 
 `ParseA3` validates the full 521-byte A3 frame (magic `0xCB 0x58`, CRC-16, STATUS byte) before
 dispatching to `ParseMSG01`. It sets `LastFrameStatus` on every call regardless of STATUS value.
@@ -363,7 +449,7 @@ performs no magic or CRC validation — the A2 transport layer handles that. Liv
 Both entry points are present on `MSG_MCC` and `MSG_BDC`. THEIA must call `ParseA3`.
 ENG GUI must call `ParseA2`. Cross-wiring these will silently produce wrong results.
 
-### 4.3 TransportPath
+### 4.4 TransportPath
 
 `MSG_MCC` and `MSG_BDC` use a `TransportPath` constructor parameter to select transport
 at construction time. `MAGIC_LO` is computed — not hardcoded. `ParseA3` and `ParseA2`
@@ -384,7 +470,7 @@ new BDC(log, TransportPath.A2_Internal)   // ENG GUI
 
 Deployed session 16/17. NEW-12 ✅ closed.
 
-### 4.4 ENG GUI — Per-Controller Access
+### 4.5 ENG GUI — Per-Controller Access
 
 TRC_ENG_GUI_PRESERVE connects to each of the five controllers independently on A2 port 10018.
 Each controller has its own message class instance:
@@ -397,7 +483,7 @@ Each controller has its own message class instance:
 | FMC | 192.168.1.23 | 10018 | `MSG_FMC` | `ParseA2` |
 | TRC | 192.168.1.22 | 10018 | `MSG_TRC` | `ParseA2` |
 
-### 4.5 THEIA — Per-Controller Access
+### 4.6 THEIA — Per-Controller Access
 
 THEIA connects to MCC and BDC on A3 only:
 
@@ -1533,15 +1619,16 @@ Full open and closed action item tracking has moved to the unified register:
 - **`Embedded_Controllers_ACTION_ITEMS.md`** — all open items, priority-ordered
 - **`Embedded_Controllers_CLOSED_ACTION_ITEMS.md`** — full closure archive
 
-Quick reference — high priority items as of session 28:
+Quick reference — high priority items as of session 29:
 
 | ID | Item | Priority |
 |----|------|----------|
 | THEIA-SHUTDOWN | Graceful STANDBY→OFF sequence — laser safe, relays off, HMI disconnect | 🔴 High |
 | HMI-A3-18 | LCH/KIZ/HORIZ — architecture analyzed; C# emplacement GUI work pending | 🔴 High |
-| GUI-1 | MCC + BDC ENG GUI A2 timeout — not receiving on A2 | 🔴 High |
+| FMC-NTP | FMC dt elevated — suspected NTP/USB CDC main loop blocking | 🔴 High |
 | GUI-2 | HMI robust testing — full engagement sequence on live HW | 🔴 High |
 | FW-B3 | PTP DELAY_REQ W5500 contention — `isPTP_Enabled=false` fleet-wide workaround | 🔴 High |
+| GUI-8 | TRC C# client model — apply standardized pattern from session 29 | 🟡 Medium |
 | FW-B4 | MCC and FMC `ptp.INIT()` not unconditional at boot — `TIMESRC PTP` silent failure | 🟡 Medium |
 | FW-C3 | BDC Fuji boot status — `fuji.SETUP()` deferred post-boot, FUJI_WAIT always times out | 🟡 Medium |
 | FW-C4 | BDC A1 ARP backoff not working — `A1 OFF` workaround when TRC offline | 🟡 Medium |

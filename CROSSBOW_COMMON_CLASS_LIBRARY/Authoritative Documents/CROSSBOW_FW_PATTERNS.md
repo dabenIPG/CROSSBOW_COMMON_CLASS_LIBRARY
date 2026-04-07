@@ -537,27 +537,47 @@ If the buffer is 256 bytes, 256 bytes past the end are read and appear in the fr
 On STM32 with static locals, those trailing bytes may be shared stack or adjacent statics.  
 **Fix:** `#define CONTROLLER_REG_SIZE  512` — always match `FRAME_PAYLOAD_SIZE`.
 
-### 4. a2_seq_init not reset on re-registration
-**Symptom:** Reconnecting GUI locked out until controller reboot.  
-**Fix:** `a2_seq_init = false;` after `frameClientRegister()` in `SET_UNSOLICITED` handler.
+### 4. a2_seq_init not reset on re-registration (session 29 — expanded fix)
+**Symptom:** Reconnecting GUI permanently locked out — all frames rejected as replay until controller reboot.
+**Root cause:** `isNewClient` detection and `a_seq_init = false` were placed **after** `frameCheckReplay()`. Reconnecting client's first frame was rejected before the window could be reset.
+**Fix:** Move new client detection **before** `frameCheckReplay()` in all six handlers:
+```cpp
+// CORRECT ORDER — new client detection before replay check:
+bool   isNewClient = (frameClientFind(...) == -1);
+int8_t clientIdx   = frameClientRegister(...);
+if (isNewClient && clientIdx >= 0)
+    a2_seq_init = false;   // reset replay window for reconnecting client
+
+if (frameCheckReplay(seq, a2_last_seq, a2_seq_init)) { ... return; }
+frameAcceptSeq(seq, a2_last_seq, a2_seq_init);
+```
+**Applies to:** MCC `handleA2Frame`, MCC `handleA3Frame`, BDC `handleA2Frame`, BDC `handleA3Frame`, TMC `handleA2Frame`, FMC `handleA2Frame`. All fixed session 29.
 
 ---
 
-## C# Engineering GUI Patterns
+## C# Engineering GUI Patterns (session 29 — standardized fleet-wide)
 
 ### Connection class
-- Port: 10018 (A2), magic `0xCB 0x49`
+- Port: 10018 (A2), magic `0xCB 0x49`; port 10050 (A3), magic `0xCB 0x58`
 - `_seq` = `(byte)new Random().Next(33, 224)` on each `Start()`
-- Registration burst of 3 frames on socket open
-- `PeriodicTimer` keepalive every 30 s — sends `0xA0 {0x01}`
-- Any `Send()` resets `_lastKeepalive`
+- **Single `0xA4` registration on connect** — burst (`×3`) retired (firmware replay fix session 29)
+- Set `_lastKeepalive = DateTime.UtcNow` immediately after registration send
+- `PeriodicTimer` keepalive every 30s — calls `SendKeepalive()` directly (no elapsed check)
+- `SendKeepalive()` sends `0xA4 FRAME_KEEPALIVE` and sets `_lastKeepalive = DateTime.UtcNow`
+- **`_lastKeepalive` updated only in `SendKeepalive()`** — never in `Send()` — ensures reliable 30s interval
+- A3 connect: same single `0xA4` registration — no auto `0xA0` subscribe (user controls via checkbox)
+
+### Receive loop liveness
+- **Any valid frame** (any CMD_BYTE) updates `isConnected`, `HB_RX_ms`, `lastMsgRx`
+- `0xA1` frames additionally call `LatestMSG.Parse()`
+- **`connection established`** logged immediately on first valid frame in receive loop — not in KeepaliveLoop
+- `connection restored` logged in KeepaliveLoop (requires `_dropCount > 0` context)
 
 ### Message parser
-- Validate magic `[0]==0xCB`, `[1]==0x49`
+- Validate magic `[0]==0xCB`, `[1]==0x49` (A2) or `[1]==0x58` (A3)
 - Validate CRC-16/CCITT over bytes 0–518
 - Check `frame[4] == STATUS_OK`
-- Check `frame[3] == 0xA1` before overlaying register struct
-- `MemoryMarshal.Read<RegStruct>()` for zero-copy struct overlay
+- Check `frame[3] == 0xA1` before calling `LatestMSG.Parse()`
 
 ### VERSION_WORD decode
 ```csharp

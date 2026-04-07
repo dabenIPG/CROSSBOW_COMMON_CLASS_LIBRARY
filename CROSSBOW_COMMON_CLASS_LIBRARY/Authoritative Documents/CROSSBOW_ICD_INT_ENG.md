@@ -2,8 +2,8 @@
 
 **Document:** `CROSSBOW_ICD_INT_ENG`
 **Doc #:** IPGD-0003
-**Version:** 3.3.7
-**Date:** 2026-04-05 (session 37)
+**Version:** 3.3.8
+**Date:** 2026-04-06 (session 29)
 **Classification:** IPG Internal Use Only
 **Source:** CB_ICD_v1_7.xlsx reconciled with ARCHITECTURE.md (TRC v3.0); `defines.hpp` canonical v3.X.Y
 **Audience:** IPG engineering staff, ENG GUI developers, firmware developers — all five controllers (MCC, BDC, TMC, FMC, TRC)
@@ -11,6 +11,15 @@
 ---
 
 ## Version History
+
+**v3.3.8 changes (session 29 — 2026-04-06):**
+- Firmware replay window fix — all six A2/A3 frame handlers: new client detection (`isNewClient` + `a_seq_init = false`) moved **before** `frameCheckReplay()`. Reconnecting clients no longer permanently locked out after slot expiry. Affected: MCC `handleA2Frame`, MCC `handleA3Frame`, BDC `handleA2Frame`, BDC `handleA3Frame`, TMC `handleA2Frame`, FMC `handleA2Frame`.
+- C# client model standardized fleet-wide (`mcc.cs`, `bdc.cs`, `tmc.cs`, `fmc.cs`): registration burst (`0xA4 ×3`) retired — single `0xA4` on connect. `_lastKeepalive` updated only in `SendKeepalive()`. Any valid frame (any CMD_BYTE) updates `isConnected`/`lastMsgRx` — not just `0xA1`. `connection established` logged immediately in receive loop. Redundant elapsed check removed from `KeepaliveLoop`. A3 auto-subscribe removed — user controls via checkbox. See ARCHITECTURE.md §4.2 for authoritative standard.
+- ENG GUI: dt/HB/RX consolidated display format `XXX dt:  000.00 <avg> [max] unit` with EMA α=0.10 on all four controller tabs. `frmFMC.cs` fully updated to match MCC/BDC/TMC pattern.
+- FMC `fmc.cs`: `isConnected`, `_wasConnected`, `_connectedSince`, `_dropCount` state added — was missing entirely. Connection tracking now matches other controllers.
+- FW version: all four controllers bumped to v3.2.3.
+
+---
 
 **v3.3.7 changes (session 37 — 2026-04-05):**
 - EXT_OPS port references updated throughout: `UDP:10009` → `UDP:15009`. HYPERION sensor
@@ -41,7 +50,7 @@
 - `GetCurrentTime()` holdover rewrite across all controllers — `EPOCH_MIN_VALID_US = 1577836800000000` guard, `_lastGoodTimeUs`/`_lastGoodStampUs` latch; free-runs from latch when both PTP and NTP invalid; `activeTimeSource = NONE` during holdover.
 - `isPTP_Enabled` defaults to `false` on all controllers (FW-B3 deferred). `isNTP_Enabled` defaults to `false` on FMC (SAMD21 open bug).
 - FMC serial: `A1 ON|OFF` command added; A1 ARP backoff added.
-- All C# client classes: `FRAME_KEEPALIVE` burst on connect; keepalive sends `0xA4` every 30 s; `Parse()` accepts `ICD.FRAME_KEEPALIVE` alongside `ICD.RES_A1`.
+- All C# client classes: single `FRAME_KEEPALIVE` on connect (burst retired session 29 — firmware replay fix makes it unnecessary); keepalive sends `0xA4` every 30 s; any valid frame updates liveness (not just `0xA1`); `connection established` logged immediately on first receive. See ARCHITECTURE.md §4.2 for authoritative C# client connect standard.
 - `MSG_BDC.cs`: property naming aligned (`_DeviceEnabled`/`_DeviceReady`; `activeTimeSourceLabel`; `TEMP_MCU`; `FW_VERSION_STRING`).
 - ENG GUI: BDC and FMC tabs updated with GUI-5 (rolling max, RX staleness, gap counter, dUTC).
 - FMC PTP integration complete — `fmc.hpp`, `fmc.cpp` updated; NEW-38c closed

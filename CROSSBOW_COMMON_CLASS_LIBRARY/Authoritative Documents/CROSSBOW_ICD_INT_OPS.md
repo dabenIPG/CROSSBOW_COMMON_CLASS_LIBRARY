@@ -2,12 +2,18 @@
 
 **Document:** `CROSSBOW_ICD_INT_OPS`
 **Doc #:** IPGD-0004
-**Version:** 3.3.6
-**Date:** 2026-04-04 (session 36)
+**Version:** 3.3.7
+**Date:** 2026-04-06 (session 29)
 
 ---
 
 ## Version History
+
+**v3.3.7 changes (session 29 — 2026-04-06):**
+- Firmware replay window fix (A3 reconnection): new client detection moved before `frameCheckReplay()` in MCC `handleA3Frame` and BDC `handleA3Frame`. THEIA reconnects cleanly after slot expiry — no longer permanently locked out until controller reboot. Symptom was `drop #2 after 0.0s` immediately on reconnect with all subsequent commands rejected.
+- A3 unsolicited subscription on connect removed from C# client — THEIA now sends single `0xA4` registration only. `SET_UNSOLICITED` (`0xA0`) must be sent explicitly to subscribe. This matches user-controlled model on all other transports.
+
+---
 
 **v3.3.6 changes (session 35/36 — 2026-04-04):**
 - `0xA4` renamed `EXT_FRAME_PING` → `FRAME_KEEPALIVE`; extended to A2 and all controllers. Empty payload = ACK only. Payload `{0x01}` = solicited REG1 (rate-gated 1 Hz per slot; suppressed if already subscribed).
