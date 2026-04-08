@@ -2,12 +2,12 @@
 
 **Document:** `CROSSBOW_UG_ENG_GUI.md`
 **Doc #:** IPGD-0014
-**Version:** 1.2.0
-**Date:** 2026-04-07
+**Version:** 1.3.0
+**Date:** 2026-04-08
 **Classification:** CONFIDENTIAL — IPG Internal Use Only
 **Audience:** IPG engineering staff, integration engineers
-**ICD Reference:** `CROSSBOW_ICD_INT_ENG` (IPGD-0003) v3.3.9 — full INT_ENG and INT_OPS command set
-**Architecture Reference:** `ARCHITECTURE.md` (IPGD-0006) v3.3.3 — network topology, framing protocol, port reference
+**ICD Reference:** `CROSSBOW_ICD_INT_ENG` (IPGD-0003) v3.4.0 — full INT_ENG and INT_OPS command set
+**Architecture Reference:** `ARCHITECTURE.md` (IPGD-0006) v3.3.4 — network topology, framing protocol, port reference
 
 ---
 
@@ -84,6 +84,15 @@
 > | TMC-HW4 | `frmTMC.cs` | ✅ Done | `ApplyHwRevLayout()` — one-time V1/V2 layout switch on first packet. Pump2 controls added. Pump speed/heater/tv3tv4 hidden on V2. `tss_HW_REV` shows revision label + loop topology. |
 > | MSG-1 | `MSG_TMC.cs` | 🔲 Open | Add `tb_` prefixed aliases for TIME_BITS accessors to match `MSG_MCC`/`MSG_BDC` naming convention |
 > | MSG-2 | `MSG_TMC.cs`, `MSG_FMC.cs` | 🔲 Open | Document that `isNTP_DeviceEnabled` has no equivalent — TIME groupbox on TMC/FMC uses `isNTPSynched` for both ENABLED and SYNCHED indicators |
+
+> **MCC hardware revision action items:**
+>
+> | ID | File | Status | Action |
+> |----|------|--------|--------|
+> | MCC-HW1 | `MSG_MCC.cs` | ✅ Done | `HW_REV` byte [254] parsed; `IsV1`/`IsV2`/`HW_REV_Label` added. `HealthBits`/`PowerBits` renamed from `StatusBits`/`StatusBits2`; backward-compat aliases retained. Seven `pb_*` PowerBits accessors added. `isReady` property added (was missing). Revision-aware `isVicor_Enabled`/`isRelay1/2_Enabled` compat aliases. |
+> | MCC-HW2 | `mcc.cs` | ✅ Done | `EnablePower(MCC_POWER, bool)` replaces `EnableSolenoid()`, `EnableRelay()`, `VicorEnable`. Unified power dispatch — single `0xE2 PMS_POWER_ENABLE` send. `ChargeLevel` V2 rejection note added. |
+> | MCC-HW3 | `defines.cs` | ✅ Done | `MCC_POWER` enum added (GPS_RELAY=0 through SOL_BDA=6). `MCC_SOLENOIDS`, `MCC_RELAYS`, `MCC_VICORS` removed. `0xE2` → `PMS_POWER_ENABLE`; `0xE4` → `RES_E4` RETIRED; `0xEC` → `RES_EC` RETIRED. |
+> | MCC-HW4 | `frmMCC.cs` | ⚠️ Partial | Compile errors fixed (6 call sites: `EnableSolenoid`/`EnableRelay`/`VicorEnable` → `EnablePower`). `tssVersion` shows `HW_REV_Label`. `ApplyHwRevLayout()` pending — solenoid/GPS relay/Vicor bus controls hidden on V2; `chk_Relay3_Enable` shown on V2 as TMS_VICOR; `rad_ChargeLow/Med/High` disabled on V2; `chk_Relay4_Enable` hidden both revisions. |
 
 > **NTP action items:**
 >
@@ -1241,4 +1250,5 @@ Planned content:
 | 1.0.0 | 2026-03-01 | IPG | Initial draft — §1–3 complete |
 | 1.1.0 | 2026-04-06 | IPG | §4.1–4.4 added; placeholder §4.5–4.9, §5–6; action item table restructured with status tracking |
 | 1.2.0 | 2026-04-07 | IPG | §4.3 TMC updated for V1/V2 hardware abstraction — description, temperature table (COMP1/2 added, VIC3/4 V1-only noted), AUX control table (PUMP2 V2, heater/speed V1-only). TMC-HW1–4 action items added (all closed). ICD ref updated to v3.3.9, ARCH ref to v3.3.3. |
+| 1.3.0 | 2026-04-08 | IPG | MCC-HW1–4 action items added. MCC-HW1–3 closed (MSG_MCC.cs, mcc.cs, defines.cs). MCC-HW4 partial (compile errors fixed, ApplyHwRevLayout pending). ICD ref updated to v3.4.0, ARCH ref to v3.3.4. |
 

@@ -2,8 +2,8 @@
 
 **Document:** `CROSSBOW_ICD_INT_ENG`
 **Doc #:** IPGD-0003
-**Version:** 3.3.8
-**Date:** 2026-04-06 (session 29)
+**Version:** 3.4.0
+**Date:** 2026-04-08 (MCC unification)
 **Classification:** IPG Internal Use Only
 **Source:** CB_ICD_v1_7.xlsx reconciled with ARCHITECTURE.md (TRC v3.0); `defines.hpp` canonical v3.X.Y
 **Audience:** IPG engineering staff, ENG GUI developers, firmware developers — all five controllers (MCC, BDC, TMC, FMC, TRC)
@@ -11,6 +11,32 @@
 ---
 
 ## Version History
+
+**v3.4.0 changes (MCC unification — 2026-04-08):**
+- MCC unified hardware abstraction (`hw_rev.hpp`) — V1/V2 hardware revision support. See MCC_HW_DELTA.md.
+- MCC FW version bumped: `3.2.0` → `3.3.0` (`VERSION_PACK(3,3,0)`).
+- MCC REG1 byte [9] **BREAKING CHANGE** — renamed `MCC STAT BITS` → `HEALTH_BITS`. New 3-bit layout:
+  - bit 0: `isReady` (unchanged)
+  - bit 1: `isChargerEnabled` — **was bit 4**
+  - bit 2: `isNotBatLowVoltage` — **was bit 5**
+  - bits 3–7: `RES` — solenoid bits (1–2) and laser bit (3) moved to `POWER_BITS` byte [10].
+- MCC REG1 byte [10] **BREAKING CHANGE** — renamed `MCC STAT BITS2` → `POWER_BITS`. Bit N = `MCC_POWER` enum value N. Revision-independent decode — unused outputs for active revision always `0`:
+  - bit 0: `isPwr_GpsRelay` (V1 live | V2 always 0)
+  - bit 1: `isPwr_VicorBus` (V1 live | V2 always 0)
+  - bit 2: `isPwr_LaserRelay` (both revisions)
+  - bit 3: `isPwr_GimVicor` (V1 always 0 | V2 live)
+  - bit 4: `isPwr_TmsVicor` (V1 always 0 | V2 live)
+  - bit 5: `isPwr_SolHel` (V1 live | V2 always 0)
+  - bit 6: `isPwr_SolBda` (V1 live | V2 always 0)
+  - bit 7: `RES`
+- MCC REG1 byte [254]: reassigned from `RESERVED` → `HW_REV` (`0x01`=V1, `0x02`=V2). Allows `MSG_MCC.cs` to self-detect register layout without out-of-band configuration. Read before interpreting bytes [9] and [10].
+- `0xE2 PMS_SOL_ENABLE` → **`PMS_POWER_ENABLE`** — unified power output command. Payload: `uint8 which (MCC_POWER enum); uint8 0/1`. INT_ENG only on both revisions. V1 valid: 0–2, 5–6. V2 valid: 2–4. Invalid `which` for active revision returns `STATUS_CMD_REJECTED`.
+- `0xE4 PMS_RELAY_ENABLE` → **`RES_E4` RETIRED** — use `0xE2 PMS_POWER_ENABLE` with `GPS_RELAY=0` or `LASER_RELAY=2`. Returns `STATUS_CMD_REJECTED`.
+- `0xEC PMS_VICOR_ENABLE` → **`RES_EC` RETIRED** — use `0xE2 PMS_POWER_ENABLE` with `VICOR_BUS=1`, `GIM_VICOR=3`, or `TMS_VICOR=4`. Returns `STATUS_CMD_REJECTED`.
+- `0xED PMS_SET_CHARGER_LEVEL` — V2 now returns `STATUS_CMD_REJECTED` (no charger I2C on V2 hardware).
+- `MCC_POWER` enum added (see enum tables). `MCC_SOLENOIDS`, `MCC_RELAYS`, `MCC_VICORS` removed — superseded by `MCC_POWER`.
+- `SEND_FIRE_STATUS` gate updated: `isSolenoid2_Enabled` → `isPwr_LaserRelay && isBDC_Ready` (both revisions).
+- `MSG_MCC.cs`: `HealthBits`/`PowerBits` properties added; `StatusBits`/`StatusBits2` retained as backward-compat aliases. `HW_REV` byte [254] parsed; `IsV1`/`IsV2`/`HW_REV_Label` added. Seven `pb_*` accessors added for `POWER_BITS`. Old `isVicor_Enabled`/`isRelay1/2_Enabled` retained as revision-aware compat aliases. `isReady` property added (was missing).
 
 **v3.3.9 changes (session 30 — 2026-04-07):**
 - TMC unified hardware abstraction (`hw_rev.hpp`) — V1/V2 hardware revision support. See TMC_HW_DELTA.md.
@@ -475,9 +501,9 @@ Scoping differs by codebase (`enum ICD` in C#/THEIA, `enum ICD_CMDS` in TRC, `en
 |------|------|-------------|---------|------------|-------------|------------|-------|------------|------------|
 | 0xE0 | SET_MCC_REINIT | Reinitialise MCC subsystem | uint8 subsystem (0=NTP, 1=TMC, 2=HEL, 3=BAT, 4=PTP, 5=CRG, 6=GNSS, 7=BDC) — index 0 = NTP only; index 4 = PTP only | — | — | ✓ | `INT_OPS` | MCC | MCC |
 | 0xE1 | SET_MCC_DEVICES_ENABLE | Enable/disable MCC-managed device | uint8 device (0=NTP, 1=TMC, 2=HEL, 3=BAT, 4=PTP, 5=CRG, 6=GNSS, 7=BDC); uint8 0/1 — device 4 (PTP): `0` forces NTP-only mode, clears `ptp.isSynched` immediately | — | — | ✓ | `INT_OPS` | MCC | MCC |
-| 0xE2 | PMS_SOL_ENABLE | Enable solenoid | uint8 which (0/1); uint8 0/1 | — | — | ✓ | `INT_ENG` | MCC | MCC |
+| 0xE2 | PMS_POWER_ENABLE | Unified power output control — replaces `PMS_SOL_ENABLE` (0xE2), `PMS_RELAY_ENABLE` (0xE4), `PMS_VICOR_ENABLE` (0xEC). INT_ENG only — A3 returns `STATUS_CMD_REJECTED`. | uint8 which (MCC_POWER enum: 0=GPS_RELAY, 1=VICOR_BUS, 2=LASER_RELAY, 3=GIM_VICOR, 4=TMS_VICOR, 5=SOL_HEL, 6=SOL_BDA); uint8 0/1. V1 valid: 0–2, 5–6. V2 valid: 2–4. Invalid `which` for active revision → `STATUS_CMD_REJECTED`. | — | — | ✓ | `INT_ENG` | MCC | MCC |
 | 0xE3 | PMS_CHARGER_ENABLE | Enable charger | uint8 0/1 | — | — | ✓ | `INT_OPS` | MCC | MCC |
-| 0xE4 | PMS_RELAY_ENABLE | PMS relay enable | uint8 relay (1–4); uint8 0/1 | — | — | ✓ | `INT_ENG` | MCC | MCC |
+| 0xE4 | ~~PMS_RELAY_ENABLE~~ → **RES_E4** | **RETIRED v3.4.0** — returns `STATUS_CMD_REJECTED`. Use `0xE2 PMS_POWER_ENABLE` with `MCC_POWER::GPS_RELAY (0)` or `MCC_POWER::LASER_RELAY (2)`. | — | — | — | — | `RES` | MCC | MCC |
 | 0xE5 | RES_E5 | Reserved | — | — | — | — | `RES` | RES | RES |
 | 0xE6 | PMS_SET_FIRE_REQUESTED_VOTE | Laser fire vote request | uint8 0/1 (continuous heartbeat required) | — | — | ✓ (→MCC) | `INT_ENG` | MCC | MCC |
 | 0xE7 | TMS_INPUT_FAN_SPEED | Set fan speed | uint8 which (0/1); uint8 speed (0=off,128=low,255=high) — matches `TMC_FAN_SPEEDS` enum | — | — | ✓ | `INT_OPS` | MCC, TMC | MCC |
@@ -485,8 +511,8 @@ Scoping differs by codebase (`enum ICD` in C#/THEIA, `enum ICD_CMDS` in TRC, `en
 | 0xE9 | TMS_SET_VICOR_ENABLE | TMS Vicor enable | uint8 vicor (TMC_VICORS enum); uint8 0/1 — V1: values 0–3 valid; V2: values 0–2,4 valid (PUMP2=4; HEAT=3 does not exist on V2) | — | — | ✓ | `INT_ENG` | MCC, TMC | MCC |
 | 0xEA | TMS_SET_LCM_ENABLE | TMS LCM enable | uint8 lcm (enum); uint8 0/1 | — | — | ✓ | `INT_ENG` | MCC, TMC | MCC |
 | 0xEB | TMS_SET_TARGET_TEMP | Set TMS target temperature | uint8 temp °C — **enforced range [10–40°C]**; firmware clamps silently. Values outside range are accepted without error but constrained. | — | — | ✓ | `INT_OPS` | MCC, TMC | MCC |
-| 0xEC | PMS_VICOR_ENABLE | PMS Vicor enable | uint8 0/1 | — | — | ✓ | `INT_ENG` | MCC, TMC | MCC |
-| 0xED | PMS_SET_CHARGER_LEVEL | Set charger current level | uint8 level (low=10, med=30, high=55) | — | — | ✓ | `INT_OPS` | MCC, TMC | MCC |
+| 0xEC | ~~PMS_VICOR_ENABLE~~ → **RES_EC** | **RETIRED v3.4.0** — returns `STATUS_CMD_REJECTED`. Use `0xE2 PMS_POWER_ENABLE` with `MCC_POWER::VICOR_BUS (1)`, `GIM_VICOR (3)`, or `TMS_VICOR (4)`. | — | — | — | — | `RES` | MCC | MCC |
+| 0xED | PMS_SET_CHARGER_LEVEL | Set charger current level. **V2: returns `STATUS_CMD_REJECTED`** — no charger I2C on V2 hardware. V1 only: I2C to DBU3200. | uint8 level (low=10, med=30, high=55) | — | — | ✓ | `INT_ENG` | MCC | MCC |
 | 0xEE | RES_EE | Reserved | — | — | — | — | `RES` | RES | RES |
 | 0xEF | RES_EF | TMS register response | — | — | — | — | `RES` | RES | RES |
 
@@ -799,8 +825,8 @@ Fixed block size: **256 bytes**.
 | 5 | 5 | 7 | 2 | dt_us | uint16 | µs in processing loop |
 | 7 | 7 | 8 | 1 | MCC DEVICE_ENABLED_BITS | uint8 | 0:NTP; 1:TMC; 2:HEL; 3:BAT; 4:PTP; 5:CRG; 6:GNSS; 7:BDC |
 | 8 | 8 | 9 | 1 | MCC DEVICE_READY_BITS | uint8 | 0:NTP; 1:TMC; 2:HEL; 3:BAT; 4:PTP; 5:CRG; 6:GNSS; 7:BDC |
-| 9 | 9 | 10 | 1 | MCC STAT BITS | uint8 | 0:isReady; 1:isSolenoid1_En; 2:isSolenoid2_En; 3:isLaserPower_En; 4:isChargerEnabled; 5:isNotBatLowVoltage; 6:RES; 7:RES *(was isUnsolicitedModeEnabled — retired session 35)* |
-| 10 | 10 | 11 | 1 | MCC STAT BITS2 | uint8 | 0–2:RES *(ntpUsingFallback/ntpHasFallback/usingPTP moved to TIME_BITS byte 253 — session 32)*; 3:isVicorEnabled; 4:isRelay1En; 5:isRelay2En; 6:isRelay3En; 7:isRelay4En |
+| 9 | 9 | 10 | 1 | MCC HEALTH_BITS | uint8 | 0:isReady; 1:isChargerEnabled; 2:isNotBatLowVoltage; 3–7:RES ⚠ **Breaking change v3.4.0** — solenoid/laser bits moved to POWER_BITS byte [10]. Old layout: 1:isSolenoid1_En; 2:isSolenoid2_En; 3:isLaserPower_En; 4:isChargerEnabled; 5:isNotBatLowVoltage. Read HW_REV [254] — layout identical on both revisions. |
+| 10 | 10 | 11 | 1 | MCC POWER_BITS | uint8 | Bit N = MCC_POWER enum value N. Unused outputs for active revision always 0 — no guards needed in decoder. 0:isPwr_GpsRelay(V1\|0 V2); 1:isPwr_VicorBus(V1\|0 V2); 2:isPwr_LaserRelay(both); 3:isPwr_GimVicor(0 V1\|V2); 4:isPwr_TmsVicor(0 V1\|V2); 5:isPwr_SolHel(V1\|0 V2); 6:isPwr_SolBda(V1\|0 V2); 7:RES ⚠ **Breaking change v3.4.0** — old layout: 0–2:RES; 3:isVicorEnabled; 4:isRelay1En; 5:isRelay2En; 6:isRelay3En; 7:isRelay4En. Read HW_REV [254] to confirm V1 vs V2 before interpreting bits 0–1 and 3–6. |
 | 11 | 11 | 12 | 1 | MCC VOTE BITS | uint8 | 0:isLaserTotalHW_Vote_rb; 1:isNotAbort_Vote_rb; 2:isArmed_Vote_rb; 3:isBDA_Vote_rb; 4:isEMON_rb; 5:isLaserFireRequested_Vote; 6:isLaserTotal_Vote_rb; 7:isCombat_Vote_rb |
 | 12 | 12 | 20 | 8 | NTP epoch Time | uint64 | ms since epoch |
 | 20 | 20 | 21 | 1 | Temp 1 (Charger) | int8 | °C |
@@ -862,9 +888,10 @@ Fixed block size: **256 bytes**.
 | 245 | 245 | 249 | 4 | MCC VERSION WORD | uint32 | |
 | 249 | 249 | 253 | 4 | MCU Temp | float | °C |
 | 253 | 253 | 254 | 1 | TIME_BITS | uint8 | bit0:isPTP_Enabled; bit1:ptp.isSynched; bit2:usingPTP; bit3:ntp.isSynched; bit4:ntpUsingFallback; bit5:ntpHasFallback; bit6–7:RES — session 32 |
-| 254 | 254 | 256 | 2 | RESERVED | — | 0x00 |
+| 254 | 254 | 255 | 1 | HW_REV | uint8 | 0x01=V1 (relay bus/solenoids/charger I2C); 0x02=V2 (dual Vicor/no solenoids/no I2C). Read before interpreting HEALTH_BITS [9] and POWER_BITS [10]. — v3.4.0 |
+| 255 | 255 | 256 | 1 | RESERVED | — | 0x00 |
 
-**Defined: 254 bytes. Reserved: 2 bytes. Fixed block: 256 bytes.**
+**Defined: 255 bytes. Reserved: 1 byte. Fixed block: 256 bytes.**
 
 
 ## BDC Register 1 — Response to `0xA1`
@@ -1227,6 +1254,23 @@ fixed block (bytes 60–123). Fixed block size: **64 bytes**.
 | 6 | 0x40 | FocusScore |
 | 7 | 0x80 | OSD |
 
+### MCC_POWER — `0xE2 PMS_POWER_ENABLE` which payload byte + POWER_BITS byte [10] bit index
+*v3.4.0 — replaces `MCC_SOLENOIDS`, `MCC_RELAYS`, `MCC_VICORS` (all removed from `defines.hpp`/`defines.cs`)*
+
+Enum value N = `POWER_BITS` byte [10] bit N. Used as `which` payload byte in `0xE2 PMS_POWER_ENABLE`.
+
+| Value | Enum | Revision | Description |
+|-------|------|----------|-------------|
+| 0 | `GPS_RELAY` | V1 only | GNSS power rail — NO opto, pin 83 |
+| 1 | `VICOR_BUS` | V1 only | Relay bank supply Vicor — inverted LOW=ON, A0 |
+| 2 | `LASER_RELAY` | Both | Laser enable — NO opto, pin 20 |
+| 3 | `GIM_VICOR` | V2 only | 300V→48V Gimbal Vicor — inverted LOW=ON, A0 |
+| 4 | `TMS_VICOR` | V2 only | TMS Vicor power bank — NC opto HIGH=ON, pin 83 |
+| 5 | `SOL_HEL` | V1 only | Laser HV bus solenoid — electromechanical, pin 5 |
+| 6 | `SOL_BDA` | V1 only | Gimbal power solenoid — electromechanical, pin 8 |
+
+> V1 valid: 0, 1, 2, 5, 6. V2 valid: 2, 3, 4. Invalid `which` for active revision → `STATUS_CMD_REJECTED`.
+
 ### VOTE_BITS_MCC — `0xAB SET_BCAST_FIRECONTROL_STATUS` byte 1 + TRC REG1 [41]
 | Bit | Name | Notes |
 |-----|------|-------|
@@ -1253,18 +1297,18 @@ fixed block (bytes 60–123). Fixed block size: **64 bytes**.
 ---
 
 
-## MSG_MCC.cs — Session 28/29 C# Additions
+## MSG_MCC.cs — Session 28/29 C# Additions and v3.4.0 Updates
 
 The following properties were added to `MSG_MCC.cs` in session 28/29. All are read-only,
 populated from the parsed register bytes on each `Parse()` call.
 
-### New Enum
+### New Enum (session 28)
 
 ```csharp
 public enum TIME_SOURCE { None, PTP, NTP }
 ```
 
-### New Properties
+### New Properties (session 28/29)
 
 | Property | Type | Source | Description |
 |----------|------|--------|-------------|
@@ -1274,12 +1318,37 @@ public enum TIME_SOURCE { None, PTP, NTP }
 | `activeTimeSourceLabel` | `string` | derived | `"PTP"` / `"NTP"` / `"NTP (fallback)"` / `"NONE"` |
 | `isPTP_DeviceEnabled` | `bool` | DEVICE_ENABLED bit 4 | PTP client enabled on MCC |
 | `isPTP_DeviceReady` | `bool` | DEVICE_READY bit 4 | `ptp.isSynched` — PTP has valid lock |
-| `ntpUsingFallback` | `bool` | STAT_BITS2 bit 0 | NTP is currently using fallback server |
-| `ntpHasFallback` | `bool` | STAT_BITS2 bit 1 | Fallback server is configured |
-| `usingPTP` | `bool` | STAT_BITS2 bit 2 | PTP is the active time source |
+| `ntpUsingFallback` | `bool` | TIME_BITS bit 4 | NTP is currently using fallback server |
+| `ntpHasFallback` | `bool` | TIME_BITS bit 5 | Fallback server is configured |
+| `usingPTP` | `bool` | TIME_BITS bit 2 | PTP is the active time source |
 
-> **⚠ `MCC_DEVICES` enum:** C# enum still has `RTCLOCK=4`. Update to `PTP=4` when enum is revised;
-> `isPTP_DeviceEnabled/Ready` currently use literal `4` to avoid dependency on stale enum value.
+### v3.4.0 Additions (MCC unification)
+
+| Property | Type | Source | Description |
+|----------|------|--------|-------------|
+| `HW_REV` | `byte` | byte [254] | Hardware revision: `0x01`=V1, `0x02`=V2 |
+| `IsV1` | `bool` | derived | `HW_REV == 0x01` |
+| `IsV2` | `bool` | derived | `HW_REV == 0x02` |
+| `HW_REV_Label` | `string` | derived | Human-readable revision description |
+| `HealthBits` | `byte` | byte [9] | Renamed from `StatusBits` — health only: isReady, isChargerEnabled, isNotBatLowVoltage |
+| `PowerBits` | `byte` | byte [10] | Renamed from `StatusBits2` — full power map: bit N = `MCC_POWER` value N |
+| `StatusBits` | `byte` | alias | Backward-compat → `HealthBits` |
+| `StatusBits2` | `byte` | alias | Backward-compat → `PowerBits` |
+| `isReady` | `bool` | HealthBits bit 0 | MCC system ready (was missing) |
+| `isCharger_Enabled` | `bool` | HealthBits bit 1 | Charger GPIO enabled (was StatusBits bit 4) |
+| `isNotBatLowVoltage` | `bool` | HealthBits bit 2 | Bus voltage ≥ 47V (was StatusBits bit 5) |
+| `pb_GpsRelay` | `bool` | PowerBits bit 0 | GPS relay state (V1 live, V2 always false) |
+| `pb_VicorBus` | `bool` | PowerBits bit 1 | Relay bus Vicor state (V1 live, V2 always false) |
+| `pb_LaserRelay` | `bool` | PowerBits bit 2 | Laser relay state (both revisions) |
+| `pb_GimVicor` | `bool` | PowerBits bit 3 | GIM Vicor state (V1 always false, V2 live) |
+| `pb_TmsVicor` | `bool` | PowerBits bit 4 | TMS Vicor state (V1 always false, V2 live) |
+| `pb_SolHel` | `bool` | PowerBits bit 5 | HEL solenoid state (V1 live, V2 always false) |
+| `pb_SolBda` | `bool` | PowerBits bit 6 | BDA solenoid state (V1 live, V2 always false) |
+
+> **Compat aliases retained** — `isVicor_Enabled`, `isRelay1_Enabled`, `isRelay2_Enabled` now revision-aware (check `IsV2`). `isRelay3/4_Enabled` return `false` permanently.
+> **Removed** — `isUnSolicitedMode_Enabled` (retired session 35). `MCC_SOLENOIDS`, `MCC_RELAYS`, `MCC_VICORS` removed from `defines.cs` — use `MCC_POWER`.
+
+> **⚠ `MCC_DEVICES` enum:** C# enum `RTCLOCK=4` — update to `PTP=4`. `isPTP_DeviceEnabled/Ready` currently use literal `4`.
 
 ### Bug Fixed (session 29)
 

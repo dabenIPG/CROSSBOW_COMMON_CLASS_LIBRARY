@@ -3,8 +3,8 @@
 **Project:** CROSSBOW  
 **Document:** `CROSSBOW_DOCUMENT_REGISTER.md`  
 **Doc #:** IPGD-0001  
-**Version:** 1.4.7  
-**Date:** 2026-04-07  
+**Version:** 1.4.8  
+**Date:** 2026-04-08  
 **Status:** Current  
 
 ---
@@ -34,9 +34,9 @@ This register is the canonical reference for all CROSSBOW project documents. It 
   <td><code>CROSSBOW_ICD_INT_ENG.docx</code></td>
   <td>CROSSBOW ICD — Internal Engineering</td>
   <td>IPGD-0003</td>
-  <td>3.3.9</td>
+  <td>3.4.0</td>
   <td>✅ Current</td>
-  <td>2026-04-07</td>
+  <td>2026-04-08</td>
   <td><code>CROSSBOW_ICD_INT_ENG.md</code></td>
   <td><code>gen_eng_icd.js</code></td>
 </tr>
@@ -140,9 +140,9 @@ This register is the canonical reference for all CROSSBOW project documents. It 
   <td><code>CROSSBOW_UG_ENG_GUI.docx</code></td>
   <td>CROSSBOW User Guide — Engineering GUI</td>
   <td>IPGD-0014 <sup>†</sup></td>
-  <td>1.0.0</td>
+  <td>1.3.0</td>
   <td>✅ Current</td>
-  <td>2026-03-16</td>
+  <td>2026-04-08</td>
   <td><code>CROSSBOW_UG_ENG_GUI.md</code></td>
   <td><code>gen_user_guides.py</code></td>
 </tr>
@@ -192,14 +192,14 @@ This register is the canonical reference for all CROSSBOW project documents. It 
   <td>—</td>
   <td>CROSSBOW System Architecture</td>
   <td>IPGD-0006</td>
-  <td>3.3.3</td>
+  <td>3.3.4</td>
   <td>✅ Current</td>
-  <td>2026-04-07</td>
+  <td>2026-04-08</td>
   <td><code>ARCHITECTURE.md</code></td>
   <td>—</td>
 </tr>
 <tr>
-  <td colspan="8"><em>System architecture reference. Covers subsystem relationships, interface topology, A1/A2/A3 port assignments, data flows, client access model, and MCC PTP/NTP time source architecture. v3.3.2: §4.2 C# ENG GUI client connect sequence added (authoritative standard — single 0xA4 registration, keepalive pattern, liveness model, firmware replay window fix). GUI-1 closed. FMC-NTP and GUI-8 added to open items.</em></td>
+  <td colspan="8"><em>System architecture reference. Covers subsystem relationships, interface topology, A1/A2/A3 port assignments, data flows, client access model, and MCC PTP/NTP time source architecture. v3.3.4: §9 MCC Internal Architecture updated for unified V1/V2 hardware abstraction. §9.6 Build Configuration added. §15 MCC version 3.3.0. §16 MCC HW_REV compatibility entry added.</em></td>
 </tr>
 
 <tr>
@@ -364,7 +364,7 @@ This register is the canonical reference for all CROSSBOW project documents. It 
 | IPGD-0003 | CROSSBOW ICD — Internal Engineering | `CROSSBOW_ICD_INT_ENG.docx` | `CROSSBOW_ICD_INT_ENG.md` |
 | IPGD-0004 | CROSSBOW ICD — Internal Operations | `CROSSBOW_ICD_INT_OPS.docx` | `CROSSBOW_ICD_INT_OPS.md` |
 | IPGD-0005 | CROSSBOW ICD — External Operations | `CROSSBOW_ICD_EXT_OPS.docx` | `CROSSBOW_ICD_EXT_OPS.md` |
-| IPGD-0006 | CROSSBOW System Architecture v3.3.2 | — | `ARCHITECTURE.md` |
+| IPGD-0006 | CROSSBOW System Architecture v3.3.4 | — | `ARCHITECTURE.md` |
 | IPGD-0007 | CROSSBOW Application Summary | — | `CROSS_APP_SUMMARY.md` |
 | IPGD-0008 | GStreamer Installation Guide | — | `GSTREAMER_INSTALL.md` |
 | IPGD-0009 | TRC Migration Guide | — | `TRC_MIGRATION.md` |

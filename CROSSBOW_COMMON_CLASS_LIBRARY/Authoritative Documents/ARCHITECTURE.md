@@ -1,9 +1,17 @@
 # CROSSBOW System Architecture
 
-**Document Version:** 3.3.3
-**Date:** 2026-04-07
-**ICD Reference:** ICD v3.3.9
-**Status:** Session 30 — TMC unified V1/V2 hardware abstraction; FW v3.3.0.
+**Document Version:** 3.3.4
+**Date:** 2026-04-08
+**ICD Reference:** ICD v3.4.0
+**Status:** MCC unified V1/V2 hardware abstraction; FW v3.3.0.
+
+**v3.3.4 changes (MCC unification — 2026-04-08):**
+- §9 MCC Internal Architecture: updated for unified V1/V2 hardware abstraction (`hw_rev.hpp`). FW version updated to 3.3.0.
+- §9.1 Role: V1/V2 power architecture variants documented.
+- §9.5 Register bits table: `STAT_BITS2` → `POWER_BITS` reference updated; `HEALTH_BITS` noted.
+- §9.6 Build Configuration (new): `hw_rev.hpp` table parallel to §11.6 TMC pattern.
+- §15 Version table: MCC `3.1.0` → `3.3.0`.
+- §16 Compatibility matrix: MCC HW_REV self-detection entry added.
 
 **v3.3.3 changes (session 30 — 2026-04-07):**
 - §11 TMC Internal Architecture: updated for unified V1/V2 hardware abstraction (`hw_rev.hpp`). Hardware variants documented, FW version updated to 3.3.0, socket budget unchanged (4/8).
@@ -1123,19 +1131,33 @@ BDC (`192.168.1.20`) at boot regardless of `--dest-host`. If omitted, video does
 
 ## 9. MCC Internal Architecture
 
-MCC runs on Arduino/STM32F7, FW v3.1.0, IP: 192.168.1.10.
+MCC runs on Arduino/STM32F7, FW v3.3.0, IP: 192.168.1.10.
+
+Hardware revision is selected at compile time in `hw_rev.hpp` (`HW_REV_V1` or `HW_REV_V2`). The active revision is reported in REG1 byte [254] (`HW_REV`) so `MSG_MCC.cs` can self-detect the register layout. Read byte [254] before interpreting `HEALTH_BITS` [9] and `POWER_BITS` [10].
 
 ### 9.1 Role
 
 Master Control Controller — manages all power and energy subsystems:
 - Battery (BAT) — pack voltage, current, state of charge
 - Laser power supply (HEL/IPG) — power bus enable, status, fire vote
-- Charger (CRG/CMC) — charge control, status
+- Charger (CRG/DBU) — charge control (V1: I2C + GPIO; V2: GPIO only)
 - GNSS (NovAtel) — position, heading, INS solution
 - TMC supervision — receives TMC REG1 via A1 and embeds it in MCC REG1
 - PTP client (primary) — syncs to NovAtel GNSS grandmaster (.30) via IEEE 1588
 - NTP client (fallback) — syncs to NTP (.33) with automatic fallback to .208
-- Fire control — aggregates all vote bits, issues 0xAB to BDC at 100 Hz
+- Fire control — aggregates all vote bits, issues 0xAB to BDC at 50 Hz
+
+**Hardware variants:**
+
+| Subsystem | V1 | V2 |
+|-----------|----|----|\n| Solenoids | SOL_HEL (pin 5) + SOL_BDA (pin 8) — laser HV bus + gimbal power | **Retired** — hardware removed |
+| Relay bus | Single Vicor (A0, LOW=ON) → relay bank | **Repurposed** → `GIM_VICOR` (A0, LOW=ON) — 300V→48V Gimbal Vicor |
+| TMS Vicor | None (`MCC_RELAYS::TMS` was pinless) | Pin 83 = `TMS_VICOR` — NC opto → TMS Vicor power bank (HIGH=ON) |
+| GPS relay | Pin 83 (NO opto) → GNSS power | **Retired** — GNSS always powered at boot |
+| Laser relay | Pin 20 (NO opto) → laser digital bus | Pin 20 (NO opto) → laser enable (swapped from pin 83) |
+| Charger enable | GPIO pin 6 | GPIO pin 82 (was CHARGER_MODE on V1) |
+| Charger I2C | DBU3200 — CC/CV control, status | **Retired** — new charger GPIO only |
+| `isBDC_Ready` source | Set by SOL_BDA on in StateManager | Set by `EnablePower(GIM_VICOR)` in StateManager |
 
 ### 9.2 Subsystem Embedding
 
@@ -1152,6 +1174,7 @@ MCC REG1 (256-byte payload) embeds:
 ### 9.3 A1 TX → BDC
 
 MCC sends REG1 and fire control vote (0xAB) to BDC via A1 at 50 Hz and 100 Hz respectively.
+`SEND_FIRE_STATUS` gate: `isPwr_LaserRelay && isBDC_Ready` (both revisions). Replaces V1's `isSolenoid2_Enabled` gate — laser power is the correct semantic gate on both hardware variants.
 
 ### 9.4 Vote Aggregation
 
@@ -1238,21 +1261,38 @@ Validated session 29: state=MASTER, `offset=0.000ns`, `Time Offsets Valid=TRUE`,
 | `TIMESRC AUTO` | Both concurrent — NTP stays warm |
 | `PTPDEBUG <0-3>` | Set PTP debug level *(FW-1 — pending)* |
 
-**Register bits** (session 28/29, updated session 32):
+**Register bits** (session 28/29, updated session 32, updated MCC unification):
 
 | Register | Byte | Bit | Field |
 |----------|------|-----|-------|
 | DEVICE_ENABLED | 7 | 4 | `isPTP_Enabled` |
 | DEVICE_READY | 8 | 4 | `isPTP_Ready` (`ptp.isSynched`) |
-| STAT_BITS2 | 10 | 0–2 | **RES** (moved to TIME_BITS byte 253 — session 32) |
+| HEALTH_BITS | 9 | 0 | `isReady` |
+| HEALTH_BITS | 9 | 1 | `isChargerEnabled` |
+| HEALTH_BITS | 9 | 2 | `isNotBatLowVoltage` |
+| POWER_BITS | 10 | N | `isPwr_<X>` where N = `MCC_POWER` enum value — see ICD v3.4.0 |
 | TIME_BITS | 253 | 0 | `isPTP_Enabled` |
 | TIME_BITS | 253 | 1 | `ptp.isSynched` |
 | TIME_BITS | 253 | 2 | `usingPTP` (active time source is PTP) |
 | TIME_BITS | 253 | 3 | `ntp.isSynched` |
 | TIME_BITS | 253 | 4 | `ntpUsingFallback` |
 | TIME_BITS | 253 | 5 | `ntpHasFallback` |
+| HW_REV | 254 | — | `0x01`=V1, `0x02`=V2 — read before interpreting HEALTH_BITS and POWER_BITS |
 
 `TIME_BITS` layout is identical across MCC (byte 253), BDC (byte 391), and TMC (`STATUS_BITS3` byte 61) — single decode path for all controllers.
+
+### 9.6 Build Configuration (`hw_rev.hpp`)
+
+| Define | Effect |
+|--------|--------|
+| `HW_REV_V1` | V1 hardware — relay bus Vicor, solenoids, GPS relay, charger I2C |
+| `HW_REV_V2` | V2 hardware — dual Vicor (GIM+TMS), no solenoids, no GPS relay, GPIO-only charger |
+| `MCC_HW_REV_BYTE` | Auto-set — `0x01` (V1) or `0x02` (V2); written to REG1 byte [254] |
+| `PIN_PWR_*` / `POL_PWR_*_ON/OFF` | Per-revision pin and polarity macros for all 7 power outputs |
+| `POL_PWR_GIM_ON = LOW` | GIM_VICOR inverted drive — ⚠️ analytically derived, verify on V2 bring-up |
+| `POL_PWR_TMS_ON = HIGH` | TMS_VICOR NC opto — ⚠️ analytically derived, verify on V2 bring-up |
+
+`EnablePower(MCC_POWER, bool)` is the sole function that calls `digitalWrite` on power output pins. All seven `MCC_POWER` outputs (GPS_RELAY, VICOR_BUS, LASER_RELAY, GIM_VICOR, TMS_VICOR, SOL_HEL, SOL_BDA) are dispatched through a single switch in `EnablePower()`. `EnableRelay()`, `EnableVicor()`, and `EnableSol()` wrappers were removed — all call sites use `EnablePower()` directly.
 
 ---
 
@@ -1606,7 +1646,7 @@ VERSION_PACK(major, minor, patch):
 
 | Controller | Current Version | VERSION_PACK value |
 |------------|----------------|--------------------|
-| MCC | 3.2.0 | `VERSION_PACK(3,2,0)` |
+| MCC | 3.3.0 | `VERSION_PACK(3,3,0)` |
 | BDC | 3.2.0 | `VERSION_PACK(3,2,0)` |
 | FMC | 3.2.0 | `VERSION_PACK(3,2,0)` |
 | TRC | 3.0.1 | `VERSION_PACK(3,0,1)` |
@@ -1647,6 +1687,7 @@ UInt32 patch =  VERSION_WORD        & 0xFFF;
 | EXT_OPS 15000 port block migration | ✅ Session 37 — 15001/15002/15009/15010 verified |
 | TMC V1/V2 hardware abstraction | ✅ Session 30 — `hw_rev.hpp`, unified codebase FW v3.3.0, HW_REV byte [62] self-detecting |
 | TMC `SINGLE_LOOP` topology flag | ✅ Session 30 — STATUS_BITS1 bit 6, both revisions |
+| MCC V1/V2 hardware abstraction | ✅ MCC unification — `hw_rev.hpp`, unified codebase FW v3.3.0, HW_REV byte [254] self-detecting. HEALTH_BITS/POWER_BITS breaking change — ICD v3.4.0 required. |
 
 ---
 
