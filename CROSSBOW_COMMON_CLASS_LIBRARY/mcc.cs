@@ -4,10 +4,9 @@
 //   THEIA:    new MCC(log, TransportPath.A3_External)  — port 10050, magic 0xCB 0x58
 //   ENG GUI:  new MCC(log, TransportPath.A2_Internal)  — port 10018, magic 0xCB 0x49
 //
-// INT_ENG commands (EnableSolenoid, VicorEnable, EnableRelay, ReInitDevice,
-//   EnableDevice, SetFanSpeed, SetTargetTemp) are guarded — calling them on
-//   an A3 instance logs a warning and does nothing. Firmware rejects INT
-//   commands on A3 regardless, but the guard catches mistakes early.
+// INT_ENG commands (EnablePower, ReInitDevice, EnableDevice,
+//   SetFanSpeed, SetTargetTemp) are guarded — calling them on
+//   an A3 instance logs a warning and does nothing.
 //
 // MSG classes are in separate files:
 //   MSG_MCC.cs, MSG_BATTERY.cs, MSG_IPG.cs, MSG_TMC.cs, MSG_GNSS.cs, MSG_CMC.cs
@@ -400,7 +399,9 @@ namespace CROSSBOW
             set { Send((byte)ICD.PMS_CHARGER_ENABLE, new byte[] { Convert.ToByte(value) }); }
         }
 
-        // 0xED PMS_SET_CHARGER_LEVEL
+        // 0xED PMS_SET_CHARGER_LEVEL — V1 only (I2C to DBU3200)
+        // V2: firmware returns STATUS_CMD_REJECTED (no charger I2C).
+        // Guard the call site with LatestMSG.IsV2 before sending on V2 hardware.
         public CHARGE_LEVELS ChargeLevel
         {
             set { Send((byte)ICD.PMS_SET_CHARGER_LEVEL, new byte[] { Convert.ToByte(value) }); }
@@ -437,28 +438,12 @@ namespace CROSSBOW
 
         // ── INT_ENG commands — A2 only, guarded ──────────────────────────────
 
-        // 0xE2 PMS_SOL_ENABLE
-        public void EnableSolenoid(MCC_SOLENOIDS w, bool en)
+        // 0xE2 PMS_POWER_ENABLE — unified power output control
+        // INT_ENG only. Invalid MCC_POWER for active HW revision rejected by firmware.
+        public void EnablePower(MCC_POWER p, bool en)
         {
-            if (!AssertIntEng("EnableSolenoid")) return;
-            Send((byte)ICD.PMS_SOL_ENABLE, new byte[] { (byte)w, (byte)(en ? 1 : 0) });
-        }
-
-        // 0xE4 PMS_RELAY_ENABLE
-        public void EnableRelay(MCC_RELAYS w, bool en)
-        {
-            if (!AssertIntEng("EnableRelay")) return;
-            Send((byte)ICD.PMS_RELAY_ENABLE, new byte[] { (byte)w, (byte)(en ? 1 : 0) });
-        }
-
-        // 0xEC PMS_VICOR_ENABLE
-        public bool VicorEnable
-        {
-            set
-            {
-                if (!AssertIntEng("VicorEnable")) return;
-                Send((byte)ICD.PMS_VICOR_ENABLE, new byte[] { (byte)(value ? 1 : 0) });
-            }
+            if (!AssertIntEng("EnablePower")) return;
+            Send((byte)ICD.PMS_POWER_ENABLE, new byte[] { (byte)p, (byte)(en ? 1 : 0) });
         }
 
         // 0xE0 SET_MCC_REINIT

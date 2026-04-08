@@ -63,21 +63,6 @@ namespace CROSSBOW
         GNSS = 6,
         BDC = 7,
     };
-    // MCC solenoid identifiers — used with ICD.PMS_SOL_ENABLE (0xE2)
-    public enum MCC_SOLENOIDS
-    {
-        HEL = 0,  // D5 — laser shutter solenoid
-        BDA = 1,  // D8 — BDA solenoid
-    };
-
-    // MCC relay identifiers — used with ICD.PMS_RELAY_ENABLE (0xE4)
-    public enum MCC_RELAYS
-    {
-        GPS = 1,  // D83 — GNSS power relay
-        HEL = 2,  // D20 — laser power relay
-        TMS = 3,  // TMS power relay
-    };
-
     public enum BDC_DEVICES
     {
         NTP = 0,
@@ -167,6 +152,21 @@ namespace CROSSBOW
         HI = 55,  //
     }
 
+    // MCC unified power output enum — matches MCC_POWER in defines.hpp
+    // Enum value N = POWER_BITS byte 10 bit N.
+    // Used with ICD.PMS_POWER_ENABLE (0xE2): { (byte)MCC_POWER, (byte)(en?1:0) }
+    // V1 valid: GPS_RELAY, VICOR_BUS, LASER_RELAY, SOL_HEL, SOL_BDA
+    // V2 valid: LASER_RELAY, GIM_VICOR, TMS_VICOR
+    public enum MCC_POWER
+    {
+        GPS_RELAY = 0,  // V1 only — GNSS power rail, pin 83
+        VICOR_BUS = 1,  // V1 only — relay bank Vicor, A0
+        LASER_RELAY = 2,  // Both   — laser enable, pin 20
+        GIM_VICOR = 3,  // V2 only — 300V→48V Gimbal Vicor, A0
+        TMS_VICOR = 4,  // V2 only — TMS Vicor bank, pin 83
+        SOL_HEL = 5,  // V1 only — laser HV bus solenoid, pin 5
+        SOL_BDA = 6,  // V1 only — gimbal power solenoid, pin 8
+    }
     public enum ICD
     {
         SET_UNSOLICITED = 0xA0,  // Subscribe/unsubscribe to unsolicited 100 Hz push. {0x01}=subscribe, {0x00}=unsubscribe. Any accepted command auto-registers the sender. Does NOT affect A1 stream.
@@ -243,9 +243,9 @@ namespace CROSSBOW
         // RESERVED 0xE (MAYBE TMS/PMS STUFF?)
         SET_MCC_REINIT = 0xE0,  // uint8: 0=NTP, 1=TMC, 2=HEL, 3=BAT, 4=PTP, 5=CRG, 6=GNSS, 7=BDC
         SET_MCC_DEVICES_ENABLE = 0xE1,  // uint8: 0=NTP, 1=TMC, 2=HEL, 3=BAT, 4=PTP, 5=CRG, 6=GNSS, 7=BDC; uint8 0/1 — device 4 (PTP) enable/disable PTP slave; device 0 (NTP) controls NTP only
-        PMS_SOL_ENABLE = 0xE2,  //	ENABLE SOLENOID 1/2	which byte 0/1, on/off byte 0/1
+        PMS_POWER_ENABLE = 0xE2,  // uint8(MCC_POWER); uint8 0/1 — INT_ENG only, both revisions. Replaces PMS_SOL_ENABLE/PMS_RELAY_ENABLE/PMS_VICOR_ENABLE.
         PMS_CHARGER_ENABLE = 0xE3,  // ENABLE CHARGER	on/off byte 0/1
-        PMS_RELAY_ENABLE = 0xE4,  //	RELAY X ON/OFF	byte 1,2,3,4; byte 0/1	relay 1 based 
+        RES_E4 = 0xE4,  // ⚠ RETIRED — was PMS_RELAY_ENABLE. Use PMS_POWER_ENABLE with GPS_RELAY or LASER_RELAY.
         RES_E5 = 0xE5,  //	
         PMS_SET_FIRE_REQUESTED_VOTE = 0xE6,  //	LASER FIRE VOTE REQUEST	byte on/off	Must be sent continous
         TMS_INPUT_FAN_SPEED = 0xE7,  // which byte 0/1; speed (0=off, 128=low, 255=high) — see TMC_FAN_SPEEDS
@@ -253,7 +253,7 @@ namespace CROSSBOW
         TMS_SET_VICOR_ENABLE = 0xE9,  //	SET VICOR X TO ON/OFF	which byte vicor (0-3), byte on/off
         TMS_SET_LCM_ENABLE = 0xEA,  //	SET LCM X TO ON/OFF	which byte lcm enum, byte on/off
         TMS_SET_TARGET_TEMP = 0xEB,  // Set Target Temp C  byte [10-40 deg C] — firmware clamps silently
-        PMS_VICOR_ENABLE = 0xEC,  //	VICOR ON/OFF	byte 0/1
+        RES_EC = 0xEC,  // ⚠ RETIRED — was PMS_VICOR_ENABLE. Use PMS_POWER_ENABLE with VICOR_BUS, GIM_VICOR, or TMS_VICOR.
         PMS_SET_CHARGER_LEVEL = 0xED,  // SET CHARGER CURRENT LEVEL	enum low=10, med=30, high=55
         RES_EE = 0xEE,  //
         RES_EF = 0xEF,  // 

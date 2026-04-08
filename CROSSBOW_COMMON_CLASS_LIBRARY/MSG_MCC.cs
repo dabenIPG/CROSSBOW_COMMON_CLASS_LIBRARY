@@ -111,8 +111,16 @@ namespace CROSSBOW
         // ── Status / device bits ──────────────────────────────────────────────
         public byte DeviceEnabledBits { get; private set; } = 0;
         public byte DeviceReadyBits   { get; private set; } = 0;
-        public byte StatusBits        { get; private set; } = 0;
-        public byte StatusBits2       { get; private set; } = 0;
+        public byte StatusBits => HealthBits;   // backward compat
+        public byte StatusBits2 => PowerBits;    // backward compat
+        public byte HealthBits { get; private set; } = 0;   // byte 9 — renamed from StatusBits
+        public byte PowerBits { get; private set; } = 0;   // byte 10 — renamed from StatusBits2
+        public byte HW_REV { get; private set; } = 0;   // byte 254 — 0x01=V1, 0x02=V2
+        public bool IsV1 => HW_REV == 0x01;
+        public bool IsV2 => HW_REV == 0x02;
+        public string HW_REV_Label => HW_REV == 0x01 ? "V1 — relay/solenoids/chargerI2C"
+                                    : HW_REV == 0x02 ? "V2 — dualVicor/noSol/noI2C"
+                                    : $"unknown (0x{HW_REV:X2})";
 
         public bool isVerboseLogEnabled { get; set; } = true;
 
@@ -326,8 +334,8 @@ namespace CROSSBOW
         //   [5-6]     dt_us          uint16
         //   [7]       DeviceEnabledBits
         //   [8]       DeviceReadyBits
-        //   [9]       StatusBits
-        //   [10]      StatusBits2
+        //   [9]       HealthBits     (isReady bit0, isChargerEnabled bit1, isNotBatLowVoltage bit2)
+        //   [10]      PowerBits      (bit N = MCC_POWER value N — GPS/VICOR/LASER/GIM/TMS/SOL_HEL/SOL_BDA)
         //   [11]      VoteBits
         //   [12-19]   NTP epoch ms   Int64
         //   [20]      Temp1 (Charger) int8
@@ -348,7 +356,8 @@ namespace CROSSBOW
         //   [245-248] VERSION_WORD     uint32
         //   [249-252] MCU Temp         float
         //   [253]      TIME_BITS (session 32) — isPTP_En, ptp.isSynched, usingPTP, ntp.isSynched, ntpUsingFB, ntpHasFB
-        //   [254-255]  RESERVED
+        //   [254]      HW_REV — 0x01=V1, 0x02=V2 (MCC unification session)
+        //   [255]      RESERVED
         // =========================================================================
         private void ParseMSG01(byte[] msg, int ndx)
         {
@@ -361,8 +370,8 @@ namespace CROSSBOW
 
             DeviceEnabledBits = msg[ndx]; ndx++;
             DeviceReadyBits   = msg[ndx]; ndx++;
-            StatusBits        = msg[ndx]; ndx++;
-            StatusBits2       = msg[ndx]; ndx++;
+            HealthBits = msg[ndx]; ndx++;   // was StatusBits
+            PowerBits = msg[ndx]; ndx++;   // was StatusBits2
             VoteBits          = msg[ndx]; ndx++;
 
             // ICD v3.0.0 session 4: NTP epoch ms only — no RTC field
@@ -397,6 +406,7 @@ namespace CROSSBOW
 
             // [253] TIME_BITS (session 32) — consolidated time source status
             TimeBits = msg[ndx]; ndx++;
+            HW_REV = msg[ndx]; ndx++;   // [254] HW_REV — 0x01=V1, 0x02=V2
 
             if (dt_us > dtmax)
             {
@@ -410,25 +420,39 @@ namespace CROSSBOW
         }
 
         // =========================================================================
-        // StatusBits accessors
+        // HealthBits / PowerBits accessors
         // =========================================================================
-        public bool isSolenoid1_Enabled       { get { return IsBitSet(StatusBits, 1); } }
-        public bool isSolenoid2_Enabled       { get { return IsBitSet(StatusBits, 2); } }
-        public bool isLaserPowerBus_Enabled   { get { return IsBitSet(StatusBits, 3); } }
-        public bool isCharger_Enabled         { get { return IsBitSet(StatusBits, 4); } }
-        public bool isNotBatLowVoltage        { get { return IsBitSet(StatusBits, 5); } }
-        public bool isUnSolicitedMode_Enabled { get { return IsBitSet(StatusBits, 7); } }
+        // HealthBits accessors [byte 9] — isReady(0), isChargerEnabled(1), isNotBatLowVoltage(2)
+        public bool isReady { get { return IsBitSet(HealthBits, 0); } }   // new — was missing from old StatusBits
+        public bool isCharger_Enabled { get { return IsBitSet(HealthBits, 1); } }   // was bit 4
+        public bool isNotBatLowVoltage { get { return IsBitSet(HealthBits, 2); } }   // was bit 5
+                                                                                     // Solenoid/laser moved to PowerBits — compat aliases so call sites don't break
+        public bool isSolenoid1_Enabled { get { return IsBitSet(PowerBits, (int)MCC_POWER.SOL_HEL); } }
+        public bool isSolenoid2_Enabled { get { return IsBitSet(PowerBits, (int)MCC_POWER.SOL_BDA); } }
+        public bool isLaserPowerBus_Enabled { get { return IsBitSet(PowerBits, (int)MCC_POWER.LASER_RELAY); } }
+        // Retired entirely — not in any register byte
+        // isUnSolicitedMode_Enabled removed (StatusBits bit 7 — retired session 35)
 
-        // StatusBits2 [byte 10] — session 32: bits 0-2 now RES (moved to TimeBits byte 253)
-        // Named properties below redirect to TimeBits for backward compatibility.
-        public bool ntpUsingFallback  { get { return tb_ntpUsingFallback; } }   // → TimeBits bit 4
-        public bool ntpHasFallback    { get { return tb_ntpHasFallback;   } }   // → TimeBits bit 5
-        public bool usingPTP          { get { return tb_usingPTP;         } }   // → TimeBits bit 2
-        public bool isVicor_Enabled   { get { return IsBitSet(StatusBits2, 3); } }
-        public bool isRelay1_Enabled  { get { return IsBitSet(StatusBits2, 4); } }
-        public bool isRelay2_Enabled  { get { return IsBitSet(StatusBits2, 5); } }
-        public bool isRelay3_Enabled  { get { return IsBitSet(StatusBits2, 6); } }   // added session 4
-        public bool isRelay4_Enabled  { get { return IsBitSet(StatusBits2, 7); } }   // added session 4
+        // PowerBits accessors [byte 10] — bit N = MCC_POWER value N (both revisions)
+        public bool pb_GpsRelay { get { return IsBitSet(PowerBits, (int)MCC_POWER.GPS_RELAY); } }  // V1 live | V2 always 0
+        public bool pb_VicorBus { get { return IsBitSet(PowerBits, (int)MCC_POWER.VICOR_BUS); } }  // V1 live | V2 always 0
+        public bool pb_LaserRelay { get { return IsBitSet(PowerBits, (int)MCC_POWER.LASER_RELAY); } }  // both revisions
+        public bool pb_GimVicor { get { return IsBitSet(PowerBits, (int)MCC_POWER.GIM_VICOR); } }  // V1 always 0 | V2 live
+        public bool pb_TmsVicor { get { return IsBitSet(PowerBits, (int)MCC_POWER.TMS_VICOR); } }  // V1 always 0 | V2 live
+        public bool pb_SolHel { get { return IsBitSet(PowerBits, (int)MCC_POWER.SOL_HEL); } }  // V1 live | V2 always 0
+        public bool pb_SolBda { get { return IsBitSet(PowerBits, (int)MCC_POWER.SOL_BDA); } }  // V1 live | V2 always 0
+
+        // Backward-compat aliases — revision-aware so existing call sites return correct value on both V1 and V2
+        public bool isVicor_Enabled { get { return IsV2 ? pb_GimVicor : pb_VicorBus; } }
+        public bool isRelay1_Enabled { get { return IsV2 ? pb_LaserRelay : pb_GpsRelay; } }
+        public bool isRelay2_Enabled { get { return IsV2 ? pb_TmsVicor : pb_LaserRelay; } }
+        public bool isRelay3_Enabled { get { return false; } }  // retired — not in PowerBits
+        public bool isRelay4_Enabled { get { return false; } }  // retired — not in PowerBits
+
+        // TimeBits redirects — unchanged
+        public bool ntpUsingFallback { get { return tb_ntpUsingFallback; } }
+        public bool ntpHasFallback { get { return tb_ntpHasFallback; } }
+        public bool usingPTP { get { return tb_usingPTP; } }
 
         // =========================================================================
         // VoteBits accessors
