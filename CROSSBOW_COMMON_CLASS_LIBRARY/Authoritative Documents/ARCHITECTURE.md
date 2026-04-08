@@ -1,9 +1,17 @@
 # CROSSBOW System Architecture
 
-**Document Version:** 3.3.2
-**Date:** 2026-04-06
-**ICD Reference:** ICD v3.3.7
-**Status:** Session 29 — C# client model standardized fleet-wide; firmware replay window fix; ENG GUI connection stability resolved.
+**Document Version:** 3.3.3
+**Date:** 2026-04-07
+**ICD Reference:** ICD v3.3.9
+**Status:** Session 30 — TMC unified V1/V2 hardware abstraction; FW v3.3.0.
+
+**v3.3.3 changes (session 30 — 2026-04-07):**
+- §11 TMC Internal Architecture: updated for unified V1/V2 hardware abstraction (`hw_rev.hpp`). Hardware variants documented, FW version updated to 3.3.0, socket budget unchanged (4/8).
+- §11.1 Role: updated to reflect V1/V2 hardware differences (pump power supply, heater, external ADC).
+- §11.3 Hardware: table updated with V1/V2 columns.
+- §11.4 Temperature Channels: tv3/tv4 noted as V1-only.
+- §15 Version table: TMC `3.2.0` → `3.3.0`.
+- §16 Compatibility matrix: TMC HW_REV self-detection entry added.
 
 **v3.3.2 changes (session 29):**
 - §4.2 (new): C# ENG GUI client connect sequence — authoritative standard for all four controllers (A2 and A3). Single `0xA4` registration on connect (burst retired — firmware replay fix makes it unnecessary). `_lastKeepalive` only updated in `SendKeepalive()` — not on every `Send()`. Any valid frame updates `isConnected` and `lastMsgRx` — not just `0xA1`. `connection established` logged immediately in receive loop on first valid frame. `KeepaliveLoop` redundant elapsed check removed — `SendKeepalive()` called directly on every timer tick.
@@ -1367,17 +1375,26 @@ TRC tx, ty
 
 ## 11. TMC Internal Architecture
 
-TMC runs on STM32F7 (OpenCR board library), FW v3.2.0, IP: 192.168.1.12.
+TMC runs on STM32F7 (OpenCR board library), FW v3.3.0, IP: 192.168.1.12.
+
+Hardware revision is selected at compile time in `hw_rev.hpp` (`HW_REV_V1` or `HW_REV_V2`). The active revision is reported in REG1 byte [62] (`HW_REV`) so `MSG_TMC.cs` can self-detect the layout.
 
 ### 11.1 Role
 
-Thermal Management Controller — maintains coolant temperature for the HEL thermal load:
-- Coolant pump (DAC-controlled)
-- LCM1 / LCM2 (liquid cooling modules, DAC-controlled)
-- Vicor 1 / Vicor 2 power converters
-- Input fans Fan1 / Fan2 (speed-controlled via 0xE7)
-- TPH sensor (temperature, pressure, humidity)
-- Heater (Vicor 3 / tv3 channel)
+Thermal Management Controller — maintains coolant temperature for the HEL thermal load.
+
+| Subsystem | V1 | V2 |
+|-----------|----|----|
+| Coolant pumps | Single Vicor DC-DC, both pumps in parallel, DAC speed control | Two TRACO DC-DCs, one per pump, on/off only, independent control |
+| LCM1 / LCM2 | DAC-controlled compressor speed (MCP47FEBXX I2C) | **Unchanged** |
+| Vicor converters | 4 Vicors (LCM1, LCM2, Pump, Heater) — NO opto inhibit | LCM Vicors only (2) — NC opto inhibit |
+| Heater | Present — Vicor supply + DAC control | **Removed** |
+| External ADC | Two ADS1015 chips (8 aux temp channels) | **Removed** — essential temps on direct MCU analog |
+| Input fans | Fan1 / Fan2 PWM speed control | **Unchanged** |
+| TPH sensor | BME280 I2C (temp, pressure, humidity) | **Unchanged** |
+| Flow sensors | f1 / f2 turbine meters, interrupt-driven | **Unchanged** |
+| Opto type (PSU inhibit) | Normally Open (NO) | Normally Closed (NC) |
+| Opto type (LCM enable) | Normally Open (NO) | **Unchanged — NO** |
 
 ### 11.2 TMC W5500 Socket Budget
 
@@ -1390,37 +1407,55 @@ W5500 has 8 hardware sockets. TMC allocates **4/8 always** — four sockets spar
 | 3 | PTP `udpEvent` | 319 | multicast | PTP SYNC RX — **always allocated at boot** |
 | 4 | PTP `udpGeneral` | 320 | multicast | PTP DELAY_REQ/RESP — **always allocated at boot** |
 
-Pump (DAC), LCM1/2 (DAC+ADC), Vicors (GPIO), Fans (PWM), TPH (I2C), Flow sensors (analog) consume no W5500 sockets.
+Pump (GPIO/DAC), LCM1/2 (DAC+ADC), Vicors (GPIO), Fans (PWM), TPH (I2C), Flow sensors (interrupt) consume no W5500 sockets.
 
 > **ptp.INIT() unconditional:** TMC calls `ptp.INIT(IP_GNSS)` at boot regardless of `isPTP_Enabled` — sockets 3/4 are always allocated. `isPTP_Enabled` gates `ptp.UPDATE()` only. This is the correct pattern — MCC and FMC will align to match (FW-B4).
 
 ### 11.3 Hardware
 
-| Hardware | Interface | Notes |
-|----------|-----------|-------|
-| Pump | DAC | Coolant loop — speed in DAC counts [0–4095] |
-| LCM1 / LCM2 | DAC + ADC | Speed setting + current readback |
-| Vicor 1–4 | GPIO enable | Power converters |
-| Fan1 / Fan2 | PWM | Speed: 0=off, 128=low, 255=high (`TMC_FAN_SPEEDS`) |
-| TPH sensor | I2C | Temp (°C), pressure (Pa), humidity (%) |
-| Flow sensors | Analog | f1 / f2 — flow rate × 10 LPM |
+| Hardware | Interface | V1 | V2 |
+|----------|-----------|----|----|
+| Pump PSU | GPIO enable | `PIN_VICOR_PUMP` (83) — Vicor, DAC trim via `TMC_PUMP_SPEEDS` | `PIN_VICOR_PUMP1` (65), `PIN_VICOR_PUMP2` (46) — TRACO, on/off only |
+| LCM1 / LCM2 | DAC (MCP47FEBXX 0x63) + ADC | Speed setting + current readback | **Unchanged** |
+| Vicor LCM1 | GPIO enable | `PIN_VICOR_LCM1` (1) | **Unchanged** |
+| Vicor LCM2 | GPIO enable | `PIN_VICOR_LCM2` (0) | **Unchanged** |
+| Heater | GPIO enable + DAC | `PIN_VICOR_HEAT` (72) | **Removed** |
+| Fan1 / Fan2 | PWM | Pins 5 / 9 | **Unchanged** |
+| TPH sensor | I2C | BME280 | **Unchanged** |
+| Flow sensors | Interrupt | Pins 7 / 8 | **Unchanged** |
+| Aux temp ADC | I2C | Two ADS1015 chips (0x48, 0x49) | **Removed** |
+| PSU inhibit opto | GPIO | Normally Open (CTRL_ON=LOW) | Normally Closed (CTRL_ON=HIGH) |
+| LCM enable opto | GPIO | Normally Open (HIGH=ON) | **Unchanged** |
 
-### 11.3 A1 TX → MCC
+### 11.4 A1 TX → MCC
 
 TMC streams REG1 (64 bytes) to MCC (.10) at 100 Hz via A1 port 10019. MCC embeds the
 received buffer directly into MCC REG1 bytes [66–129] with no parsing at the MCC level —
 raw pass-through. THEIA parses it as `MSG_TMC`.
 
-### 11.4 Temperature Channels
+### 11.5 Temperature Channels
 
-| Field | Description |
-|-------|-------------|
-| `tt` | Target setpoint °C — range [10–40°C], enforced by firmware (clamp, no error) |
-| `ta1` | Air temp 1 °C |
-| `tf1` / `tf2` | Flow temp 1/2 °C |
-| `tc1` / `tc2` | Compressor temp 1/2 °C |
-| `to1` / `to2` | Output channel temp 1/2 °C |
-| `tv1` – `tv4` | Vicor temps — tv3=heater, tv4=pump °C |
+| Field | Description | Source |
+|-------|-------------|--------|
+| `tt` | Target setpoint °C — range [10–40°C], enforced by firmware (clamp, no error) | Serial/ICD command |
+| `ta1` | Air temp 1 °C | V1: ADS1015 ADC1 CH1 → V2: `PIN_TEMP_AIR1` (72) direct |
+| `tf1` / `tf2` | Flow temp 1/2 °C | Direct MCU analog (both revisions) |
+| `tc1` / `tc2` | Compressor temp 1/2 °C | V1: ADS1015 ADC1 CH3/CH4 → V2: `PIN_TEMP_COMP1/2` (29/30) direct |
+| `to1` | Output channel 1 temp °C | V1: ADS1015 ADC2 CH1 → V2: `PIN_TEMP_OUT1` (42) direct |
+| `to2` | Output channel 2 temp °C | Direct MCU analog (both revisions) |
+| `tv1` / `tv2` | Vicor LCM1/2 temp °C | Direct MCU analog (both revisions) |
+| `tv3` | Vicor heater temp °C | **V1 only** — ADS1015 ADC2 CH3; 0x00 on V2 |
+| `tv4` | Vicor pump temp °C | **V1 only** — ADS1015 ADC2 CH4; 0x00 on V2 |
+
+### 11.6 Build Configuration (`hw_rev.hpp`)
+
+| Define | Effect |
+|--------|--------|
+| `HW_REV_V1` | V1 hardware — Vicor/ADS1015/heater/single pump |
+| `HW_REV_V2` | V2 hardware — TRACO/direct analog/no heater/dual pump |
+| `SINGLE_LOOP` | Optional (independent of HW_REV) — single coolant loopback; both PIDs track `tf2` |
+| `CTRL_OFF` / `CTRL_ON` | Auto-set from HW_REV — Vicor/PSU inhibit line polarity |
+| `TMC_HW_REV_BYTE` | Auto-set — `0x01` (V1) or `0x02` (V2); written to REG1 byte [62] |
 
 ---
 
@@ -1575,7 +1610,7 @@ VERSION_PACK(major, minor, patch):
 | BDC | 3.2.0 | `VERSION_PACK(3,2,0)` |
 | FMC | 3.2.0 | `VERSION_PACK(3,2,0)` |
 | TRC | 3.0.1 | `VERSION_PACK(3,0,1)` |
-| TMC | 3.2.0 | `VERSION_PACK(3,2,0)` |
+| TMC | 3.3.0 | `VERSION_PACK(3,3,0)` |
 
 C# unpack:
 ```csharp
@@ -1610,6 +1645,8 @@ UInt32 patch =  VERSION_WORD        & 0xFFF;
 | ICD scope labels (INT_OPS/INT_ENG) | ✅ Applied ICD v3.1.0 — NEW-13 closed |
 | EXT_OPS framing (CueReceiver/CueSender) | ✅ Deployed session 17 |
 | EXT_OPS 15000 port block migration | ✅ Session 37 — 15001/15002/15009/15010 verified |
+| TMC V1/V2 hardware abstraction | ✅ Session 30 — `hw_rev.hpp`, unified codebase FW v3.3.0, HW_REV byte [62] self-detecting |
+| TMC `SINGLE_LOOP` topology flag | ✅ Session 30 — STATUS_BITS1 bit 6, both revisions |
 
 ---
 

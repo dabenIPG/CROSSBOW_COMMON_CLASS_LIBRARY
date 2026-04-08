@@ -105,6 +105,29 @@ namespace CROSSBOW
         public byte          STATUS_BITS3        { get; private set; } = 0;   // byte 61 — PTP+NTP time status (session 30)
         public byte HW_REV { get; private set; } = 0;                         // byte 62 — HW VS
 
+        /// <summary>True when firmware reports V1 hardware (Vicor/ADS1015).</summary>
+        public bool IsV1 => HW_REV == 0x01;
+
+        /// <summary>True when firmware reports V2 hardware (TRACO/direct analog).</summary>
+        public bool IsV2 => HW_REV == 0x02;
+
+        /// <summary>
+        /// Hardware revision label for status panels.
+        /// Returns "unknown (legacy FW)" when HW_REV is 0x00 (old firmware, byte was reserved).
+        /// </summary>
+        public string HW_REV_Label
+        {
+            get
+            {
+                switch (HW_REV)
+                {
+                    case 0x01: return "V1 — Vicor/ADS1015";
+                    case 0x02: return "V2 — TRACO/direct";
+                    default:   return "unknown (legacy FW)";
+                }
+            }
+        }
+
         public DateTime      lastMsgRx           { get; private set; } = DateTime.UtcNow;
 
         // Version — semver layout: bits[31:24]=major  [23:12]=minor  [11:0]=patch
@@ -120,19 +143,38 @@ namespace CROSSBOW
             }
         }
 
-        // STAT BITS1
-        // STAT BITS1 [byte 7] — session 30: bits 5/6 vacated, NTP/PTP state moved to BITS3
+        // STAT BITS1 [byte 7]
+        //
+        //   bit 0:  isReady
+        //   bit 1:  isPumpEnabled (V1 — single Vicor) | isPump1Enabled (V2 — TRACO PSU 1)
+        //   bit 2:  isHeaterEnabled  — V1: active | V2: always 0 (hardware removed)
+        //   bit 3:  isInputFan1Enabled
+        //   bit 4:  isInputFan2Enabled
+        //   bit 5:  RES (V1) | isPump2Enabled (V2 — TRACO PSU 2)  ← read IsV2 before decoding
+        //   bit 6:  isSingleLoop — compile-time constant; 1 = single loopback circuit
+        //   bit 7:  RES  (isUnSolicitedEnabled retired session 35 — always 0)
+        //
+        // Use IsV1 / IsV2 (derived from HW_REV byte [62]) to select the correct interpretation.
         public bool isReady               { get { return IsBitSet(STATUS_BITS1, 0); } }
-        public bool isPumpEnabled         { get { return IsBitSet(STATUS_BITS1, 1); } }
-        public bool isHeaterEnabled       { get { return IsBitSet(STATUS_BITS1, 2); } }
+
+        // Bit 1: pump-on indicator in both revisions (different hardware behind it)
+        public bool isPumpEnabled         { get { return IsBitSet(STATUS_BITS1, 1); } }   // V1: single Vicor pump
+        public bool isPump1Enabled        { get { return IsBitSet(STATUS_BITS1, 1); } }   // V2 alias — same bit
+
+        public bool isHeaterEnabled       { get { return IsBitSet(STATUS_BITS1, 2); } }   // V2: always false
         public bool isInputFan1Enabled    { get { return IsBitSet(STATUS_BITS1, 3); } }
         public bool isInputFan2Enabled    { get { return IsBitSet(STATUS_BITS1, 4); } }
-        // bit 5 = RES (was isNTPSynched — moved to STATUS_BITS3 bit 3)
-        // bit 6 = RES (was ntpUsingFallback/isRTCInit — moved to STATUS_BITS3 bit 4)
-        // Session 35: STATUS_BITS1 bit 7 retired in firmware (was isUnSolicitedEnabled).
-        // A2 subscription state is now per-client in FrameClient.wantsUnsolicited and
-        // is not exposed in REG1. This property is preserved for build compatibility
-        // but will always return false against session 35+ firmware.
+
+        // Bit 5: V1 = reserved (always 0) | V2 = isPump2Enabled
+        // Guard reads of this property with IsV2 in GUI code.
+        public bool isPump2Enabled        { get { return IsV2 && IsBitSet(STATUS_BITS1, 5); } }
+
+        // Bit 6: isSingleLoop — always present regardless of revision.
+        // 1 = single coolant loop (both PIDs track tf2, SINGLE_LOOP defined at compile time).
+        // 0 = dual independent loops (PID1→tf1, PID2→tf2).
+        public bool isSingleLoop          { get { return IsBitSet(STATUS_BITS1, 6); } }
+
+        // Bit 7: retired session 35 (was isUnSolicitedEnabled). Preserved for build compatibility.
         [Obsolete("STATUS_BITS1 bit 7 retired session 35. Always returns false against current firmware.")]
         public bool isUnsolicitedEnabled  { get { return IsBitSet(STATUS_BITS1, 7); } }
 
@@ -187,6 +229,12 @@ namespace CROSSBOW
 
         // Actuator readbacks
         public ushort PumpSpeed       { get; private set; } = 0;
+        /// <summary>
+        /// True only on V1 hardware — V1 Vicors accept DAC trim for pump speed (0–800 range).
+        /// On V2, TRACO PSUs are fixed-voltage on/off only; PumpSpeed is always 0x0000 (reserved).
+        /// Hide pump speed display in GUI when PumpSpeedValid is false.
+        /// </summary>
+        public bool   PumpSpeedValid  => IsV1;
         public ushort LCM1_SPEED      { get; private set; } = 0;
         public ushort LCM1_CURRENT_RB { get; private set; } = 0;
         public ushort LCM2_SPEED      { get; private set; } = 0;
@@ -211,8 +259,13 @@ namespace CROSSBOW
         public sbyte TEMP_O2     { get; private set; } = 0;
         public sbyte TEMP_V1     { get; private set; } = 0;
         public sbyte TEMP_V2     { get; private set; } = 0;
-        public sbyte TEMP_V3     { get; private set; } = 0;
-        public sbyte TEMP_V4     { get; private set; } = 0;
+        public sbyte TEMP_V3     { get; private set; } = 0;   // V1: Vicor heater temp | V2: 0x00 reserved
+        public sbyte TEMP_V4     { get; private set; } = 0;   // V1: Vicor pump temp   | V2: 0x00 reserved
+        /// <summary>
+        /// True only on V1 — TEMP_V3 (Vicor heater) and TEMP_V4 (Vicor pump) are live sensor data.
+        /// On V2 both bytes are 0x00 reserved (sensors and hardware removed). Hide in GUI when false.
+        /// </summary>
+        public bool Tv3Tv4Valid => IsV1;
         public float TEMP_MCU    { get; private set; } = 0;
 
         // TPH (BME280)

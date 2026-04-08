@@ -3,8 +3,8 @@
 **Project:** CROSSBOW  
 **Document:** `CROSSBOW_DOCUMENT_REGISTER.md`  
 **Doc #:** IPGD-0001  
-**Version:** 1.4.6  
-**Date:** 2026-04-06  
+**Version:** 1.4.7  
+**Date:** 2026-04-07  
 **Status:** Current  
 
 ---
@@ -34,9 +34,9 @@ This register is the canonical reference for all CROSSBOW project documents. It 
   <td><code>CROSSBOW_ICD_INT_ENG.docx</code></td>
   <td>CROSSBOW ICD — Internal Engineering</td>
   <td>IPGD-0003</td>
-  <td>3.3.8</td>
+  <td>3.3.9</td>
   <td>✅ Current</td>
-  <td>2026-04-06</td>
+  <td>2026-04-07</td>
   <td><code>CROSSBOW_ICD_INT_ENG.md</code></td>
   <td><code>gen_eng_icd.js</code></td>
 </tr>
@@ -48,9 +48,9 @@ This register is the canonical reference for all CROSSBOW project documents. It 
   <td><code>CROSSBOW_ICD_INT_OPS.docx</code></td>
   <td>CROSSBOW ICD — Internal Operations</td>
   <td>IPGD-0004</td>
-  <td>3.3.7</td>
+  <td>3.3.8</td>
   <td>✅ Current</td>
-  <td>2026-04-06</td>
+  <td>2026-04-07</td>
   <td><code>CROSSBOW_ICD_INT_OPS.md</code></td>
   <td><code>gen_int_ops_icd.js</code></td>
 </tr>
@@ -192,9 +192,9 @@ This register is the canonical reference for all CROSSBOW project documents. It 
   <td>—</td>
   <td>CROSSBOW System Architecture</td>
   <td>IPGD-0006</td>
-  <td>3.3.2</td>
+  <td>3.3.3</td>
   <td>✅ Current</td>
-  <td>2026-04-06</td>
+  <td>2026-04-07</td>
   <td><code>ARCHITECTURE.md</code></td>
   <td>—</td>
 </tr>

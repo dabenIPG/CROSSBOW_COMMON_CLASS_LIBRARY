@@ -2,12 +2,12 @@
 
 **Document:** `CROSSBOW_UG_ENG_GUI.md`
 **Doc #:** IPGD-0014
-**Version:** 1.1.0
-**Date:** 2026-04-05
+**Version:** 1.2.0
+**Date:** 2026-04-07
 **Classification:** CONFIDENTIAL — IPG Internal Use Only
 **Audience:** IPG engineering staff, integration engineers
-**ICD Reference:** `CROSSBOW_ICD_INT_ENG` (IPGD-0003) v3.3.7 — full INT_ENG and INT_OPS command set
-**Architecture Reference:** `ARCHITECTURE.md` (IPGD-0006) v3.2.1 — network topology, framing protocol, port reference
+**ICD Reference:** `CROSSBOW_ICD_INT_ENG` (IPGD-0003) v3.3.9 — full INT_ENG and INT_OPS command set
+**Architecture Reference:** `ARCHITECTURE.md` (IPGD-0006) v3.3.3 — network topology, framing protocol, port reference
 
 ---
 
@@ -74,13 +74,17 @@
 > | FORM-5 | `frmMCC.cs`, `frmBDC.cs` | 🔲 Open | Move VOTE_BITS raw field from TIMING into SAFETY panel |
 > | FORM-6 | `frmBDC.cs` | ✅ Done | SAFETY/GEOMETRY panel added to BDC Col 2 |
 >
-> **MSG class action items:**
+> **TMC hardware revision action items:**
 >
 > | ID | File | Status | Action |
 > |----|------|--------|--------|
+> | TMC-HW1 | `MSG_TMC.cs` | ✅ Done | `HW_REV` byte [62] parsed; `IsV1`/`IsV2`/`HW_REV_Label` properties added. `isPump1/2Enabled`, `isSingleLoop`, `PumpSpeedValid`, `Tv3Tv4Valid` added. |
+> | TMC-HW2 | `tmc.cs` | ✅ Done | `EnableVicor()` guards HEAT channel on V2. `SetDAC()` guards PUMP/HEATER on V2. `EnableBothPumps()` added for V2. |
+> | TMC-HW3 | `defines.cs` | ✅ Done | `TMC_VICORS.PUMP1=2`, `PUMP2=4` added. |
+> | TMC-HW4 | `frmTMC.cs` | ✅ Done | `ApplyHwRevLayout()` — one-time V1/V2 layout switch on first packet. Pump2 controls added. Pump speed/heater/tv3tv4 hidden on V2. `tss_HW_REV` shows revision label + loop topology. |
 > | MSG-1 | `MSG_TMC.cs` | 🔲 Open | Add `tb_` prefixed aliases for TIME_BITS accessors to match `MSG_MCC`/`MSG_BDC` naming convention |
 > | MSG-2 | `MSG_TMC.cs`, `MSG_FMC.cs` | 🔲 Open | Document that `isNTP_DeviceEnabled` has no equivalent — TIME groupbox on TMC/FMC uses `isNTPSynched` for both ENABLED and SYNCHED indicators |
->
+
 > **NTP action items:**
 >
 > | ID | File | Status | Action |
@@ -922,7 +926,9 @@ Y-axis fixed: major ticks at 0, 25, 50 °C. Pan/zoom disabled.
 **Class:** `TMC` (`namespace CROSSBOW`, A2 internal only — no A3 path)
 **Log file:** Debug output only (no Serilog — TMC uses `Debug.WriteLine`)
 
-The TMC window provides direct A2 access to the Thermal Management Controller. TMC manages the liquid cooling loop (LCM1/LCM2), Vicor power converters, input fans, heater, and pump. It has no sub-controllers and no pass-through blocks. All telemetry is from TMC REG1 (64 bytes).
+The TMC window provides direct A2 access to the Thermal Management Controller. TMC manages the liquid cooling loop (LCM1/LCM2 compressors, coolant pumps, fans) and Vicor/TRACO power converters. It has no sub-controllers and no pass-through blocks. All telemetry is from TMC REG1 (64 bytes).
+
+TMC supports two hardware revisions selected at compile time (`hw_rev.hpp`). The active revision is reported in REG1 byte [62] and shown in the status strip as `HW: V1 — Vicor/ADS1015` or `HW: V2 — TRACO/direct`. The GUI automatically adjusts control visibility on first packet — pump speed DAC controls and heater controls are hidden on V2; a second independent pump control (PUMP2) is shown on V2.
 
 TMC telemetry is also visible via the MCC window pass-through (MCC REG1 bytes [66–129]) — use the MCC view for system-level verification and the TMC window for subsystem-level control and diagnostics.
 
@@ -955,16 +961,20 @@ All TMC temperature, flow, and current readbacks. Read-only.
 
 **Temperatures (all °C, integer display):**
 
-| Label | Source | Location |
-|-------|--------|----------|
+| Label | Source | Notes |
+|-------|--------|-------|
 | TARGET | `TEMP_TARGET` | Set-point readback |
-| OTF1 | `TEMP_TF1` | Optical bench thermal sensor 1 |
-| OTF2 | `TEMP_TF2` | Optical bench thermal sensor 2 |
-| VIC1 | `TEMP_V1` | Vicor 1 temperature |
-| VIC2 | `TEMP_V2` | Vicor 2 temperature |
-| IN1 | `TEMP_O1` | Inlet 1 temperature |
-| IN2 | `TEMP_O2` | Inlet 2 temperature |
-| AIR1 | `TEMP_AIR1` | Air temperature 1 |
+| OTF1 | `TEMP_TF1` | Fluid temp 1 — direct MCU analog, both revisions |
+| OTF2 | `TEMP_TF2` | Fluid temp 2 — direct MCU analog, both revisions |
+| VIC1 | `TEMP_V1` | Vicor LCM1 temperature — both revisions |
+| VIC2 | `TEMP_V2` | Vicor LCM2 temperature — both revisions |
+| IN1 | `TEMP_O1` | Output channel 1 — V1: ADS1015; V2: direct MCU analog |
+| IN2 | `TEMP_O2` | Output channel 2 — direct MCU analog, both revisions |
+| AIR1 | `TEMP_AIR1` | Air temp 1 — V1: ADS1015; V2: direct MCU analog |
+| COMP1 | `TEMP_C1` | Compressor 1 — V1: ADS1015; V2: direct MCU analog |
+| COMP2 | `TEMP_C2` | Compressor 2 — V1: ADS1015; V2: direct MCU analog |
+| VIC3 | `TEMP_V3` | Vicor heater temp — **V1 only** (hidden on V2; field reserved 0x00) |
+| VIC4 | `TEMP_V4` | Vicor pump temp — **V1 only** (hidden on V2; field reserved 0x00) |
 
 **Flow (LPM):** FLOW1, FLOW2
 
@@ -987,13 +997,18 @@ Readbacks: `mb_LCM1_Vicor_Enabled_rb`, `mb_LCM1_Enabled_rb`, `mb_LCM1_Error_rb`,
 
 **AUX — pump, fans, heater:**
 
-| Control | Action | ICD command |
-|---------|--------|-------------|
-| Pump Vicor Enable | `aTMC.EnableVicor(PUMP, bool)` | `0xE9 TMS_SET_VICOR_ENABLE` |
-| Pump Speed dropdown | `aTMC.SetDAC(PUMP, value)` | `0xE8 TMS_SET_DAC_VALUE` |
-| Fan1 / Fan2 (3-state) | `aTMC.SetInputFanSpeed(0/1, OFF/LO/HI)` | `0xE7 TMS_INPUT_FAN_SPEED` |
-| Heater Enable | `aTMC.EnableVicor(HEAT, bool)` | `0xE9 TMS_SET_VICOR_ENABLE` |
-| Target Temp (text + button) | `aTMC.SetTargetTemp(byte)` | `0xEB TMS_SET_TARGET_TEMP` — firmware clamps to 10–40 °C |
+Controls in this group are hardware-revision-dependent. The GUI auto-hides V1-only controls when connected to V2 hardware (`HW_REV` byte [62]).
+
+| Control | Revision | Action | ICD command |
+|---------|----------|--------|-------------|
+| Pump Enable (PUMP1) | Both | `aTMC.EnableVicor(PUMP/PUMP1, bool)` — V1: Vicor; V2: TRACO PSU 1 | `0xE9` |
+| Pump 2 Enable | **V2 only** | `aTMC.EnableVicor(PUMP2, bool)` — TRACO PSU 2 | `0xE9` |
+| Pump Speed dropdown | **V1 only** | `aTMC.SetDAC(PUMP, value)` — Vicor DAC trim [0–800] | `0xE8` |
+| Fan1 / Fan2 (3-state) | Both | `aTMC.SetInputFanSpeed(0/1, OFF/LO/HI)` | `0xE7` |
+| Heater Enable | **V1 only** | `aTMC.EnableVicor(HEAT, bool)` | `0xE9` |
+| Target Temp (text + button) | Both | `aTMC.SetTargetTemp(byte)` — firmware clamps to 10–40 °C | `0xEB` |
+
+**Status strip:** shows `HW: V1 — Vicor/ADS1015` or `HW: V2 — TRACO/direct` + `SINGLE LOOP` or `PARALLEL LOOP` (from STATUS_BITS1 bit 6).
 
 **NTP config:** `btn_SetNTP_Servers` — hardcoded to test environment values. See NTP-1.
 
@@ -1225,4 +1240,5 @@ Planned content:
 |---------|------|--------|---------|
 | 1.0.0 | 2026-03-01 | IPG | Initial draft — §1–3 complete |
 | 1.1.0 | 2026-04-06 | IPG | §4.1–4.4 added; placeholder §4.5–4.9, §5–6; action item table restructured with status tracking |
+| 1.2.0 | 2026-04-07 | IPG | §4.3 TMC updated for V1/V2 hardware abstraction — description, temperature table (COMP1/2 added, VIC3/4 V1-only noted), AUX control table (PUMP2 V2, heater/speed V1-only). TMC-HW1–4 action items added (all closed). ICD ref updated to v3.3.9, ARCH ref to v3.3.3. |
 

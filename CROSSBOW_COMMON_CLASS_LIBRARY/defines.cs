@@ -146,10 +146,12 @@ namespace CROSSBOW
     }
     public enum TMC_VICORS
     {
-        LCM1 = 0,    // 
-        LCM2 = 1,  //
-        PUMP = 2, //
-        HEAT = 3,  //
+        LCM1 = 0,
+        LCM2 = 1,
+        PUMP = 2,   // V1 — single Vicor, both pumps in parallel
+        PUMP1 = 2,   // V2 — TRACO PSU pump 1 (same wire value as PUMP)
+        HEAT = 3,   // V1 only — heater Vicor
+        PUMP2 = 4,   // V2 only — TRACO PSU pump 2
     }
 
     public enum TMC_LCMS

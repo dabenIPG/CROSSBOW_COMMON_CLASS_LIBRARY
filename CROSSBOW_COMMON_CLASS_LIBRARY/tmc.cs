@@ -308,18 +308,54 @@ namespace CROSSBOW
         }
 
         // 0xE8 TMS_SET_DAC_VALUE — payload: uint8 channel, uint16 LE value
+        // PUMP (0x04) and HEATER (0x06) channels are V1 only — TRACO PSUs have no analog input
+        // and heater hardware is removed in V2. Suppressed silently on V2 to prevent reject errors.
         public void SetDAC(TMC_DAC_CHANNELS ch, ushort val)
         {
+            if (LatestMSG.IsV2 &&
+                (ch == TMC_DAC_CHANNELS.PUMP || ch == TMC_DAC_CHANNELS.HEATER))
+            {
+                Debug.WriteLine($"TMC.SetDAC: channel {ch} not valid on V2 hardware — suppressed");
+                return;
+            }
             byte[] b = BitConverter.GetBytes(val);   // little-endian
             Send(BuildA2Frame((byte)ICD.TMS_SET_DAC_VALUE,
                 new[] { (byte)ch, b[0], b[1] }));
         }
 
         // 0xE9 TMS_SET_VICOR_ENABLE — payload: uint8 vicor enum, uint8 0/1
+        //
+        // Channel validity by revision:
+        //   V1: LCM1(0), LCM2(1), PUMP(2), HEAT(3)
+        //   V2: LCM1(0), LCM2(1), PUMP1(2), PUMP2(4)  — HEAT does not exist
+        //
+        // GUI code must use LatestMSG.IsV1 / IsV2 to determine which overload to call.
+        // Sending an invalid channel (e.g. HEAT on V2) is silently rejected by firmware
+        // (STATUS_CMD_REJECTED), but this guard prevents accidental sends entirely.
         public void EnableVicor(TMC_VICORS v, bool en)
         {
+            // Block V1-only channels on V2 hardware
+            if (LatestMSG.IsV2 && ((byte)v == (byte)TMC_VICORS.HEAT))
+            {
+                Debug.WriteLine($"TMC.EnableVicor: HEAT channel not valid on V2 hardware — suppressed");
+                return;
+            }
             Send(BuildA2Frame((byte)ICD.TMS_SET_VICOR_ENABLE,
                 new[] { (byte)v, (byte)(en ? 1 : 0) }));
+        }
+
+        // Convenience: enable/disable both pumps together (V2 TRACO PSU normal operation)
+        public void EnableBothPumps(bool en)
+        {
+            if (!LatestMSG.IsV2)
+            {
+                Debug.WriteLine("TMC.EnableBothPumps: V2 only — use EnableVicor(TMC_VICORS.PUMP) on V1");
+                return;
+            }
+            Send(BuildA2Frame((byte)ICD.TMS_SET_VICOR_ENABLE,
+                new[] { (byte)TMC_VICORS.PUMP1, (byte)(en ? 1 : 0) }));
+            Send(BuildA2Frame((byte)ICD.TMS_SET_VICOR_ENABLE,
+                new[] { (byte)TMC_VICORS.PUMP2, (byte)(en ? 1 : 0) }));
         }
 
         // 0xEA TMS_SET_LCM_ENABLE — payload: uint8 lcm enum, uint8 0/1

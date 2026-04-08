@@ -12,6 +12,27 @@
 
 ## Version History
 
+**v3.3.9 changes (session 30 — 2026-04-07):**
+- TMC unified hardware abstraction (`hw_rev.hpp`) — V1/V2 hardware revision support. See TMC_HW_DELTA.md.
+- TMC FW version bumped: `3.2.3` → `3.3.0` (`VERSION_PACK(3,3,0)`).
+- TMC REG1 byte [7] `STAT BITS1` updated:
+  - bit 1: `isPumpEnabled (V1)` | `isPump1Enabled (V2)` — same wire value, different hardware
+  - bit 5: `RES (V1)` | `isPump2Enabled (V2)` — **wire format differs by revision**
+  - bit 6: `isSingleLoop` — compile-time constant; `1` = single loopback coolant circuit, `0` = dual independent loops. Always present regardless of revision.
+  - bit 7: `RES` (unchanged — `isUnSolicitedEnabled` retired session 35)
+- TMC REG1 byte [17–18] `Pump Speed`:
+  - V1: live DAC counts [0–800] (Vicor trim for pump motor voltage)
+  - V2: always `0x0000` reserved (TRACO PSUs are fixed-voltage on/off only)
+- TMC REG1 bytes [39–40] `tv3`/`tv4`:
+  - V1: live int8 °C (Vicor heater temp / Vicor pump temp via ADS1015)
+  - V2: always `0x00` reserved (ADS1015 chips removed; heater hardware removed)
+- TMC REG1 byte [62]: reassigned from `RESERVED` → `HW_REV` (`0x01`=V1, `0x02`=V2). Allows `MSG_TMC.cs` to self-detect register layout without out-of-band configuration.
+- `TMS_SET_VICOR_ENABLE (0xE9)` payload range updated: V1 `(0–3)`, V2 `(0–2, 4)`. `PUMP2=4` added for V2 independent TRACO PSU control.
+- `TMC_VICORS` enum: `PUMP1=2` (V2 alias for `PUMP=2`), `PUMP2=4` added.
+- New serial commands added to TMC: `PUMP` (status + control, HW_REV-aware), `PIDGAIN` (runtime PID gain read/set).
+- `SINGLE_LOOP` build flag documented in `hw_rev.hpp` — gates PID input selection for single loopback plumbing.
+- `MSG_TMC.cs`: `IsV1`/`IsV2`/`HW_REV_Label`, `isPump1/2Enabled`, `isSingleLoop`, `PumpSpeedValid`, `Tv3Tv4Valid` added.
+
 **v3.3.8 changes (session 29 — 2026-04-06):**
 - Firmware replay window fix — all six A2/A3 frame handlers: new client detection (`isNewClient` + `a_seq_init = false`) moved **before** `frameCheckReplay()`. Reconnecting clients no longer permanently locked out after slot expiry. Affected: MCC `handleA2Frame`, MCC `handleA3Frame`, BDC `handleA2Frame`, BDC `handleA3Frame`, TMC `handleA2Frame`, FMC `handleA2Frame`.
 - C# client model standardized fleet-wide (`mcc.cs`, `bdc.cs`, `tmc.cs`, `fmc.cs`): registration burst (`0xA4 ×3`) retired — single `0xA4` on connect. `_lastKeepalive` updated only in `SendKeepalive()`. Any valid frame (any CMD_BYTE) updates `isConnected`/`lastMsgRx` — not just `0xA1`. `connection established` logged immediately in receive loop. Redundant elapsed check removed from `KeepaliveLoop`. A3 auto-subscribe removed — user controls via checkbox. See ARCHITECTURE.md §4.2 for authoritative standard.
@@ -461,7 +482,7 @@ Scoping differs by codebase (`enum ICD` in C#/THEIA, `enum ICD_CMDS` in TRC, `en
 | 0xE6 | PMS_SET_FIRE_REQUESTED_VOTE | Laser fire vote request | uint8 0/1 (continuous heartbeat required) | — | — | ✓ (→MCC) | `INT_ENG` | MCC | MCC |
 | 0xE7 | TMS_INPUT_FAN_SPEED | Set fan speed | uint8 which (0/1); uint8 speed (0=off,128=low,255=high) — matches `TMC_FAN_SPEEDS` enum | — | — | ✓ | `INT_OPS` | MCC, TMC | MCC |
 | 0xE8 | TMS_SET_DAC_VALUE | Set DAC output value | uint8 dac (`TMC_DAC_CHANNELS` enum); uint16 value | — | — | ✓ | `INT_ENG` | MCC, TMC | MCC |
-| 0xE9 | TMS_SET_VICOR_ENABLE | TMS Vicor enable | uint8 vicor (enum); uint8 0/1 | — | — | ✓ | `INT_ENG` | MCC, TMC | MCC |
+| 0xE9 | TMS_SET_VICOR_ENABLE | TMS Vicor enable | uint8 vicor (TMC_VICORS enum); uint8 0/1 — V1: values 0–3 valid; V2: values 0–2,4 valid (PUMP2=4; HEAT=3 does not exist on V2) | — | — | ✓ | `INT_ENG` | MCC, TMC | MCC |
 | 0xEA | TMS_SET_LCM_ENABLE | TMS LCM enable | uint8 lcm (enum); uint8 0/1 | — | — | ✓ | `INT_ENG` | MCC, TMC | MCC |
 | 0xEB | TMS_SET_TARGET_TEMP | Set TMS target temperature | uint8 temp °C — **enforced range [10–40°C]**; firmware clamps silently. Values outside range are accepted without error but constrained. | — | — | ✓ | `INT_OPS` | MCC, TMC | MCC |
 | 0xEC | PMS_VICOR_ENABLE | PMS Vicor enable | uint8 0/1 | — | — | ✓ | `INT_ENG` | MCC, TMC | MCC |
@@ -970,6 +991,7 @@ Sent by TMC directly (engineering access) and passed through MCC REG1 as a 64-by
 >
 > **Firmware note (session 27):** `isRTCInit` (TMC STAT BITS1 bit 6) was deprecated → `ntpUsingFallback`.
 > **Firmware note (session 30/31):** TMC STAT BITS1 bits 5/6 vacated — `isNTPSynched` and `ntpUsingFallback` moved to new TMC STAT BITS3 (byte 61). Byte 61 was previously RESERVED. All PTP and NTP time status is now consolidated in BITS3.
+> **Firmware note (session 30 — 2026-04-07):** TMC unified V1/V2 hardware abstraction. Byte [7] STAT BITS1 bits 5/6 now hardware-conditional (see below). Byte [17–18] and bytes [39–40] are revision-dependent. Byte [62] promoted from RESERVED to HW_REV. Read byte [62] before interpreting bits 5/6 of byte [7].
 
 | Byte | From | To | nBytes | Name | Type | Notes |
 |------|------|----|--------|------|------|-------|
@@ -978,13 +1000,13 @@ Sent by TMC directly (engineering access) and passed through MCC REG1 as a 64-by
 | 2 | 2 | 3 | 1 | System Mode | uint8 | BDC_MODES enum |
 | 3 | 3 | 5 | 2 | HB_ms | uint16 | ms between sends |
 | 5 | 5 | 7 | 2 | dt_us | uint16 | µs in processing loop |
-| 7 | 7 | 8 | 1 | TMC STAT BITS1 | uint8 | 0:isReady; 1:isPumpEnabled; 2:isHeaterEnabled; 3:isInputFan1Enabled; 4:isInputFan2Enabled; 5:RES *(was isNTPSynched — moved to BITS3)*; 6:RES *(was ntpUsingFallback — moved to BITS3)*; 7:RES *(was isUnsolicitedModeEnabled — retired session 35)* |
+| 7 | 7 | 8 | 1 | TMC STAT BITS1 | uint8 | 0:isReady; 1:isPumpEnabled(V1)/isPump1Enabled(V2); 2:isHeaterEnabled(V1,always 0 on V2); 3:isInputFan1Enabled; 4:isInputFan2Enabled; 5:RES(V1)/isPump2Enabled(V2) ⚠ read HW_REV[62] first; 6:isSingleLoop (compile-time, both revisions); 7:RES *(was isUnsolicitedModeEnabled — retired session 35)* |
 | 8 | 8 | 9 | 1 | TMC STAT BITS2 | uint8 | 0:isVicor1Enabled; 1:isLCM1Enabled; 2:isLCM1Error; 3:isFlow1Error; 4:isVicor2Enabled; 5:isLCM2Enabled; 6:isLCM2Error; 7:isFlow2Error |
-| 9 | 9 | 17 | 8 | NTP epoch Time | uint64 | ms since epoch |
-| 17 | 17 | 19 | 2 | Pump Speed | uint16 | DAC counts [0–4095] |
-| 19 | 19 | 21 | 2 | LCM1 Speed Setting | uint16 | DAC counts [0–4095] |
+| 9 | 9 | 17 | 8 | epoch Time (PTP/NTP) | uint64 | ms since Unix epoch — PTP when synched, NTP otherwise |
+| 17 | 17 | 19 | 2 | Pump Speed | uint16 | V1: DAC counts [0–800] (Vicor trim); V2: 0x0000 reserved (TRACO PSUs on/off only) |
+| 19 | 19 | 21 | 2 | LCM1 Speed Setting | uint16 | DAC counts [0–4095] — active both revisions |
 | 21 | 21 | 23 | 2 | LCM1 Current Readback | uint16 | [0–4095] |
-| 23 | 23 | 25 | 2 | LCM2 Speed Setting | uint16 | DAC counts [0–4095] |
+| 23 | 23 | 25 | 2 | LCM2 Speed Setting | uint16 | DAC counts [0–4095] — active both revisions |
 | 25 | 25 | 27 | 2 | LCM2 Current Readback | uint16 | [0–4095] |
 | 27 | 27 | 28 | 1 | f1 | uint8 | flow rate ×10 LPM (e.g. 15 = 1.5 LPM) |
 | 28 | 28 | 29 | 1 | f2 | uint8 | flow rate ×10 LPM |
@@ -996,19 +1018,20 @@ Sent by TMC directly (engineering access) and passed through MCC REG1 as a 64-by
 | 34 | 34 | 35 | 1 | tc2 | int8 | temp compressor 2 °C |
 | 35 | 35 | 36 | 1 | to1 | int8 | temp output ch1 °C |
 | 36 | 36 | 37 | 1 | to2 | int8 | temp output ch2 °C |
-| 37 | 37 | 38 | 1 | tv1 | int8 | temp vicor 1 °C |
-| 38 | 38 | 39 | 1 | tv2 | int8 | temp vicor 2 °C |
-| 39 | 39 | 40 | 1 | tv3 | int8 | temp vicor 3 (heater) °C |
-| 40 | 40 | 41 | 1 | tv4 | int8 | temp vicor 4 (pump) °C |
+| 37 | 37 | 38 | 1 | tv1 | int8 | temp vicor LCM1 °C |
+| 38 | 38 | 39 | 1 | tv2 | int8 | temp vicor LCM2 °C |
+| 39 | 39 | 40 | 1 | tv3 | int8 | V1: temp vicor heater °C (ADS1015); V2: 0x00 reserved (sensor and hardware removed) |
+| 40 | 40 | 41 | 1 | tv4 | int8 | V1: temp vicor pump °C (ADS1015); V2: 0x00 reserved (sensor and Vicor pump removed) |
 | 41 | 41 | 45 | 4 | TPH: Temp | float | °C |
 | 45 | 45 | 49 | 4 | TPH: Pressure | float | Pa |
 | 49 | 49 | 53 | 4 | TPH: Humidity | float | % |
-| 53 | 53 | 57 | 4 | TMC VERSION WORD | uint32 | |
+| 53 | 53 | 57 | 4 | TMC VERSION WORD | uint32 | VERSION_PACK — V1/V2 unified: `3.3.0` = `0x03003000` |
 | 57 | 57 | 61 | 4 | MCU Temp | float | °C |
 | 61 | 61 | 62 | 1 | TMC STAT BITS3 | uint8 | 0:isPTP_Enabled; 1:isPTP_Synched (ptp.isSynched); 2:usingPTP (active source); 3:isNTPSynched; 4:ntpUsingFallback; 5:ntpHasFallback; 6–7:RES |
-| 62 | 62 | 64 | 2 | RESERVED | — | 0x00 |
+| 62 | 62 | 63 | 1 | HW_REV | uint8 | 0x01=V1 (Vicor/ADS1015); 0x02=V2 (TRACO/direct). Read before interpreting STAT BITS1 bits 5/6 and bytes [17–18], [39–40]. |
+| 63 | 63 | 64 | 1 | RESERVED | — | 0x00 |
 
-**Defined: 62 bytes. Reserved: 2 bytes. Fixed block: 64 bytes.**
+**Defined: 63 bytes. Reserved: 1 byte. Fixed block: 64 bytes.**
 
 ---
 
@@ -1184,8 +1207,8 @@ fixed block (bytes 60–123). Fixed block size: **64 bytes**.
 |-------|------|---------|
 | 0x00 | `LCM1` | LCM 1 |
 | 0x02 | `LCM2` | LCM 2 |
-| 0x04 | `PUMP` | Pump |
-| 0x06 | `HEATER` | Heater |
+| 0x04 | `PUMP` | Pump (V1 — single Vicor, both pumps in parallel) |
+| 0x06 | `HEATER` | Heater (V1 only — hardware removed in V2) |
 | 0x0B | `MCP4728_WIPER` | MCP4728 wiper |
 | 0x10 | `MCP4728_CHANNEL_A` | MCP4728 channel A |
 | 0x12 | `MCP4728_CHANNEL_B` | MCP4728 channel B |

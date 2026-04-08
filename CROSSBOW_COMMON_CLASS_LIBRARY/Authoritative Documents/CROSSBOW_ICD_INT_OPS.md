@@ -2,12 +2,20 @@
 
 **Document:** `CROSSBOW_ICD_INT_OPS`
 **Doc #:** IPGD-0004
-**Version:** 3.3.7
-**Date:** 2026-04-06 (session 29)
+**Version:** 3.3.8
+**Date:** 2026-04-07 (session 30)
 
 ---
 
 ## Version History
+
+**v3.3.8 changes (session 30 — 2026-04-07):**
+- TMC REG1 embedded block (MCC REG1 bytes [66–129]) updated — layout changes are transparent to INT_OPS clients that treat the TMC block as opaque, but THEIA/HMI clients parsing TMC sub-fields must be aware:
+  - Byte [7] STAT BITS1: bit 5 is now `isPump2Enabled` on V2 hardware (was RES); bit 6 is now `isSingleLoop` (was RES). Read byte [62] HW_REV first.
+  - Byte [17–18] Pump Speed: V1=DAC counts [0–800]; V2=0x0000 reserved.
+  - Bytes [39–40] tv3/tv4: V1=live temps; V2=0x00 reserved.
+  - Byte [62]: promoted from RESERVED → HW_REV (0x01=V1, 0x02=V2).
+- TMC FW version: `3.2.3` → `3.3.0` (`VERSION_PACK(3,3,0)` = `0x03003000`).
 
 **v3.3.7 changes (session 29 — 2026-04-06):**
 - Firmware replay window fix (A3 reconnection): new client detection moved before `frameCheckReplay()` in MCC `handleA3Frame` and BDC `handleA3Frame`. THEIA reconnects cleanly after slot expiry — no longer permanently locked out until controller reboot. Symptom was `drop #2 after 0.0s` immediately on reconnect with all subsequent commands rejected.
@@ -338,7 +346,7 @@ Fixed block size: **256 bytes** in payload, always padded to 512-byte payload.
 | 54 | 54 | 58 | 4 | Laser Error Word | uint32 | |
 | 58 | 58 | 62 | 4 | Laser SetPoint | float | % |
 | 62 | 62 | 66 | 4 | Laser Output Power | float | W |
-| 66 | 66 | 130 | 64 | TMC FULL REG | TMC_REG | 64-byte block — thermal status (opaque to INT_OPS clients) |
+| 66 | 66 | 130 | 64 | TMC FULL REG | TMC_REG | 64-byte block — thermal status. Byte [62] within this block = HW_REV (0x01=V1, 0x02=V2). THEIA clients parsing TMC sub-fields must read HW_REV before decoding STAT BITS1 bit 5 and bytes [17–18], [39–40] — layout differs by hardware revision. See INT_ENG TMC REG1 section for full decode. |
 | 130 | 130 | 131 | 1 | NTP HB | uint8 | s/10 |
 | 131 | 131 | 132 | 1 | HEL HB | uint8 | s/10 |
 | 132 | 132 | 133 | 1 | BAT HB | uint8 | s/10 |
@@ -511,7 +519,7 @@ uint32 bits[31:24] = major
 uint32 bits[23:12] = minor
 uint32 bits[11:0]  = patch
 ```
-Current firmware versions (session 36): MCC = `VERSION_PACK(3,2,0)` = `0x03002000`. BDC = `VERSION_PACK(3,2,0)` = `0x03002000`. TMC = `VERSION_PACK(3,2,0)` = `0x03002000`. FMC = `VERSION_PACK(3,2,0)` = `0x03002000`. TRC = `VERSION_PACK(3,0,1)` = `0x03000001`.
+Current firmware versions (session 30): MCC = `VERSION_PACK(3,2,0)` = `0x03002000`. BDC = `VERSION_PACK(3,2,0)` = `0x03002000`. TMC = `VERSION_PACK(3,3,0)` = `0x03003000`. FMC = `VERSION_PACK(3,2,0)` = `0x03002000`. TRC = `VERSION_PACK(3,0,1)` = `0x03000001`.
 
 ---
 
