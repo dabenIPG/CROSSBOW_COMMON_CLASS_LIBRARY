@@ -12,7 +12,7 @@
 //   [23–26]  Current Limit (IOUT_MAX) float    A
 //   [27–30]  Voltage Limit (VOUT_MAX) float    V
 //   [31]     CHARGER STATUS BITS      uint8    bit0:isConnected; 1:isHealthy; 2:isCharging;
-//                                              3:isFullyCharged; 4:isHighCharge; 5:is220V
+//                                              3:isFullyCharged; 4:isHighCharge; 5:is220V; 6:isCrgAlarm
 //
 // Two entry points:
 //   Parse(byte[] msg, int ndx) → int
@@ -81,7 +81,8 @@ namespace CROSSBOW
         public bool isCharging     { get { return IsBitSet(STATUS_BITS1, 2); } }
         public bool isFullyCharged2 { get { return IsBitSet(STATUS_BITS1, 3); } }
         public bool isHighCharge   { get { return IsBitSet(STATUS_BITS1, 4); } }
-        public bool is220V         { get { return IsBitSet(STATUS_BITS1, 5); } }
+        public bool is220V { get { return IsBitSet(STATUS_BITS1, 5); } }
+        public bool isCrgAlarm { get { return IsBitSet(STATUS_BITS1, 6); } }  // V1: !isHealthy | V2: PIN_CRG_ALARM HIGH
 
         // CHARGE_STATUS word — lower byte
         public bool isFullyCharged { get { return IsBitSet((byte)(CHARGE_STATUS & 0xFF), 0); } }
