@@ -1,0 +1,107 @@
+
+<h2 class="sr-only">Four task overview for tomorrow's session</h2>
+<style>
+  * { box-sizing: border-box; }
+  .tasks { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 12px; }
+  .card { background: var(--color-background-primary); border: 0.5px solid var(--color-border-tertiary); border-radius: var(--border-radius-lg); overflow: hidden; }
+  .card-hdr { padding: 10px 14px 8px; border-bottom: 0.5px solid var(--color-border-tertiary); }
+  .task-num { font-size: 11px; font-weight: 500; color: var(--color-text-secondary); }
+  .task-title { font-size: 14px; font-weight: 500; color: var(--color-text-primary); margin-top: 2px; }
+  .card-body { padding: 10px 14px; }
+  .check { font-size: 12px; color: var(--color-text-secondary); padding: 4px 0; border-bottom: 0.5px solid var(--color-border-tertiary); display: flex; gap: 8px; align-items: baseline; }
+  .check:last-child { border-bottom: none; }
+  .check-label { flex: 1; line-height: 1.4; }
+  .badge { display: inline-block; font-size: 10px; font-weight: 500; padding: 1px 6px; border-radius: 3px; white-space: nowrap; flex-shrink: 0; }
+  .crit   { background: #FCEBEB; color: #A32D2D; }
+  .warn   { background: #FAEEDA; color: #854F0B; }
+  .ok     { background: #EAF3DE; color: #3B6D11; }
+  .info   { background: #E6F1FB; color: #185FA5; }
+  .teal   { background: #E1F5EE; color: #0F6E56; }
+  .mono   { font-family: var(--font-mono); font-size: 10.5px; }
+  .dep { font-size: 11px; color: var(--color-text-tertiary); padding: 6px 14px; border-top: 0.5px solid var(--color-border-tertiary); font-style: italic; }
+  @media (prefers-color-scheme: dark) {
+    .crit { background: #791F1F; color: #F7C1C1; }
+    .warn { background: #633806; color: #FAC775; }
+    .ok   { background: #27500A; color: #C0DD97; }
+    .info { background: #0C447C; color: #B5D4F4; }
+    .teal { background: #085041; color: #9FE1CB; }
+  }
+</style>
+
+<div class="tasks">
+
+<div class="card">
+  <div class="card-hdr">
+    <div class="task-num">Task 1 — Do first, no changes</div>
+    <div class="task-title">Verify lab setup baseline</div>
+  </div>
+  <div class="card-body">
+    <div class="check"><span class="badge crit">Critical</span><span class="check-label">CUDA DNN: <span class="mono">grep OPENCV_DNN_CUDA CMakeCache.txt</span></span></div>
+    <div class="check"><span class="badge crit">Critical</span><span class="check-label">OpenCV version + dist-packages path</span></div>
+    <div class="check"><span class="badge crit">Critical</span><span class="check-label">Full inference probe: CUDA FP16 / FP32 / CPU</span></div>
+    <div class="check"><span class="badge warn">Check</span><span class="check-label">TRC binary ldd → libopencv_dnn.so.411</span></div>
+    <div class="check"><span class="badge warn">Check</span><span class="check-label">VimbaX version in /opt/ and Makefile</span></div>
+    <div class="check"><span class="badge info">Note</span><span class="check-label"><span class="mono">ls /dev/ptp*</span> — PHC hardware clock availability</span></div>
+    <div class="check"><span class="badge info">Note</span><span class="check-label">NTP sync: timedatectl, confirm .33 not .8</span></div>
+    <div class="check"><span class="badge ok">Save</span><span class="check-label">Full snapshot to <span class="mono">jetson_baseline_YYYYMMDD.txt</span></span></div>
+  </div>
+  <div class="dep">No dependencies — run before anything is changed</div>
+</div>
+
+<div class="card">
+  <div class="card-hdr">
+    <div class="task-num">Task 2 — Produce all documentation</div>
+    <div class="task-title">Finalize JETSON_SETUP.md + scripts</div>
+  </div>
+  <div class="card-body">
+    <div class="check"><span class="badge ok">Done</span><span class="check-label">OPENCV_BUILD_HISTORY.md</span></div>
+    <div class="check"><span class="badge ok">Done</span><span class="check-label">install_opencv4.13.0_Jetpack6.2.1.sh</span></div>
+    <div class="check"><span class="badge warn">Write</span><span class="check-label">00_base_setup.sh — apt hold, swap, pip, jtop</span></div>
+    <div class="check"><span class="badge warn">Write</span><span class="check-label">01_power_setup.sh — nvpmodel, jetson_clocks</span></div>
+    <div class="check"><span class="badge warn">Write</span><span class="check-label">02_timing_setup.sh — timesyncd .33/.208 + ptp4l</span></div>
+    <div class="check"><span class="badge warn">Write</span><span class="check-label">03_install_vimba.sh — VimbaX 2026-1 + CTI + USB buf</span></div>
+    <div class="check"><span class="badge warn">Write</span><span class="check-label">04_verify_all.sh — automated Task 1 checks</span></div>
+    <div class="check"><span class="badge warn">Write</span><span class="check-label">05_image_and_overlay.sh — overlayFS + dd image</span></div>
+    <div class="check"><span class="badge warn">Write</span><span class="check-label">JETSON_SETUP.md (DOC-2) — master narrative</span></div>
+  </div>
+  <div class="dep">Uses Task 1 baseline as reference for verification pass/fail criteria</div>
+</div>
+
+<div class="card">
+  <div class="card-hdr">
+    <div class="task-num">Task 3 — Fresh build validation</div>
+    <div class="task-title">Build Jetson from scratch + test</div>
+  </div>
+  <div class="card-body">
+    <div class="check"><span class="badge warn">Run</span><span class="check-label">00 → 01 → 02 → 03 → OpenCV install in order</span></div>
+    <div class="check"><span class="badge crit">Fix first</span><span class="check-label">Makefile: <span class="mono">VIMBAX_DIR := /opt/VimbaX_2026-1</span></span></div>
+    <div class="check"><span class="badge warn">Build</span><span class="check-label"><span class="mono">make clean && make -j$(nproc)</span></span></div>
+    <div class="check"><span class="badge warn">Verify</span><span class="check-label"><span class="mono">ldd ./trc</span> → opencv_dnn.so.413 + VimbaX 2026-1</span></div>
+    <div class="check"><span class="badge warn">Run</span><span class="check-label">04_verify_all.sh — diff against Task 1 baseline</span></div>
+    <div class="check"><span class="badge warn">Test</span><span class="check-label">Live camera, COCO FP16, stream to THEIA</span></div>
+    <div class="check"><span class="badge teal">Review</span><span class="check-label">Autostart: compare crontab vs systemd options</span></div>
+    <div class="check"><span class="badge teal">When stable</span><span class="check-label">05_image_and_overlay.sh — enable overlayFS + image</span></div>
+  </div>
+  <div class="dep">Requires Task 2 scripts complete. Jetson must be freshly flashed JetPack 6.2.1.</div>
+</div>
+
+<div class="card">
+  <div class="card-hdr">
+    <div class="task-num">Task 4 — TRC source upgrades</div>
+    <div class="task-title">PTP/NTP + OpenCV bridge (NEW-38d)</div>
+  </div>
+  <div class="card-body">
+    <div class="check"><span class="badge teal">NEW-38d</span><span class="check-label">NTP client class — queries .33 directly</span></div>
+    <div class="check"><span class="badge teal">NEW-38d</span><span class="check-label">PHC reader via <span class="mono">/dev/ptp0</span></span></div>
+    <div class="check"><span class="badge teal">NEW-38d</span><span class="check-label">TIMESRC / TIME ASCII commands on port 5012</span></div>
+    <div class="check"><span class="badge teal">NEW-38d</span><span class="check-label">TIME_BITS byte [49] in telemetry.h + assert</span></div>
+    <div class="check"><span class="badge teal">NEW-38d</span><span class="check-label">ntpEpochTime sourced from active time manager</span></div>
+    <div class="check"><span class="badge teal">NEW-38d</span><span class="check-label">MSG_TRC.cs TIME_BITS decode in ENG GUI</span></div>
+    <div class="check"><span class="badge info">Eval</span><span class="check-label">VmbOpenCVHelper.h bridge — measure latency delta</span></div>
+    <div class="check"><span class="badge info">Eval</span><span class="check-label">If marked improvement: implement in alvium_camera.cpp</span></div>
+    <div class="check"><span class="badge warn">Version</span><span class="check-label">VERSION_PACK(3,1,0) + ARCHITECTURE.md §15 update</span></div>
+  </div>
+  <div class="dep">Requires Task 3 validated build. NEW-38d is medium priority — not a fire control blocker.</div>
+</div>
+
+</div>
