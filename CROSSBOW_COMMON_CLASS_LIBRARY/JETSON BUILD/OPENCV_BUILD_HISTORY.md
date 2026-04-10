@@ -16,7 +16,7 @@ when performing future upgrades.
 | Generation | Version | Date | Status |
 |---|---|---|---|
 | Gen 1 | 4.8.0 | Initial JetPack install | System package — no CUDA DNN, replaced |
-| Gen 2 | 4.11.0 | 2026-03-09 | Custom build — CUDA DNN enabled. Active on TRC hardware |
+| Gen 2 | 4.12.0 | 2026-03-09 | Custom build — CUDA DNN enabled. Confirmed active on lab Jetson 2026-04-06 |
 | Gen 3 | 4.13.0 | Target | Full flag set — upgrade pending |
 
 ---
@@ -26,7 +26,8 @@ when performing future upgrades.
 | Item | Value |
 |---|---|
 | SoC | Jetson Orin NX 16GB |
-| Carrier | Seeed Studio J401 |
+| Carrier | Seeed Studio J401 (**non-Super** variant — J4012 original) |
+| **Hardware note** | Two J4012 variants exist: non-Super (J401, this document) and Super J4012 (new carrier). Mechanically different — images not interchangeable. |
 | CUDA Arch | `8.7` (Ampere SM 87 — do not change) |
 | PTX | `""` (empty — device matches exactly, no JIT fallback needed) |
 | Ubuntu | 22.04 LTS |
@@ -45,10 +46,10 @@ when performing future upgrades.
 
 ## cmake Flag Comparison — All Three Generations
 
-| Flag / Setting | Gen 1 (4.8.0) | Gen 2 (4.11.0) | Gen 3 (4.13.0) |
+| Flag / Setting | Gen 1 (4.8.0) | Gen 2 (4.12.0) | Gen 3 (4.13.0) |
 |---|---|---|---|
 | **Version** | | | |
-| OpenCV version | 4.8.0 (system apt) | 4.12.0 script, built as 4.11.0 | 4.13.0 |
+| OpenCV version | 4.8.0 (system apt) | 4.12.0 (confirmed live 2026-04-06) | 4.13.0 |
 | **CUDA core** | | | |
 | `WITH_CUDA` | ✗ | ON | ON |
 | `WITH_CUDNN` | ✗ | ON | ON |
@@ -102,7 +103,7 @@ when performing future upgrades.
 - **Wrong version for TRC** — COCO inference (SSD MobileNet v3, FP16) requires
   `OPENCV_DNN_CUDA=ON` for the CUDA execution path to be available at runtime.
 
-### Gen 2 (4.11.0) — Issues found during build and deployment
+### Gen 2 (4.12.0) — Issues found during build and deployment
 
 1. **`OPENCV_DNN_CUDA` missing from original script** — The install script did not include this
    flag. It was discovered when `[COCO] CUDA backend unavailable` appeared in TRC logs even after
@@ -111,26 +112,26 @@ when performing future upgrades.
 
 2. **`dist-packages` vs `site-packages`** — The original script's `.bashrc` export used
    `site-packages`. On Ubuntu 22.04 / JetPack, cmake installs the binding to `dist-packages`.
-   Symptom: `cv2.__version__` returned `4.8.0` after a successful 4.11.0 build. Fix: change
+   Symptom: `cv2.__version__` returned `4.8.0` after a successful 4.12.0 build. Fix: change
    `PYTHONPATH` export in `.bashrc` to reference `dist-packages`.
 
-3. **Version 4.11.0 vs 4.12.0** — The build script at the time was written for 4.12.0 but
-   4.11.0 was built instead. Believed to be an oversight. No known functional difference for
-   TRC use case. Resolved in Gen 3 by targeting 4.13.0.
+3. **Version confirmed 4.12.0** — Live baseline check on lab Jetson 2026-04-06 confirmed
+   cv2.__version__ = 4.12.0. Earlier session notes incorrectly recorded this as 4.11.0.
+   No functional issue — resolved in Gen 3 by targeting 4.13.0.
 
 4. **`libtbb2` package name** — On Ubuntu 22.04, `libtbb2` was renamed to `libtbb12`.
    `libtbb2` may install as a transitional stub but is not reliable. Correct package is
    `libtbb-dev`. Not corrected in Gen 2 (TBB not explicitly enabled).
 
 5. **`getBuildInformation()` does not report `OPENCV_DNN_CUDA: YES`** — This label was
-   removed in OpenCV 4.11.0. Confirmation must come from CMakeCache.txt instead:
+   removed in OpenCV 4.11.x+. Confirmation must come from CMakeCache.txt instead:
    ```bash
-   grep "OPENCV_DNN_CUDA" <workspace>/opencv-4.11.0/release/CMakeCache.txt
+   grep "OPENCV_DNN_CUDA" <workspace>/opencv-4.12.0/release/CMakeCache.txt
    # Expect: OPENCV_DNN_CUDA:BOOL=ON
    ```
 
 6. **Old `/usr/local` `.so` stubs after version upgrade** — cmake install does not remove
-   prior version `.so` files. When upgrading (e.g. 4.11.0 → 4.13.0), the old
+   prior version `.so` files. When upgrading (e.g. 4.12.0 → 4.13.0), the old
    `libopencv_dnn.so.411` remains in `/usr/local/lib`. Any binary linked against the old
    soname continues to load the old library silently. `make clean && make` in TRC is
    mandatory after any OpenCV version change. Old `.so` files should be explicitly removed:
@@ -164,7 +165,7 @@ when performing future upgrades.
 
 ## Upgrade Procedure: Gen 2 → Gen 3
 
-When upgrading from 4.11.0 to 4.13.0 on an active TRC system:
+When upgrading from 4.12.0 to 4.13.0 on an active TRC system:
 
 ```bash
 # 1. Run the new build script (will purge old OpenCV if selected)

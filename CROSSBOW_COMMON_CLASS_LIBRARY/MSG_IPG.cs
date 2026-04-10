@@ -24,6 +24,7 @@
 //   Reads exactly IPG_BLOCK_LEN (21) bytes and returns ndx + 21.
 
 using System;
+using System.Diagnostics;
 
 namespace CROSSBOW
 {
@@ -45,12 +46,32 @@ namespace CROSSBOW
         public double SetPoint      { get; private set; } = 0;   // %
         public double OutputPower_W { get; private set; } = 0;   // W
 
-        // Derived — 3000 W max power
-        public double PowerSetting_W { get { return SetPoint / 100.0 * 3000; } }
+        // PowerSetting_W — max power driven by sensed model
+        public double PowerSetting_W => SetPoint / 100.0 * MaxPower_W;
 
         // Convenience
         public bool isError    { get { return ErrorWord    != 0; } }
         public bool isEmitting { get { return OutputPower_W > 0; } }
+
+        public string ModelName { get; set; } = "---";
+        public string SerialNumber { get; set; } = "---";
+
+        public LASER_MODEL LaserModel { get; set; } = LASER_MODEL.UNKNOWN;
+
+        public bool IsSensed => LaserModel.IsSensed();
+        public int MaxPower_W => LaserModel.MaxPower_W();
+
+        // Emission bit — 3K=bit0, 6K=bit2
+        public bool IsEMON => LaserModel == LASER_MODEL.YLR_6K
+            ? (StatusWord & (1u << 2)) != 0
+            : (StatusWord & (1u << 0)) != 0;
+
+        // Not-ready — 3K=bit9, 6K=bit11 (PSU off)
+        public bool IsNotReady => LaserModel == LASER_MODEL.YLR_6K
+            ? (StatusWord & (1u << 11)) != 0
+            : (StatusWord & (1u << 9)) != 0;
+
+        public static bool GetBit(uint word, int bit) => (word & (1u << bit)) != 0;
 
         // -------------------------------------------------------------------
         // Parse — reads 21 bytes at msg[ndx], returns updated ndx
@@ -71,5 +92,67 @@ namespace CROSSBOW
 
             return ndx;
         }
+
+        // ── ParseDirect — ASCII response path (direct TCP from HEL eng GUI)
+        // Called from hel.cs with the split cmd/payload from each laser response line.
+        // Handles both 3K and 6K responses — model-conditional fields left at 0
+        // when the command is not applicable (e.g. RHKPS on 6K never called).
+        public void ParseDirect(string cmd, string payload)
+        {
+            switch (cmd.ToUpper())
+            {
+                case "RMODEL":
+                    ModelName = payload;
+                    var parts = payload.Split('-');
+                    if (parts.Length >= 2 && int.TryParse(parts[1], out int power))
+                    {
+                        if (power == 3000) LaserModel = LASER_MODEL.YLM_3K;
+                        else if (power == 6000) LaserModel = LASER_MODEL.YLR_6K;
+                        else Debug.WriteLine($"IPG ERROR — unrecognised laser power: {power}");
+                    }
+                    else Debug.WriteLine($"IPG ERROR — RMODEL parse failed: '{payload}'");
+                    break;
+                case "RMN":
+                    // Machine name (hostname) — store but do not use for sense
+                    Debug.WriteLine($"IPG RMN (hostname): {payload}");
+                    break;
+                case "RSN":
+                    SerialNumber = payload;
+                    break;
+                case "RHKPS":
+                    if (double.TryParse(payload, out double hk))
+                        HKVoltage = hk;
+                    break;
+                case "RBSTPS":
+                    if (double.TryParse(payload, out double bv))
+                        BusVoltage = bv;
+                    break;
+                case "RCT":
+                    if (double.TryParse(payload, out double tmp))
+                        Temperature = tmp;
+                    break;
+                case "STA":
+                    if (uint.TryParse(payload, out uint sta))
+                        StatusWord = sta;
+                    break;
+                case "RMEC":
+                    if (uint.TryParse(payload, out uint err))
+                        ErrorWord = err;
+                    break;
+                case "RCS":
+                case "SDC":
+                case "SCS":
+                    if (double.TryParse(payload, out double sp))
+                        SetPoint = sp;
+                    break;
+                case "ROP":
+                    if (payload == "OFF" || payload == "LOW")
+                        OutputPower_W = 0;
+                    else if (double.TryParse(payload, out double op))
+                        OutputPower_W = op;
+                    break;
+            }
+        }
+
     }
 }

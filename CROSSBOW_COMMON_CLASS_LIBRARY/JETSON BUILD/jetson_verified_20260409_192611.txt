@@ -1,0 +1,116 @@
+============================================================
+  TRC Jetson Full System Verification
+  Thu Apr  9 07:26:11 PM CDT 2026
+  Log: /home/ipg/CV/SETUP/jetson_verified_20260409_192611.txt
+============================================================
+
+[1m[0;36m━━━ Checkpoint 0 — JetPack ━━━[0m
+  [0;32m✓[0m  JetPack L4T revision
+  [0;36m·[0m      → # R36 (release), REVISION: 5.0, GCID: 43688277, BOARD: generic, EABI: aarch64, DATE: Fri Jan 16 03:50:45 UTC 2026
+  [0;32m✓[0m  NVMe has sufficient space
+  [0;36m·[0m      → 92G
+  [0;32m✓[0m  Username is ipg
+  [0;36m·[0m      → ipg
+
+[1m[0;36m━━━ Checkpoint 1 — Base system ━━━[0m
+  [0;32m✓[0m  nvidia-l4t-bootloader is held
+  [0;36m·[0m      → nvidia-l4t-bootloader
+  [0;32m✓[0m  nvidia-l4t-kernel is held
+  [0;36m·[0m      → nvidia-l4t-bootloader
+  [0;32m✓[0m  nvidia-l4t-core is held
+  [0;36m·[0m      → nvidia-l4t-bootloader
+  [0;32m✓[0m  CUDA installed (nvcc)
+  [0;36m·[0m      → nvcc: NVIDIA (R) Cuda compiler driver
+  [0;32m✓[0m  Swap ≥ 4GB (7.6GB)
+  [0;32m✓[0m  jetson-stats (jtop) installed
+  [0;36m·[0m      → Name: jetson-stats
+  [0;32m✓[0m  GStreamer h264parse present
+  [0;36m·[0m      → Factory Details:
+  [0;32m✓[0m  GStreamer nvvidconv present
+  [0;36m·[0m      → Factory Details:
+  [0;32m✓[0m  GStreamer nvv4l2h264enc present
+  [0;36m·[0m      → Factory Details:
+
+[1m[0;36m━━━ Checkpoint 2 — Power and performance ━━━[0m
+  [0;32m✓[0m  nvpmodel MAXN (mode 0)
+  [0;36m·[0m      → NV Power Mode: MAXN
+  [0;32m✓[0m  jetson_clocks active (cpu0 locked at 1984000 Hz)
+
+[1m[0;36m━━━ Checkpoint 3 — Network and timing ━━━[0m
+  [0;36m·[0m  Ethernet interface: enP8p1s0
+  [0;32m✓[0m  Static IP 192.168.1.22 configured on enP8p1s0
+  [0;32m✓[0m  NTP primary server is .33
+  [0;36m·[0m      → [Time]
+  [0;32m✓[0m  NTP fallback server is .208
+  [0;36m·[0m      → [Time]
+  [0;32m✓[0m  NTP service active
+  [0;36m·[0m      →                Local time: Thu 2026-04-09 19:26:13 CDT
+  [0;32m✓[0m  USB buffer set in extlinux
+  [0;36m·[0m      →       APPEND ${cbootargs} root=PARTUUID=736d6bc3-5023-40b7-8db1-1da4550e7b43 rw rootwait rootfstype=ext4 mminit_loglevel=4 console=ttyTCU0,115200 firmware_class.path=/etc/firmware fbcon=map:0 video=efifb:off console=tty0 efi=runtime pci=pcie_bus_perf nvme.use_threaded_interrupts=1 nv-auto-config usbcore.usbfs_memory_mb=1000 
+
+[1m[0;36m━━━ Checkpoint 4 — VimbaX ━━━[0m
+  [0;32m✓[0m  VimbaX 2026-1 installed
+  [0;36m·[0m      → nvidia
+  [0;32m✓[0m  libVmbCPP.so present
+  [0;36m·[0m      → /opt/VimbaX_2026-1/api/lib/libVmbCPP.so
+  [0;32m✓[0m  VimbaX in ldconfig
+  [0;36m·[0m      → /usr/local/cuda/targets/aarch64-linux/lib: (from /etc/ld.so.conf.d/000_cuda.conf:1)
+  [0;32m✓[0m  GENICAM_GENTL64_PATH set
+  [0;36m·[0m      → /opt/VimbaX_2026-1/cti/
+  [0;32m✓[0m  gst-vmbsrc plugin installed
+  [0;36m·[0m      → vmbsrc:  vmbsrc: VimbaX GStreamer source
+  [0;32m✓[0m  Alvium camera detected: Allied Vision 1800 U-240c
+
+[1m[0;36m━━━ Checkpoint 5 — OpenCV ━━━[0m
+  [0;32m✓[0m  OpenCV version 4.13.0
+  [0;32m✓[0m  OpenCV from dist-packages (correct path)
+  [0;32m✓[0m  CUDA DNN targets available: [6 7]
+  [0;32m✓[0m  CUDA in OpenCV build info
+  [0;36m·[0m      → 
+  [0;32m✓[0m  cuDNN in OpenCV build info
+  [0;36m·[0m      → 
+  [0;32m✓[0m  GStreamer in OpenCV build info
+  [0;36m·[0m      → 
+  [0;32m✓[0m  TBB in OpenCV build info
+  [0;36m·[0m      → 
+  [0;32m✓[0m  pkg-config finds opencv4
+  [0;36m·[0m      → 4.13.0
+
+[1m[0;36m━━━ Checkpoint 6 — TRC build ━━━[0m
+  [0;32m✓[0m  TRC binary exists: /home/ipg/CV/TRC/trc
+  [0;32m✓[0m  TRC links against OpenCV 4.13
+  [0;36m·[0m      → 	linux-vdso.so.1 (0x0000ffff86c46000)
+  [0;32m✓[0m  TRC links against VimbaX 2026-1
+  [0;36m·[0m      → 	linux-vdso.so.1 (0x0000ffff966d8000)
+  [0;32m✓[0m  Makefile references VimbaX 2026-1
+  [0;36m·[0m      → VIMBAX_DIR := /opt/VimbaX_2026-1
+  [0;32m✓[0m  TRC version string
+  [0;36m·[0m      → TRC 3.0.2 Apr  9 2026 19:00:09
+  [0;36m·[0m  Running COCO inference probe...
+  [0;32m✓[0m  Inference probe — CUDA FP16: OK
+  [0;32m✓[0m  Inference probe — CUDA FP32: OK
+  [0;32m✓[0m  Inference probe — CPU: OK
+
+[1m[0;36m━━━ Checkpoint 7 — Autostart ━━━[0m
+  [1;33m![0m  TRC not currently running — verify autostart config
+
+[1m[0;36m━━━ System snapshot ━━━[0m
+  [0;36m·[0m  JetPack:     R36 (release), REVISION: 5.0, GCID: 43688277, BOARD: generic, EABI: aarch64, DATE: Fri Jan 16 03:50:45 UTC 2026
+  [0;36m·[0m  OpenCV:     4.13.0 (/usr/local/lib/python3.10/dist-packages/cv2/__init__.py)
+  [0;36m·[0m  VimbaX:     VimbaX_2026-1
+  [0;36m·[0m  NTP server: NTP=192.168.1.33
+  [0;36m·[0m  IP:         192.168.1.22/24
+  [0;36m·[0m  nvpmodel:   NV Power Mode: MAXN
+  [0;36m·[0m  Swap:       7.6Gi
+  [0;36m·[0m  USB buffer: usbfs_memory_mb=1000
+
+============================================================
+  [1mVerification Summary[0m
+============================================================
+  [0;32mPASS:[0m  52
+  [1;33mWARN:[0m  2
+
+  Log saved: /home/ipg/CV/SETUP/jetson_verified_20260409_192611.txt
+
+  [1;33m[1mPASSED WITH WARNINGS — review warnings before imaging[0m
+

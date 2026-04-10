@@ -2,8 +2,8 @@
 
 **Document:** `CROSSBOW_ICD_INT_ENG`
 **Doc #:** IPGD-0003
-**Version:** 3.4.0
-**Date:** 2026-04-08 (MCC unification)
+**Version:** 3.5.0
+**Date:** 2026-04-10 (IPG 6K integration — Phase 1 ENG GUI)
 **Classification:** IPG Internal Use Only
 **Source:** CB_ICD_v1_7.xlsx reconciled with ARCHITECTURE.md (TRC v3.0); `defines.hpp` canonical v3.X.Y
 **Audience:** IPG engineering staff, ENG GUI developers, firmware developers — all five controllers (MCC, BDC, TMC, FMC, TRC)
@@ -11,6 +11,24 @@
 ---
 
 ## Version History
+
+**v3.5.0 changes (IPG 6K integration Phase 1 — ENG GUI direct TCP — 2026-04-10):**
+- `LASER_MODEL` enum added to `defines.hpp` and `defines.cs`: `UNKNOWN=0x00`, `YLM_3K=0x01`, `YLR_6K=0x02`. Inline function `LASER_MAX_POWER_W()` added to `defines.hpp`. `LaserModelExt` static class (`MaxPower_W()`, `IsSensed()`, `Label()`) added to `defines.cs`.
+- `DEBUG_LEVELS` enum added to `defines.cs` — was present in `defines.hpp` only. Now parallel.
+- `BDC_TRACKERS.KALMAN=3` added to `defines.cs` — was present in `defines.hpp` only. Now parallel.
+- MCC REG1 byte [255]: `RESERVED (0x00)` → **`LASER_MODEL`** — stores laser model sensed via `RMN` command on connect. `0x00`=UNKNOWN/not yet sensed; `0x01`=YLM_3K; `0x02`=YLR_6K. Backwards compatible — old C# clients reading `0x00` see UNKNOWN which is a safe default (they were reading reserved zero before). See enum table below.
+- `MSG_IPG.cs` extended:
+  - `PowerSetting_W` — hardcoded `* 3000` replaced with `SetPoint / 100.0 * MaxPower_W` (model-aware via `LaserModel`).
+  - New properties: `LaserModel` (`LASER_MODEL`, `public set`), `ModelName` (`string`), `SerialNumber` (`string`), `IsSensed` (derived), `MaxPower_W` (derived), `IsEMON` (model-aware bit decode), `IsNotReady` (model-aware bit decode).
+  - `ParseDirect(string cmd, string payload)` method added — handles ASCII TCP response path from ENG GUI direct connection. Handles: `RMN` (model sense), `RSN`, `RHKPS`, `RBSTPS`, `RCT`, `STA`, `RMEC`, `RCS`/`SDC`/`SCS`, `ROP`.
+  - `GetBit(uint word, int bit)` static helper added.
+- ENG GUI `HEL` window (`hel.cs`, `frmHEL.cs`, `frmHEL_Designer.cs`) — complete rewrite:
+  - Transport: `UdpClient` port 10011 → `TcpClient`/`NetworkStream` port 10001 (both lasers use TCP on port 10001).
+  - Auto-sense: `RMODEL` sent immediately on connect; response parsed to determine `LASER_MODEL` (e.g. `YLM-3000-SM-VV`). `RSN` follows for serial number. Note: `RMN` is Read Machine Name (hostname) — distinct from `RMODEL` (model string).
+  - Periodic poll loop (20 ms) — mirrors firmware `POLL()` p1 state machine. Model-conditional: `RHKPS`/`RBSTPS` 3K only; `SDC` (6K) vs `SCS` (3K) for set power.
+  - Full `STA`/`ERR` bit decode with `mb_` (`CodeArtEng.Controls.StatusLabel`) controls — model-aware labels updated on sense via `UpdateModelLabels()`.
+  - 3-column layout matching `frmTMC` (1320×854). IP/Port text inputs. `EMON`/`EMOFF` buttons gated on `IsSensed`.
+  - All parse logic centralised in `MSG_IPG.ParseDirect()`.
 
 **v3.4.0 changes (MCC unification — 2026-04-08):**
 - MCC unified hardware abstraction (`hw_rev.hpp`) — V1/V2 hardware revision support. See MCC_HW_DELTA.md.
@@ -889,9 +907,9 @@ Fixed block size: **256 bytes**.
 | 249 | 249 | 253 | 4 | MCU Temp | float | °C |
 | 253 | 253 | 254 | 1 | TIME_BITS | uint8 | bit0:isPTP_Enabled; bit1:ptp.isSynched; bit2:usingPTP; bit3:ntp.isSynched; bit4:ntpUsingFallback; bit5:ntpHasFallback; bit6–7:RES — session 32 |
 | 254 | 254 | 255 | 1 | HW_REV | uint8 | 0x01=V1 (relay bus/solenoids/charger I2C); 0x02=V2 (dual Vicor/no solenoids/no I2C). Read before interpreting HEALTH_BITS [9] and POWER_BITS [10]. — v3.4.0 |
-| 255 | 255 | 256 | 1 | RESERVED | — | 0x00 |
+| 255 | 255 | 256 | 1 | LASER_MODEL | uint8 | `LASER_MODEL` enum. `0x00`=UNKNOWN/not yet sensed; `0x01`=YLM_3K (YLM-3000-SM-VV); `0x02`=YLR_6K (YLR-6000). Was RESERVED. Backwards compatible — old clients reading `0x00` see UNKNOWN. — v3.5.0 |
 
-**Defined: 255 bytes. Reserved: 1 byte. Fixed block: 256 bytes.**
+**Defined: 256 bytes. Reserved: 0 bytes. Fixed block: 256 bytes.**
 
 
 ## BDC Register 1 — Response to `0xA1`
@@ -1271,6 +1289,25 @@ Enum value N = `POWER_BITS` byte [10] bit N. Used as `which` payload byte in `0x
 
 > V1 valid: 0, 1, 2, 5, 6. V2 valid: 2, 3, 4. Invalid `which` for active revision → `STATUS_CMD_REJECTED`.
 
+### LASER_MODEL — MCC REG1 byte [255]
+*v3.5.0 — was RESERVED. Sensed via `RMN` command on laser connect. Written by firmware `SEND_REG_01()`. Read by `MSG_MCC.cs` and `MSG_IPG.cs`.*
+
+| Value | Enum | Laser | Max Power |
+|-------|------|-------|-----------|
+| 0x00 | `UNKNOWN` | Not yet sensed / sense fault | 0 W |
+| 0x01 | `YLM_3K` | YLM-3000-SM-VV | 3000 W |
+| 0x02 | `YLR_6K` | YLR-6000 | 6000 W |
+
+### DEBUG_LEVELS — firmware serial debug verbosity
+*Present in `defines.hpp` since v3.X.Y; added to `defines.cs` v3.5.0.*
+
+| Value | Enum | Meaning |
+|-------|------|---------|
+| 0 | `OFF` | No debug output |
+| 1 | `MIN` | Minimal — connect/disconnect/state changes |
+| 2 | `NORM` | Normal — command/response logging |
+| 3 | `VERBOSE` | Verbose — per-packet detail |
+
 ### VOTE_BITS_MCC — `0xAB SET_BCAST_FIRECONTROL_STATUS` byte 1 + TRC REG1 [41]
 | Bit | Name | Notes |
 |-----|------|-------|
@@ -1358,7 +1395,46 @@ active and NTP was unsynched. Fixed — all four call sites now use `GetCurrentT
 
 ---
 
-## MCC Serial Command Reference
+## MSG_IPG.cs — v3.5.0 Additions
+
+### New Properties
+
+| Property | Type | Access | Description |
+|----------|------|--------|-------------|
+| `LaserModel` | `LASER_MODEL` | `public set` | Sensed laser model. Set by `Parse()` from MCC REG1 byte [255] (MCC path) or by `ParseDirect()` from `RMN` response (ENG GUI direct path). Default `UNKNOWN`. |
+| `ModelName` | `string` | `public set` | Full model name string from `RMN` response (e.g. `"YLM-3000-SM-VV"`). ENG GUI path only — empty on MCC framed path until Step 2. |
+| `SerialNumber` | `string` | `public set` | Serial number from `RSN` response. ENG GUI path only — empty on MCC framed path until Step 2. |
+| `IsSensed` | `bool` | derived | `LaserModel != UNKNOWN` |
+| `MaxPower_W` | `int` | derived | `LaserModel.MaxPower_W()` — 3000 (3K), 6000 (6K), 0 (UNKNOWN) |
+| `IsEMON` | `bool` | derived | Emission ON — normalized across models. 3K=`StatusWord` bit 0; 6K=`StatusWord` bit 2 |
+| `IsNotReady` | `bool` | derived | Not-ready — normalized across models. 3K=`StatusWord` bit 9; 6K=`StatusWord` bit 11 (PSU off) |
+
+### Updated Properties
+
+| Property | Change |
+|----------|--------|
+| `PowerSetting_W` | Was `SetPoint / 100.0 * 3000` (hardcoded 3K). Now `SetPoint / 100.0 * MaxPower_W` (model-aware). Old line retained as comment. |
+
+### New Methods
+
+**`ParseDirect(string cmd, string payload)`** — ASCII TCP response path for ENG GUI direct laser connection. Routes by `cmd`:
+
+| cmd | Action |
+|-----|--------|
+| `RMODEL` | Parse model string (e.g. `YLM-3000-SM-VV`) → set `LaserModel` + `ModelName`. Power field extracted from second `-` delimited token: `3000`→`YLM_3K`, `6000`→`YLR_6K`. |
+| `RMN` | Read Machine Name (hostname) — logged only, not used for sense. |
+| `RSN` | Set `SerialNumber` |
+| `RHKPS` | Set `HKVoltage` (double, V) |
+| `RBSTPS` | Set `BusVoltage` (double, V) |
+| `RCT` | Set `Temperature` (double, °C) |
+| `STA` | Set `StatusWord` (uint) |
+| `RMEC` | Set `ErrorWord` (uint) |
+| `RCS` / `SDC` / `SCS` | Set `SetPoint` (double, %) |
+| `ROP` | Set `OutputPower_W` — `"OFF"`/`"LOW"` → 0, else parse double |
+
+**`GetBit(uint word, int bit)`** — static helper. Returns `(word & (1u << bit)) != 0`.
+
+---
 
 Commands accepted on the MCC USB/UART serial port. All commands are uppercase.
 Baud rate: 115200. Line terminator: `\n` or `\r\n`.

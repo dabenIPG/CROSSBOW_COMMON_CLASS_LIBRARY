@@ -81,11 +81,19 @@ namespace CROSSBOW
         IN_LCH = 2,
         BDC_TOTAL = 3,
     };
+    public enum DEBUG_LEVELS
+    {
+        OFF = 0,
+        MIN = 1,
+        NORM = 2,
+        VERBOSE = 3,
+    }
     public enum BDC_TRACKERS
     {
         AI = 0,
         MOSSE = 1,  // TrackB — primary operational tracker
         CENT = 2,
+        KALMAN = 3,  // not implemented
     };
 
     public enum AF_MODES
@@ -167,6 +175,42 @@ namespace CROSSBOW
         SOL_HEL = 5,  // V1 only — laser HV bus solenoid, pin 5
         SOL_BDA = 6,  // V1 only — gimbal power solenoid, pin 8
     }
+
+    // Laser model identity — sensed via RMN on connect.
+    // Byte [255] of MCC REG1. 0x00 = not yet sensed / sense fault.
+    // Mirror in defines.hpp.
+    public enum LASER_MODEL : byte
+    {
+        UNKNOWN = 0x00,
+        YLM_3K = 0x01,   // bit 0 — YLM-3000-SM-VV
+        YLR_6K = 0x02,   // bit 1 — YLR-6000
+    }
+
+    public static class LaserModelExt
+    {
+        public static int MaxPower_W(this LASER_MODEL m)
+        {
+            switch (m)
+            {
+                case LASER_MODEL.YLM_3K: return 3000;
+                case LASER_MODEL.YLR_6K: return 6000;
+                default: return 0;
+            }
+        }
+
+        public static bool IsSensed(this LASER_MODEL m) => m != LASER_MODEL.UNKNOWN;
+
+        public static string Label(this LASER_MODEL m)
+        {
+            switch (m)
+            {
+                case LASER_MODEL.YLM_3K: return "YLM-3K";
+                case LASER_MODEL.YLR_6K: return "YLR-6K";
+                default: return "UNKNOWN";
+            }
+        }
+    }
+
     public enum ICD
     {
         SET_UNSOLICITED = 0xA0,  // Subscribe/unsubscribe to unsolicited 100 Hz push. {0x01}=subscribe, {0x00}=unsubscribe. Any accepted command auto-registers the sender. Does NOT affect A1 stream.

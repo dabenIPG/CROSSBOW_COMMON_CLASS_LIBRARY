@@ -118,7 +118,7 @@ The application hosts the following child windows:
 | TMC | Controller view | 192.168.1.12 | ✅ Current | Thermal management — direct A2 |
 | BDC | Controller view | 192.168.1.20 | ✅ Current | Beam director — gimbal, cameras, FSM, TRC / FMC pass-through |
 | FMC | Controller view | 192.168.1.23 | ✅ Current | FSM DAC/ADC, focus stage — direct A2 |
-| HEL | Controller view | 192.168.1.13 | ✅ Current | IPG laser — direct UDP (independent of MCC pass-through) |
+| HEL | Controller view | 192.168.1.13 | ✅ Current | IPG laser — direct TCP port 10001 (independent of MCC pass-through) |
 | TRC | Controller view | 192.168.1.22 | ✅ Current | Jetson tracker — telemetry, ASCII commands via port 5012 |
 | GNSS | Controller view | 192.168.1.30 | 🔵 Planned | NovAtel receiver — direct UDP interface (merge from existing VS project) |
 | Gimbal | Controller view | 192.168.1.21 | 🔵 Planned | Galil pan/tilt drive — direct interface (merge from existing VS project) |
@@ -218,7 +218,7 @@ use the `.1–.99` range.
 |------|----|------|-------------|
 | MCC | 192.168.1.10 | Master Control Computer | A1→BDC, A2↔ENG GUI, A3↔THEIA |
 | TMC | 192.168.1.12 | Thermal Management Controller | A1→MCC, A2↔ENG GUI |
-| HEL | 192.168.1.13 | High Energy Laser | Direct ENG GUI UDP window; status also embedded in MCC REG1 [50–57] |
+| HEL | 192.168.1.13 | High Energy Laser | Direct ENG GUI TCP window (port 10001); status also embedded in MCC REG1 [45–65] + LASER_MODEL byte [255] |
 | BDC | 192.168.1.20 | Beam Director Controller | A1←TRC/FMC/MCC, A2↔ENG GUI, A3↔THEIA |
 | Gimbal | 192.168.1.21 | Galil pan/tilt servo drive | BDC CMD:7777 / DATA:7778; direct ENG GUI Galil window planned |
 | TRC | 192.168.1.22 | Tracking and Range Computer | A1→BDC, A2↔ENG GUI/BDC |
@@ -411,7 +411,7 @@ five ICD controllers directly, with the full INT_ENG command set available on ea
 Beyond the five ICD controllers, the ENG GUI provides direct UDP windows to hardware
 that operates outside the A2/A3 framing model:
 
-- **HEL (.13)** — direct UDP to the IPG laser, independent of the MCC pass-through.
+- **HEL (.13)** — direct TCP (port 10001) to the IPG laser, independent of the MCC pass-through.
   Allows laser-level diagnostics without MCC in the loop.
 - **GNSS (.30)** — direct UDP to the NovAtel receiver *(planned)*.
 - **Gimbal (.21)** — direct Galil interface *(planned)*.
@@ -1174,16 +1174,90 @@ Key content when built:
 
 ### 4.6 HEL — High Energy Laser
 
-**Target:** 192.168.1.13 · direct UDP (non-ICD framed)
+**Target:** 192.168.1.13 · direct TCP port 10001
+**Class:** `HEL` (`namespace CROSSBOW`, direct TCP — not ICD framed)
+**Transport:** TCP port 10001 — both YLM-3K and YLR-6K use the same port.
 
-> 🔲 **Section pending** — HEL form not yet built. HEL telemetry currently accessible via MCC pass-through (§4.2 Col 3 — LASER panel). Direct UDP window planned.
+> ⚠️ **MCC co-existence note:** Current MCC firmware (pre-Step 2) uses UDP port 10011 for laser comms — a different socket. ENG GUI direct TCP and MCC UDP can coexist. After Step 2 firmware is applied, MCC will use TCP 10001 and the ENG GUI direct window should only be used with MCC HEL device disabled (`0xE1 SET_MCC_DEVICES_ENABLE, device=2, en=0`).
 
-Key content when built:
-- HK Voltage, Bus Voltage, Case Temp
-- Status Word (32-bit), Error Word (32-bit)
-- Set power (0–100%), output power readback
-- Clear Errors command
-- EMON / NOT READY readbacks
+#### Layout — 3 columns (1320 × 854)
+
+**Col 1 — left panel (330px):**
+
+*CONNECTION groupbox:*
+- `IP` text input (default `192.168.1.13`) + `PORT` text input (default `10001`)
+- `HEL Connect` checkbox — triggers `await aHEL.Start()` on check, `aHEL.Stop()` on uncheck
+- `mb_HEL_connStatus` — `OFFLINE` (red) / `SENSING` (grey) / `SENSED` (green)
+- `MODEL:` label — populated from `RMN` response after connect
+- `SN:` label — populated from `RSN` response after connect
+
+*TIMING groupbox:*
+- `HEL HB RX` — ms between received laser responses
+- `DROPS` — TCP read error count
+
+*Laser data groupbox:*
+- `HK VOLTS` — housekeeping voltage V (3K only — `RHKPS`)
+- `BUS VOLTS` — bus voltage V (3K only — `RBSTPS`)
+- `CASE TEMP` — case temperature °C (`RCT`)
+- `mb_hel_isEmOn` — emission on indicator (model-aware bit decode)
+- `mb_hel_isNotReady` — not-ready indicator (model-aware bit decode)
+- `SET POINT` progress bar — % (`RCS`/`SDC`/`SCS`)
+- `POWER [W]` progress bar — W (`ROP`), maximum driven by sensed model
+
+*Commands:*
+- `EMON` / `EMOFF` buttons — gated on `IsSensed`
+- Power spinner (0–100%) + `SET` button — sends `SCS` (3K) or `SDC` (6K)
+- `CLR` button — sends `RERR`
+
+**Col 2 — center:**
+
+*STA groupbox:* 8 `mb_` StatusLabel bit indicators + raw 32-bit binary. Labels are model-aware — updated once on sense by `UpdateModelLabels()`:
+
+| mb_ control | 3K bit | 6K bit |
+|-------------|--------|--------|
+| `mb_sta_emission` | B0: EM ON | B2: EM ON |
+| `mb_sta_overheat` | B16: HI TEMP | B1: OVHEAT |
+| `mb_sta_notready` | B9: NOT RDY | B11: PSU OFF |
+| `mb_sta_busvolts` | B20: BUS V | B25: PWR ERR |
+| `mb_sta_extctrl` | B5: EXT CTL | B18: EXT CTRL |
+| `mb_sta_error` | B10: ERROR | B19: PWR ERR |
+| `mb_sta_crit` | B29: CRIT ERR | B29: CRIT ERR |
+| `mb_sta_shutdown` | B31: EXT SHT | B30: FIBR BRK |
+
+*ERR groupbox:* 8 `mb_` StatusLabel bit indicators + raw 32-bit binary. 3K only — on 6K, bit indicators are hidden and `lbl_err_6k_note` ("6K ERR bits not fully mapped — see raw word") is shown instead:
+
+| mb_ control | 3K bit |
+|-------------|--------|
+| `mb_err_temp` | B0: CASE TEMP |
+| `mb_err_busv` | B4: BUS VOLT |
+| `mb_err_outpwr` | B6: OUT PWR |
+| `mb_err_fuse` | B10: FIBR FUSE |
+| `mb_err_optint` | B11: OPT INT |
+| `mb_err_crit` | B13: CRIT ERR |
+| `mb_err_extshut` | B15: EXT SHUT |
+| `mb_err_overcurr` | B18: OVER CURR |
+
+**Col 3 — right panel (330px):** Reserved — empty.
+
+**Status strip (bottom):** `MODEL:` · `SN:` · date/time
+
+#### Auto-Sense and Poll Loop
+
+On connect, `hel.cs` sends `RMN\r` then `RSN\r` before starting the poll timer. The `RMN` response (e.g. `RMN: YLM-3000-SM-VV`) is parsed by `MSG_IPG.ParseDirect()` — the power field in the model name determines `LaserModel` (`3000`→`YLM_3K`, `6000`→`YLR_6K`, anything else→`UNKNOWN` + error logged).
+
+Poll timer fires every 20 ms, gated on `IsSensed`. State machine (p1):
+
+| p1 | Command | Condition |
+|----|---------|-----------|
+| 0 | `RHKPS\r` | 3K only |
+| 1 | `RCT\r` | both |
+| 2 | `STA\r` | both |
+| 3 | `RMEC\r` | both |
+| 4 | `RBSTPS\r` | 3K only |
+| 5 | `RCS\r` | both |
+| 6 | `ROP\r` | both → wrap to 0 |
+
+All responses routed to `MSG_IPG.ParseDirect(cmd, payload)`.
 
 ---
 
