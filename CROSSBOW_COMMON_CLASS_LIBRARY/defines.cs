@@ -183,7 +183,7 @@ namespace CROSSBOW
     {
         UNKNOWN = 0x00,
         YLM_3K = 0x01,   // bit 0 — YLM-3000-SM-VV
-        YLR_6K = 0x02,   // bit 1 — YLR-6000
+        YLM_6K = 0x02,   // bit 1 — YLR-6000
     }
 
     public static class LaserModelExt
@@ -193,7 +193,7 @@ namespace CROSSBOW
             switch (m)
             {
                 case LASER_MODEL.YLM_3K: return 3000;
-                case LASER_MODEL.YLR_6K: return 6000;
+                case LASER_MODEL.YLM_6K: return 6000;
                 default: return 0;
             }
         }
@@ -204,8 +204,8 @@ namespace CROSSBOW
         {
             switch (m)
             {
-                case LASER_MODEL.YLM_3K: return "YLM-3K";
-                case LASER_MODEL.YLR_6K: return "YLR-6K";
+                case LASER_MODEL.YLM_3K: return "YLM-3000-SM-VV";
+                case LASER_MODEL.YLM_6K: return "YLM-6000-U3-SM";
                 default: return "UNKNOWN";
             }
         }

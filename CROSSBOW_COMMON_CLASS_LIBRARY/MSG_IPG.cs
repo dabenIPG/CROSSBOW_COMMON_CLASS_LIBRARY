@@ -62,12 +62,12 @@ namespace CROSSBOW
         public int MaxPower_W => LaserModel.MaxPower_W();
 
         // Emission bit — 3K=bit0, 6K=bit2
-        public bool IsEMON => LaserModel == LASER_MODEL.YLR_6K
+        public bool IsEMON => LaserModel == LASER_MODEL.YLM_6K
             ? (StatusWord & (1u << 2)) != 0
             : (StatusWord & (1u << 0)) != 0;
 
         // Not-ready — 3K=bit9, 6K=bit11 (PSU off)
-        public bool IsNotReady => LaserModel == LASER_MODEL.YLR_6K
+        public bool IsNotReady => LaserModel == LASER_MODEL.YLM_6K
             ? (StatusWord & (1u << 11)) != 0
             : (StatusWord & (1u << 9)) != 0;
 
@@ -78,7 +78,7 @@ namespace CROSSBOW
             if (parts.Length >= 2 && int.TryParse(parts[1], out int power))
             {
                 if (power == 3000) { LaserModel = LASER_MODEL.YLM_3K; ModelName = payload; }
-                else if (power == 6000) { LaserModel = LASER_MODEL.YLR_6K; ModelName = payload; }
+                else if (power == 6000) { LaserModel = LASER_MODEL.YLM_6K; ModelName = payload; }
                 else Debug.WriteLine($"IPG ERROR — unrecognised power field: {power}");
             }
             else Debug.WriteLine($"IPG ERROR — sense parse failed: '{payload}'");

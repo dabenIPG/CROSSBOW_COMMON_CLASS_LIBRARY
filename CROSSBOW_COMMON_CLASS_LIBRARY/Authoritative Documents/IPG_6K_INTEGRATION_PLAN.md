@@ -77,12 +77,12 @@ Send("RSN\r");   // serial number
 `Parse()` handles `RMN` response:
 ```csharp
 case "RMN":
-    // e.g. "YLM-3000-SM-VV" or "YLR-6000-???"
+    // e.g. "YLM-3000-SM-VV" or "YLM-6000-U3-SM-???"
     string[] parts = payload.Trim().Split('-');
     if (parts.Length >= 2 && int.TryParse(parts[1], out int power))
     {
         if      (power == 3000) LaserModel = LASER_MODEL.YLM_3K;
-        else if (power == 6000) LaserModel = LASER_MODEL.YLR_6K;
+        else if (power == 6000) LaserModel = LASER_MODEL.YLM_6K;
         else                    LaserModel = LASER_MODEL.UNKNOWN;
     }
     ModelName    = payload.Trim();
@@ -154,7 +154,7 @@ private void Send(string cmd)
 // Model-aware set power
 public void SET_POWER(float pct)
 {
-    string cmd = LaserModel == LASER_MODEL.YLR_6K ? "SDC " : "SCS ";
+    string cmd = LaserModel == LASER_MODEL.YLM_6K ? "SDC " : "SCS ";
     Send($"{cmd}{pct:F1}\r");
 }
 
@@ -179,7 +179,7 @@ public bool        IsEMON
     get
     {
         // normalized — same bit logic as firmware isEMON()
-        return LaserModel == LASER_MODEL.YLR_6K
+        return LaserModel == LASER_MODEL.YLM_6K
             ? (IPGMsg.StatusWord & (1u << 2)) != 0
             : (IPGMsg.StatusWord & (1u << 0)) != 0;
     }
@@ -323,7 +323,7 @@ private void btn_mcc_hel_setPower_Click(object sender, EventArgs e)
 ## 1. Background
 
 MCC currently drives a single laser type — the IPG YLM-3000-SM-VV (3K) — via the `ipg` class
-in `ipg.hpp` / `ipg.cpp`. A second laser, the IPG YLR-6000 (6K), is being integrated. The two
+in `ipg.hpp` / `ipg.cpp`. A second laser, the IPG YLM-6000-U3-SM (6K), is being integrated. The two
 lasers share the same Ethernet command interface structure but differ in:
 
 - Command mnemonics (e.g. `SCS` vs `SDC` for set power)
@@ -382,7 +382,7 @@ enum class LASER_MODEL : uint8_t
 {
     UNKNOWN = 0x00,
     YLM_3K  = 0x01,   // bit 0 — YLM-3000-SM-VV
-    YLR_6K  = 0x02    // bit 1 — YLR-6000
+    YLM_6K  = 0x02    // bit 1 — YLM-6000-U3-SM
 };
 
 inline uint16_t LASER_MAX_POWER_W(LASER_MODEL m)
@@ -390,7 +390,7 @@ inline uint16_t LASER_MAX_POWER_W(LASER_MODEL m)
     switch (m)
     {
         case LASER_MODEL::YLM_3K: return 3000;
-        case LASER_MODEL::YLR_6K: return 6000;
+        case LASER_MODEL::YLM_6K: return 6000;
         default:                  return 0;
     }
 }
@@ -402,7 +402,7 @@ public enum LASER_MODEL : byte
 {
     UNKNOWN = 0x00,
     YLM_3K  = 0x01,
-    YLR_6K  = 0x02
+    YLM_6K  = 0x02
 }
 
 public static class LaserModelExt
@@ -412,7 +412,7 @@ public static class LaserModelExt
         switch (m)
         {
             case LASER_MODEL.YLM_3K: return 3000;
-            case LASER_MODEL.YLR_6K: return 6000;
+            case LASER_MODEL.YLM_6K: return 6000;
             default:                 return 0;
         }
     }
@@ -435,7 +435,7 @@ On `INIT()`, immediately after TCP connect, send `RMN\r` and wait for the respon
 ### Expected responses
 ```
 3K → "RMN: YLM-3000-SM-VV"   power field = 3000
-6K → "RMN: YLR-6000-???"     power field = 6000
+6K → "RMN: YLM-6000-U3-SM-???"     power field = 6000
 ```
 
 ### Parse logic
@@ -446,7 +446,7 @@ if (dash != nullptr)
 {
     int power = atoi(dash + 1);
     if      (power == 3000) { model_type = LASER_MODEL::YLM_3K; isInit = true; }
-    else if (power == 6000) { model_type = LASER_MODEL::YLR_6K; isInit = true; }
+    else if (power == 6000) { model_type = LASER_MODEL::YLM_6K; isInit = true; }
     else
     {
         model_type = LASER_MODEL::UNKNOWN;
@@ -505,7 +505,7 @@ bool isReady() { return isStarted && isConnected && isInit; }
 ```cpp
 bool isEMON()
 {
-    if (model_type == LASER_MODEL::YLR_6K)
+    if (model_type == LASER_MODEL::YLM_6K)
         return ((status_word & (1U << 2)) != 0);   // 6K: emission = bit 2
     return ((status_word & (1U << 0)) != 0);        // 3K: emission = bit 0
 }
@@ -519,7 +519,7 @@ caller changes.
 void SET_POWER(float _pow)
 {
     if (model_type == LASER_MODEL::UNKNOWN) return;   // guard
-    tcpClient.print(model_type == LASER_MODEL::YLR_6K ? F("SDC ") : F("SCS "));
+    tcpClient.print(model_type == LASER_MODEL::YLM_6K ? F("SDC ") : F("SCS "));
     tcpClient.print(_pow, 1);
     tcpClient.print(F(" \r"));
 }
@@ -572,7 +572,7 @@ No equivalent commands exist on the 6K. Fields remain at their initialised value
 
 | Byte | From | To | nBytes | Name | Type | Notes |
 |------|------|----|--------|------|------|-------|
-| 255 | 255 | 256 | 1 | **LASER_MODEL** | uint8 | `LASER_MODEL` enum. `0x00`=UNKNOWN/not sensed; `0x01`=YLM_3K; `0x02`=YLR_6K. Was RESERVED. |
+| 255 | 255 | 256 | 1 | **LASER_MODEL** | uint8 | `LASER_MODEL` enum. `0x00`=UNKNOWN/not sensed; `0x01`=YLM_3K; `0x02`=YLM_6K. Was RESERVED. |
 
 **Backwards compatible** — old C# clients reading `0x00` here see `UNKNOWN` which is a safe
 default (they were reading reserved zero before).
@@ -710,7 +710,7 @@ correct bit mask per laser.
 | 6K ch2 output power (`ROPS`) | Not in current poll — future extension |
 | 6K pulse mode (`SPRR`, `SPW`, `EGM`) | Not required for CROSSBOW fire control |
 | 6K aiming beam (`ABN`/`ABF`) | Not required — no guide laser in CROSSBOW path |
-| `MSG_MCC.cs` byte [255] parse | Parse `LaserModel` from byte [255]; set on `MSG_IPG` for MCC framed path |
+| `isTrainingMode` readback via REG1 | Pack `ipg.isTrainingMode` into `HEALTH_BITS` byte [9] bit 3 (currently RES). Add `isHEL_TrainingMode` accessor to `MSG_MCC.cs`. Replace `chk_hel_trainingMode` write-only control in `frmMCC` with `mb_hel_trainingMode` StatusLabel readback alongside the existing checkbox. Requires `mcc.cpp`, `MSG_MCC.cs`, `frmMCC.cs`, `frmMCC_Designer.cs`, ICD update. |
 | `defines.hpp` fleet deployment | Deploy updated `defines.hpp` to all 5 controllers (BDC, TMC, FMC, TRC, MCC) |
 
 ## 13. Pending Serial Command Enhancements

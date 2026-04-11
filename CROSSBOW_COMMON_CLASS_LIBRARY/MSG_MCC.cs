@@ -357,7 +357,7 @@ namespace CROSSBOW
         //   [249-252] MCU Temp         float
         //   [253]      TIME_BITS (session 32) — isPTP_En, ptp.isSynched, usingPTP, ntp.isSynched, ntpUsingFB, ntpHasFB
         //   [254]      HW_REV — 0x01=V1, 0x02=V2 (MCC unification session)
-        //   [255]      LASER_MODEL — 0x00=UNKNOWN, 0x01=YLM_3K, 0x02=YLR_6K (v3.5.0)
+        //   [255]      LASER_MODEL — 0x00=UNKNOWN, 0x01=YLM_3K, 0x02=YLM_6K (v3.5.0)
         // =========================================================================
         private void ParseMSG01(byte[] msg, int ndx)
         {
@@ -430,7 +430,7 @@ namespace CROSSBOW
         public bool isReady { get { return IsBitSet(HealthBits, 0); } }   // new — was missing from old StatusBits
         public bool isCharger_Enabled { get { return IsBitSet(HealthBits, 1); } }   // was bit 4
         public bool isNotBatLowVoltage { get { return IsBitSet(HealthBits, 2); } }   // was bit 5
-                                                                                     // Solenoid/laser moved to PowerBits — compat aliases so call sites don't break
+        public bool isHEL_TrainingMode { get { return IsBitSet(HealthBits, 3); } }   // v3.5.0 — MCC training mode flag                                                     // Solenoid/laser moved to PowerBits — compat aliases so call sites don't break
         public bool isSolenoid1_Enabled { get { return IsBitSet(PowerBits, (int)MCC_POWER.SOL_HEL); } }
         public bool isSolenoid2_Enabled { get { return IsBitSet(PowerBits, (int)MCC_POWER.SOL_BDA); } }
         public bool isLaserPowerBus_Enabled { get { return IsBitSet(PowerBits, (int)MCC_POWER.LASER_RELAY); } }

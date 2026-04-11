@@ -483,17 +483,25 @@ namespace CROSSBOW
         public bool TMC_STATUS { get { return LatestMSG.isTMC_DeviceReady; } }
         public bool GPS_STATUS { get { return LatestMSG.isGNSS_DeviceReady && LatestMSG.GNSSMsg.SIV >= 4; } }
 
+        private const double HEL_HB_STALE_S = 2.0;   // laser silent > 2s = stale
+
         public READY_STATUS HEL_STATUS
         {
             get
             {
-                if ((LatestMSG.IPGMsg.HKVoltage > 23.3) && (LatestMSG.IPGMsg.BusVoltage > 40))
+                if (!LatestMSG.isHEL_Sensed) return READY_STATUS.ERROR;
+                if (LatestMSG.HB_HEL > HEL_HB_STALE_S) return READY_STATUS.ERROR;
+
+                if (LatestMSG.LaserModel == LASER_MODEL.YLM_6K)
                 {
-                    if (LatestMSG.isHEL_NOTREADY)
-                        return READY_STATUS.WARN;
-                    else
-                        return READY_STATUS.READY;
+                    // 6K has no HK/bus voltage readback — use notready bit only
+                    return LatestMSG.isHEL_NOTREADY ? READY_STATUS.WARN : READY_STATUS.READY;
                 }
+
+                // 3K — validate HK and bus voltage before declaring ready
+                if ((LatestMSG.IPGMsg.HKVoltage > 23.3) && (LatestMSG.IPGMsg.BusVoltage > 40))
+                    return LatestMSG.isHEL_NOTREADY ? READY_STATUS.WARN : READY_STATUS.READY;
+
                 return READY_STATUS.ERROR;
             }
         }

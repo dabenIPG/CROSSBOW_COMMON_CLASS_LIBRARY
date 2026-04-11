@@ -13,10 +13,10 @@
 ## Version History
 
 **v3.5.0 changes (IPG 6K integration Phase 1 — ENG GUI direct TCP — 2026-04-10):**
-- `LASER_MODEL` enum added to `defines.hpp` and `defines.cs`: `UNKNOWN=0x00`, `YLM_3K=0x01`, `YLR_6K=0x02`. Inline function `LASER_MAX_POWER_W()` added to `defines.hpp`. `LaserModelExt` static class (`MaxPower_W()`, `IsSensed()`, `Label()`) added to `defines.cs`.
+- `LASER_MODEL` enum added to `defines.hpp` and `defines.cs`: `UNKNOWN=0x00`, `YLM_3K=0x01`, `YLM_6K=0x02`. Inline function `LASER_MAX_POWER_W()` added to `defines.hpp`. `LaserModelExt` static class (`MaxPower_W()`, `IsSensed()`, `Label()`) added to `defines.cs`.
 - `DEBUG_LEVELS` enum added to `defines.cs` — was present in `defines.hpp` only. Now parallel.
 - `BDC_TRACKERS.KALMAN=3` added to `defines.cs` — was present in `defines.hpp` only. Now parallel.
-- MCC REG1 byte [255]: `RESERVED (0x00)` → **`LASER_MODEL`** — stores laser model sensed via `RMN` command on connect. `0x00`=UNKNOWN/not yet sensed; `0x01`=YLM_3K; `0x02`=YLR_6K. Backwards compatible — old C# clients reading `0x00` see UNKNOWN which is a safe default (they were reading reserved zero before). See enum table below.
+- MCC REG1 byte [255]: `RESERVED (0x00)` → **`LASER_MODEL`** — stores laser model sensed via `RMN` command on connect. `0x00`=UNKNOWN/not yet sensed; `0x01`=YLM_3K; `0x02`=YLM_6K. Backwards compatible — old C# clients reading `0x00` see UNKNOWN which is a safe default (they were reading reserved zero before). See enum table below.
 - `MSG_IPG.cs` extended:
   - `PowerSetting_W` — hardcoded `* 3000` replaced with `SetPoint / 100.0 * MaxPower_W` (model-aware via `LaserModel`).
   - New properties: `LaserModel` (`LASER_MODEL`, `public set`), `ModelName` (`string`), `SerialNumber` (`string`), `IsSensed` (derived), `MaxPower_W` (derived), `IsEMON` (model-aware bit decode), `IsNotReady` (model-aware bit decode).
@@ -33,8 +33,8 @@
 - `0xAF SET_HEL_TRAINING_MODE` — was `RES_AF` (reserved stub). `uint8 0=COMBAT, 1=TRAINING`. Sets `ipg.isTrainingMode` — power clamped to 10% when training. `INT_ENG` only.
 - MCC serial commands added: `HEL` (status dump), `HELPOW <0-100>` (set power), `HELCLR` (clear errors), `HELTRAIN <0|1>` (training mode). All gated on `isHEL_Valid()`.
 - Firmware `ipg.hpp`/`ipg.cpp` rewritten: UDP→TCP, auto-sense, model-conditional poll, `LASER_MODEL model_type`, `isSensed()`, `isResponding()`, `isEMON()` model-aware switch, `isTrainingMode`, `lastMsgRx_ms`/`HB_RX_ms` liveness tracking, `parseLine()`/`trySenseModel()` helpers.
-- `mcc.hpp`: `isHEL_Valid()` added.
-- `mcc.cpp`: byte [255] packed as `LASER_MODEL_BITS()`; `StateManager()` COMBAT gate on `isHEL_Valid()`; `0xAF` handler added.
+- `mcc.hpp`: `isHEL_Valid()` added. `isTrainingMode` + `TRAINING_POWER_PCT` moved from `IPG` class to `MCC` class — training mode is MCC policy, not laser state.
+- `mcc.cpp`: byte [255] packed as `LASER_MODEL_BITS()`; `HEALTH_BITS()` bit 3 = `isTrainingMode`; `StateManager()` COMBAT gate on `isHEL_Valid()`; `0xAF` handler sets `isTrainingMode` + applies power immediately; `HELTRAIN` serial command moved to MCC-level (out of HEL section).
 
 **v3.4.0 changes (MCC unification — 2026-04-08):**
 - MCC unified hardware abstraction (`hw_rev.hpp`) — V1/V2 hardware revision support. See MCC_HW_DELTA.md.
@@ -43,7 +43,8 @@
   - bit 0: `isReady` (unchanged)
   - bit 1: `isChargerEnabled` — **was bit 4**
   - bit 2: `isNotBatLowVoltage` — **was bit 5**
-  - bits 3–7: `RES` — solenoid bits (1–2) and laser bit (3) moved to `POWER_BITS` byte [10].
+  - bit 3: `isTrainingMode` — **added v3.5.0** — MCC HEL training mode flag
+  - bits 4–7: `RES` — solenoid bits (1–2) and laser bit (3) moved to `POWER_BITS` byte [10].
 - MCC REG1 byte [10] **BREAKING CHANGE** — renamed `MCC STAT BITS2` → `POWER_BITS`. Bit N = `MCC_POWER` enum value N. Revision-independent decode — unused outputs for active revision always `0`:
   - bit 0: `isPwr_GpsRelay` (V1 live | V2 always 0)
   - bit 1: `isPwr_VicorBus` (V1 live | V2 always 0)
@@ -849,7 +850,7 @@ Fixed block size: **256 bytes**.
 | 5 | 5 | 7 | 2 | dt_us | uint16 | µs in processing loop |
 | 7 | 7 | 8 | 1 | MCC DEVICE_ENABLED_BITS | uint8 | 0:NTP; 1:TMC; 2:HEL; 3:BAT; 4:PTP; 5:CRG; 6:GNSS; 7:BDC |
 | 8 | 8 | 9 | 1 | MCC DEVICE_READY_BITS | uint8 | 0:NTP; 1:TMC; 2:HEL; 3:BAT; 4:PTP; 5:CRG; 6:GNSS; 7:BDC |
-| 9 | 9 | 10 | 1 | MCC HEALTH_BITS | uint8 | 0:isReady; 1:isChargerEnabled; 2:isNotBatLowVoltage; 3–7:RES ⚠ **Breaking change v3.4.0** — solenoid/laser bits moved to POWER_BITS byte [10]. Old layout: 1:isSolenoid1_En; 2:isSolenoid2_En; 3:isLaserPower_En; 4:isChargerEnabled; 5:isNotBatLowVoltage. Read HW_REV [254] — layout identical on both revisions. |
+| 9 | 9 | 10 | 1 | MCC HEALTH_BITS | uint8 | 0:isReady; 1:isChargerEnabled; 2:isNotBatLowVoltage; 3:isTrainingMode (v3.5.0); 4–7:RES ⚠ **Breaking change v3.4.0** — solenoid/laser bits moved to POWER_BITS byte [10]. Old layout: 1:isSolenoid1_En; 2:isSolenoid2_En; 3:isLaserPower_En; 4:isChargerEnabled; 5:isNotBatLowVoltage. Read HW_REV [254] — layout identical on both revisions. |
 | 10 | 10 | 11 | 1 | MCC POWER_BITS | uint8 | Bit N = MCC_POWER enum value N. Unused outputs for active revision always 0 — no guards needed in decoder. 0:isPwr_GpsRelay(V1\|0 V2); 1:isPwr_VicorBus(V1\|0 V2); 2:isPwr_LaserRelay(both); 3:isPwr_GimVicor(0 V1\|V2); 4:isPwr_TmsVicor(0 V1\|V2); 5:isPwr_SolHel(V1\|0 V2); 6:isPwr_SolBda(V1\|0 V2); 7:RES ⚠ **Breaking change v3.4.0** — old layout: 0–2:RES; 3:isVicorEnabled; 4:isRelay1En; 5:isRelay2En; 6:isRelay3En; 7:isRelay4En. Read HW_REV [254] to confirm V1 vs V2 before interpreting bits 0–1 and 3–6. |
 | 11 | 11 | 12 | 1 | MCC VOTE BITS | uint8 | 0:isLaserTotalHW_Vote_rb; 1:isNotAbort_Vote_rb; 2:isArmed_Vote_rb; 3:isBDA_Vote_rb; 4:isEMON_rb; 5:isLaserFireRequested_Vote; 6:isLaserTotal_Vote_rb; 7:isCombat_Vote_rb |
 | 12 | 12 | 20 | 8 | NTP epoch Time | uint64 | ms since epoch |
@@ -913,7 +914,7 @@ Fixed block size: **256 bytes**.
 | 249 | 249 | 253 | 4 | MCU Temp | float | °C |
 | 253 | 253 | 254 | 1 | TIME_BITS | uint8 | bit0:isPTP_Enabled; bit1:ptp.isSynched; bit2:usingPTP; bit3:ntp.isSynched; bit4:ntpUsingFallback; bit5:ntpHasFallback; bit6–7:RES — session 32 |
 | 254 | 254 | 255 | 1 | HW_REV | uint8 | 0x01=V1 (relay bus/solenoids/charger I2C); 0x02=V2 (dual Vicor/no solenoids/no I2C). Read before interpreting HEALTH_BITS [9] and POWER_BITS [10]. — v3.4.0 |
-| 255 | 255 | 256 | 1 | LASER_MODEL | uint8 | `LASER_MODEL` enum. `0x00`=UNKNOWN/not yet sensed; `0x01`=YLM_3K (YLM-3000-SM-VV); `0x02`=YLR_6K (YLR-6000). Was RESERVED. Backwards compatible — old clients reading `0x00` see UNKNOWN. — v3.5.0 |
+| 255 | 255 | 256 | 1 | LASER_MODEL | uint8 | `LASER_MODEL` enum. `0x00`=UNKNOWN/not yet sensed; `0x01`=YLM_3K (YLM-3000-SM-VV); `0x02`=YLM_6K (YLM-6000-U3-SM). Was RESERVED. Backwards compatible — old clients reading `0x00` see UNKNOWN. — v3.5.0 |
 
 **Defined: 256 bytes. Reserved: 0 bytes. Fixed block: 256 bytes.**
 
@@ -1302,7 +1303,7 @@ Enum value N = `POWER_BITS` byte [10] bit N. Used as `which` payload byte in `0x
 |-------|------|-------|-----------|
 | 0x00 | `UNKNOWN` | Not yet sensed / sense fault | 0 W |
 | 0x01 | `YLM_3K` | YLM-3000-SM-VV | 3000 W |
-| 0x02 | `YLR_6K` | YLR-6000 | 6000 W |
+| 0x02 | `YLM_6K` | YLM-6000-U3-SM | 6000 W |
 
 ### DEBUG_LEVELS — firmware serial debug verbosity
 *Present in `defines.hpp` since v3.X.Y; added to `defines.cs` v3.5.0.*
@@ -1380,6 +1381,7 @@ public enum TIME_SOURCE { None, PTP, NTP }
 | `isReady` | `bool` | HealthBits bit 0 | MCC system ready (was missing) |
 | `isCharger_Enabled` | `bool` | HealthBits bit 1 | Charger GPIO enabled (was StatusBits bit 4) |
 | `isNotBatLowVoltage` | `bool` | HealthBits bit 2 | Bus voltage ≥ 47V (was StatusBits bit 5) |
+| `isHEL_TrainingMode` | `bool` | HealthBits bit 3 | MCC training mode active — power clamped to 10% (v3.5.0) |
 | `pb_GpsRelay` | `bool` | PowerBits bit 0 | GPS relay state (V1 live, V2 always false) |
 | `pb_VicorBus` | `bool` | PowerBits bit 1 | Relay bus Vicor state (V1 live, V2 always false) |
 | `pb_LaserRelay` | `bool` | PowerBits bit 2 | Laser relay state (both revisions) |
@@ -1427,7 +1429,7 @@ active and NTP was unsynched. Fixed — all four call sites now use `GetCurrentT
 
 | cmd | Action |
 |-----|--------|
-| `RMODEL` | Parse model string (e.g. `YLM-3000-SM-VV`) → set `LaserModel` + `ModelName`. Power field extracted from second `-` delimited token: `3000`→`YLM_3K`, `6000`→`YLR_6K`. |
+| `RMODEL` | Parse model string (e.g. `YLM-3000-SM-VV`) → set `LaserModel` + `ModelName`. Power field extracted from second `-` delimited token: `3000`→`YLM_3K`, `6000`→`YLM_6K`. |
 | `RMN` | Read Machine Name (hostname) — logged only, not used for sense. |
 | `RSN` | Set `SerialNumber` |
 | `RHKPS` | Set `HKVoltage` (double, V) |

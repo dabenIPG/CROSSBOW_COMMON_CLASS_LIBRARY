@@ -1176,7 +1176,7 @@ Key content when built:
 
 **Target:** 192.168.1.13 · direct TCP port 10001
 **Class:** `HEL` (`namespace CROSSBOW`, direct TCP — not ICD framed)
-**Transport:** TCP port 10001 — both YLM-3K and YLR-6K use the same port.
+**Transport:** TCP port 10001 — both YLM-3K and YLM-6K use the same port.
 
 > ⚠️ **MCC co-existence note:** Current MCC firmware (pre-Step 2) uses UDP port 10011 for laser comms — a different socket. ENG GUI direct TCP and MCC UDP can coexist. After Step 2 firmware is applied, MCC will use TCP 10001 and the ENG GUI direct window should only be used with MCC HEL device disabled (`0xE1 SET_MCC_DEVICES_ENABLE, device=2, en=0`).
 
@@ -1243,7 +1243,7 @@ Key content when built:
 
 #### Auto-Sense and Poll Loop
 
-On connect, `hel.cs` sends `RMN\r` then `RSN\r` before starting the poll timer. The `RMN` response (e.g. `RMN: YLM-3000-SM-VV`) is parsed by `MSG_IPG.ParseDirect()` — the power field in the model name determines `LaserModel` (`3000`→`YLM_3K`, `6000`→`YLR_6K`, anything else→`UNKNOWN` + error logged).
+On connect, `hel.cs` sends `RMN\r` then `RSN\r` before starting the poll timer. The `RMN` response (e.g. `RMN: YLM-3000-SM-VV`) is parsed by `MSG_IPG.ParseDirect()` — the power field in the model name determines `LaserModel` (`3000`→`YLM_3K`, `6000`→`YLM_6K`, anything else→`UNKNOWN` + error logged).
 
 Poll timer fires every 20 ms, gated on `IsSensed`. State machine (p1):
 

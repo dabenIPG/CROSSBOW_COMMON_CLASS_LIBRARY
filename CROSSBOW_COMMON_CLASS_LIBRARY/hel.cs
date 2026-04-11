@@ -149,7 +149,7 @@ namespace CROSSBOW
         public void SET_POWER(int pct)
         {
             if (!IPGMsg.IsSensed) return;
-            string cmd = IPGMsg.LaserModel == LASER_MODEL.YLR_6K
+            string cmd = IPGMsg.LaserModel == LASER_MODEL.YLM_6K
                 ? $"SDC {pct}.0\r"
                 : $"SCS {pct}\r";
             Send(cmd);
