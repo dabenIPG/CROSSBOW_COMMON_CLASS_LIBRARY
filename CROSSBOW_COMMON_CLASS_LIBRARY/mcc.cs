@@ -418,7 +418,11 @@ namespace CROSSBOW
         {
             Send((byte)ICD.CLEAR_HEL_ERROR);
         }
-
+        // 0xAF SET_HEL_TRAINING_MODE
+        public void SetHELTrainingMode(bool en)
+        {
+            Send((byte)ICD.SET_HEL_TRAINING_MODE, new byte[] { (byte)(en ? 1 : 0) });
+        }
         // 0xE6 PMS_SET_FIRE_REQUESTED_VOTE — continuous heartbeat required while active
         public bool wasLaserFireRequested { get; private set; } = false;
         public Stopwatch LaserFireStopwatch { get; set; } = new Stopwatch();

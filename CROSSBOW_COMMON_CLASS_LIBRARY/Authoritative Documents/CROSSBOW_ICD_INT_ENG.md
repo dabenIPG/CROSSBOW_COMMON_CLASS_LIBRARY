@@ -24,11 +24,17 @@
   - `GetBit(uint word, int bit)` static helper added.
 - ENG GUI `HEL` window (`hel.cs`, `frmHEL.cs`, `frmHEL_Designer.cs`) — complete rewrite:
   - Transport: `UdpClient` port 10011 → `TcpClient`/`NetworkStream` port 10001 (both lasers use TCP on port 10001).
-  - Auto-sense: `RMODEL` sent immediately on connect; response parsed to determine `LASER_MODEL` (e.g. `YLM-3000-SM-VV`). `RSN` follows for serial number. Note: `RMN` is Read Machine Name (hostname) — distinct from `RMODEL` (model string).
+  - Auto-sense: `RMODEL` and `RMN` both sent on connect. `RMODEL` returns model string on 3K (e.g. `YLM-3000-SM-VV`); `RMN` returns model string on 6K (e.g. `YLM-6000-U3-SM`) and hostname on 3K (ignored — no `-` delimiter). `TrySenseModel()` in `ParseDirect()` handles both paths. `RSN` follows for serial number.
   - Periodic poll loop (20 ms) — mirrors firmware `POLL()` p1 state machine. Model-conditional: `RHKPS`/`RBSTPS` 3K only; `SDC` (6K) vs `SCS` (3K) for set power.
   - Full `STA`/`ERR` bit decode with `mb_` (`CodeArtEng.Controls.StatusLabel`) controls — model-aware labels updated on sense via `UpdateModelLabels()`.
   - 3-column layout matching `frmTMC` (1320×854). IP/Port text inputs. `EMON`/`EMOFF` buttons gated on `IsSensed`.
   - All parse logic centralised in `MSG_IPG.ParseDirect()`.
+  - `Stop()` nulls `_tcp`/`_stream` to prevent `SocketException` on reconnect.
+- `0xAF SET_HEL_TRAINING_MODE` — was `RES_AF` (reserved stub). `uint8 0=COMBAT, 1=TRAINING`. Sets `ipg.isTrainingMode` — power clamped to 10% when training. `INT_ENG` only.
+- MCC serial commands added: `HEL` (status dump), `HELPOW <0-100>` (set power), `HELCLR` (clear errors), `HELTRAIN <0|1>` (training mode). All gated on `isHEL_Valid()`.
+- Firmware `ipg.hpp`/`ipg.cpp` rewritten: UDP→TCP, auto-sense, model-conditional poll, `LASER_MODEL model_type`, `isSensed()`, `isResponding()`, `isEMON()` model-aware switch, `isTrainingMode`, `lastMsgRx_ms`/`HB_RX_ms` liveness tracking, `parseLine()`/`trySenseModel()` helpers.
+- `mcc.hpp`: `isHEL_Valid()` added.
+- `mcc.cpp`: byte [255] packed as `LASER_MODEL_BITS()`; `StateManager()` COMBAT gate on `isHEL_Valid()`; `0xAF` handler added.
 
 **v3.4.0 changes (MCC unification — 2026-04-08):**
 - MCC unified hardware abstraction (`hw_rev.hpp`) — V1/V2 hardware revision support. See MCC_HW_DELTA.md.
@@ -428,7 +434,7 @@ Scoping differs by codebase (`enum ICD` in C#/THEIA, `enum ICD_CMDS` in TRC, `en
 | 0xAC | SET_BDC_HORIZ | Set horizon elevation vector | float[360] | — | — | ✓ | `INT_OPS` | BDC | BDC |
 | 0xAD | SET_HEL_POWER | Set laser power level | uint8 [0–100] % | — | — | ✓ | `INT_OPS` | MCC | MCC |
 | 0xAE | CLEAR_HEL_ERROR | Clear laser error state | none | — | — | ✓ | `INT_OPS` | MCC | MCC |
-| 0xAF | RES_AF | MCC register response | — | — | — | — | `RES` | RES | RES |
+| 0xAF | SET_HEL_TRAINING_MODE | Set laser training/combat mode. Training mode clamps power to 10% regardless of `SET_HEL_POWER`. | uint8 `0`=COMBAT, `1`=TRAINING | — | — | ✓ | `INT_ENG` | MCC | MCC |
 
 
 ---
@@ -1436,8 +1442,102 @@ active and NTP was unsynched. Fixed — all four call sites now use `GetCurrentT
 
 ---
 
+## IPG Laser ASCII Command Reference
+
+Commands sent directly to the laser over TCP port 10001. Both lasers use CR (`\r`) as line terminator.
+Source: YLM-3000 UG `CFSUGHPL0002ENUS_RevA` and YLR-U3 UG `G21-550132-001`.
+
+### Sense / Identity Commands
+
+| Command | 3K Response | 6K Response | Notes |
+|---------|-------------|-------------|-------|
+| `RMODEL` | `RMN: YLM-3000-SM-VV` | *(empty)* | 3K model string — **3K sense path** |
+| `RMN` | `RMN: IPGP578` (hostname) | `RMN: YLM-6000-U3-SM` | **6K sense path** — 3K returns hostname, ignore if no `-` delimiter |
+| `RSN` | `RSN: PL2546496` | `RSN: 6103081` | Serial number — both |
+
+### Poll Commands — Telemetry
+
+| Command | Purpose | 3K | 6K | Poll |
+|---------|---------|----|----|------|
+| `RHKPS` | Housekeeping voltage V | ✅ | ❌ | 3K only |
+| `RBSTPS` | Boost voltage V | ✅ | ❌ | 3K only |
+| `RCT` | Case temperature °C | ✅ | ✅ | Both |
+| `STA` | Status word (32-bit decimal) | ✅ | ✅ | Both |
+| `RMEC` | Error word (32-bit decimal) | ✅ | ✅ | Both |
+| `RCS` | Setpoint % ch1 | ✅ | ✅ | Both |
+| `ROP` | Output power W ch1 | ✅ | ✅ | Both |
+| `ROPS` | Output power W ch2 | ❌ | ✅ | 6K only — future |
+| `RCSS` | Setpoint % ch2 | ❌ | ✅ | 6K only — future |
+
+### Control Commands
+
+| Command | Purpose | 3K | 6K |
+|---------|---------|----|----|
+| `EMON` | Start emission | ✅ | ✅ |
+| `EMOFF` | Stop emission | ✅ | ✅ |
+| `RERR` | Reset resettable errors | ✅ | ✅ |
+| `SCS <pct>` | Set current setpoint % ch1 | ✅ | ❌ |
+| `SDC <pct>` | Set diode current % ch1 | ❌ | ✅ |
+| `ELE` | Enable hardware emission control | ✅ | ✅ |
+| `DLE` | Disable hardware emission control | ✅ | ✅ |
+
+### STA Word Bit Decode
+
+32-bit decimal word. Undefined/reserved bits may be 0 or 1 — disregard.
+
+| Bit | 3K Meaning | 6K Meaning | Our label | Polarity |
+|-----|-----------|-----------|-----------|----------|
+| 0 | Laser Emission | Command buffer overflow | `mb_sta_emission` (3K) | 1=active |
+| 1 | Reserved | Overheating | `mb_sta_overheat` (6K) | 1=fault |
+| 2 | Reserved | Emission OFF/ON | `mb_sta_emission` (6K) | 1=active |
+| 3 | Reserved | High back reflection | — | 1=fault |
+| 4 | Reserved | External control power enabled | — | 1=active |
+| 5 | External Emission Control enabled | Reserve | `mb_sta_extctrl` (3K) | 1=active |
+| 7 | Reserved | High humidity | — | 1=fault |
+| 8 | Reserved | Guide laser ON | — | 1=active |
+| 9 | Not Ready | Pulse too short | `mb_sta_notready` (3K) | 1=fault |
+| 10 | Error Present | CW/pulse mode | `mb_sta_error` (3K) | 1=fault |
+| 11 | Reserved | Power supply OFF | `mb_sta_notready` (6K) | 1=fault |
+| 12 | Reserved | Modulation enabled | — | 1=active |
+| 16 | High Case Temperature | Gate mode enabled | `mb_sta_overheat` (3K) | 1=fault |
+| 18 | High Order Mode Error | External emission control enabled | `mb_sta_extctrl` (6K) | 1=active |
+| 19 | Optical Fuse 2 Error | Power supply error | `mb_sta_error` (6K) | 1=fault |
+| 20 | Bus Voltage out of range | Reserve | `mb_sta_busvolts` (3K) | 1=fault |
+| 25 | Reserved | Power supply error | `mb_sta_busvolts` (6K) | 1=fault |
+| 26 | Optical Fuse Level | Ground fault | — | 1=fault |
+| 27 | Optical Interlock Error | External guide control enabled | — | 1=fault |
+| 29 | Critical Error | Critical Error | `mb_sta_crit` (both) | 1=fault |
+| 30 | Reserved | Fiber break monitoring active | `mb_sta_shutdown` (6K) | 1=fault |
+| 31 | External Shutdown | Reserve | `mb_sta_shutdown` (3K) | 1=fault |
+
+### RMEC Error Word Bit Decode — 3K only
+
+32-bit decimal word. 6K RMEC bit mapping not fully documented in YLR-U3 ICD — use raw word only.
+
+| Bit | 3K Meaning |
+|-----|-----------|
+| 0 | Case Temperature Fault |
+| 4 | Bus Voltage Fault |
+| 6 | Output Power Out of Range |
+| 10 | Fiber Fuse (optical fuse 1) |
+| 11 | Optical Interlock Disconnected |
+| 13 | Critical Error |
+| 15 | External Shutdown |
+| 18 | Over Current |
+
+---
+
 Commands accepted on the MCC USB/UART serial port. All commands are uppercase.
 Baud rate: 115200. Line terminator: `\n` or `\r\n`.
+
+### HEL Commands (v3.5.0)
+
+| Command | Description |
+|---------|-------------|
+| `HEL` | Full HEL status dump — model, serial, sense state, liveness, voltages, temperatures, setpoint, output power, status word, error word. |
+| `HELPOW <0-100>` | Set laser power % — gated on `isHEL_Valid()`. Routes to `SDC` (6K) or `SCS` (3K). Training mode clamps to 10% regardless of argument. |
+| `HELCLR` | Clear laser errors — sends `RERR`. Gated on `isHEL_Valid()`. |
+| `HELTRAIN <0\|1>` | Set training mode: `0`=COMBAT (full power), `1`=TRAINING (10% max). No argument = print current state. |
 
 ### Time Source Commands (session 28/29)
 
@@ -1464,6 +1564,7 @@ Baud rate: 115200. Line terminator: `\n` or `\r\n`.
 | `NTP` | NTP server, sync status, epoch time, fallback state |
 | `DEBUG <0-3>` | Set MCC debug level |
 | `TMC` | TMC A1 liveness, raw 64-byte buffer dump |
+| `HEL` | HEL status dump — see HEL Commands above |
 
 ---
 

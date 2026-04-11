@@ -17,9 +17,18 @@ hardware 2026-04-06. Tasks 2–4 are the remaining work.
 | Task | Scope | Status |
 |------|-------|--------|
 | 1 | Verify lab setup baseline | ✅ Complete — 2026-04-06 |
-| 2 | Finalize Jetson config docs, scripts, verification, image procedure | ⏳ Next |
-| 3 | Fresh Jetson build from scratch using new scripts | ⏳ Pending Task 2 |
-| 4 | TRC upgrades: VimbaX 2026-1, PTP/NTP (NEW-38d), OpenCV bridge eval | ⏳ Pending Task 3 |
+| 2 | Finalize Jetson config docs, scripts, verification, image procedure | ✅ Complete — 2026-04-10 |
+| 3 | Fresh Jetson build from scratch using new scripts | ✅ Complete — 3 units confirmed, all 54 PASS |
+| 4 | TRC upgrades: VimbaX 2026-1, PTP/NTP (NEW-38d), OpenCV bridge eval | ⏳ Pending |
+
+## Next Session — Phase 9
+
+| Step | Action |
+|------|--------|
+| 9.1 | overlayFS setup and verification on Unit 3 |
+| 9.2 | Image Unit 3 NVMe → USB drive |
+| 9.3 | Restore image to a 4th unit and verify 54 PASS |
+| 9.4 | Unit 1 cleanup — desktop removal, crontab production (U1-1, U1-2, U1-3) |
 
 ---
 
@@ -309,7 +318,51 @@ Update ARCHITECTURE.md §15 TRC: `3.0.2` → `3.1.0`.
 
 ---
 
-## Open Items Carried Forward
+---
+
+## Unit 1 Open Actions (192.168.1.22 — lab baseline)
+
+| ID | Action | Command |
+|----|--------|---------|
+| U1-1 | Remove desktop/LibreOffice | `sudo systemctl stop gdm3 && sudo systemctl disable gdm3 && sudo systemctl set-default multi-user.target && sudo apt remove --purge ubuntu-desktop gdm3 -y && sudo apt purge libreoffice* -y && sudo apt autoremove -y && sudo reboot` |
+| U1-2 | Switch crontab to production | `crontab -e` → change to `trc_start.sh` |
+| U1-3 | Run 04_verify_all.sh after above | Confirm 54 PASS, 0 WARN, 0 FAIL |
+
+---
+
+### Production (multicast, live MWIR)
+```bash
+cd ~/CV/TRC
+./trc --dest-host 239.127.1.21 --mwir-live --view PIP &> trc.log
+```
+
+### Bench / test (MWIR test source, unicast to Windows)
+```bash
+cd ~/CV/TRC
+./trc --dest-host 192.168.1.208 --view PIP
+```
+
+### View switching (ASCII commands via UDP port 5012)
+```bash
+echo "SELECT CAM1" | nc -u -w1 192.168.1.22 5012   # VIS only
+echo "SELECT CAM2" | nc -u -w1 192.168.1.22 5012   # MWIR only
+echo "SELECT PIP"  | nc -u -w1 192.168.1.22 5012   # PIP (both cameras)
+echo "SELECT PIP8" | nc -u -w1 192.168.1.22 5012   # PIP 8-way
+echo "DEBUG ON"    | nc -u -w1 192.168.1.22 5012   # Enable debug output
+```
+
+> **Note:** `--view` at launch sets the default. View can be changed at runtime
+> via ASCII commands on port 5012 without restarting TRC.
+
+---
+
+## TRC Open Actions (Task 4)
+
+| ID | Item | Detail |
+|----|------|--------|
+| TRC-CAM-1 | VIS test source flag | Add `--vis-test` launch argument to substitute videotestsrc for Alvium camera — allows full pipeline testing without physical camera |
+| TRC-CAM-2 | Camera index / ID selection | Add `--alvium-id <DEV_xxx>` launch argument to select camera by ID explicitly — prevents simulator cameras (added in VimbaX 2026-1) from being selected if ordering changes |
+| TRC-CAM-3 | Camera simulator filtering | Currently `cameras[0]` works because VimbaX orders real hardware first. Add explicit filter to skip `Camera Simulator` entries for robustness |
 
 | ID | Item | Task | Priority |
 |----|------|------|----------|

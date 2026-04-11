@@ -1,8 +1,8 @@
 # JETSON_SETUP.md — TRC Jetson Orin NX Setup Procedure
 **Document:** JETSON_SETUP.md (DOC-2)  
-**Version:** 2.0.0  
+**Version:** 2.2.1  
 **Date:** 2026-04-10  
-**Confirmed on:** Unit 1 (2026-04-09), Unit 2 (2026-04-09), Unit 3 (2026-04-10)  
+**Confirmed on:** Unit 1 (2026-04-09), Unit 2 (2026-04-09), Unit 3 (2026-04-10) — all 54 PASS, 0 FAIL  
 **Platform:** Seeed Studio reComputer J4012 **(non-Super, J401 carrier)** — see hardware note below  
 **JetPack:** 6.2.2 (L4T 36.5, Ubuntu 22.04, CUDA 12.6, cuDNN 9.3)  
 **Reference:** ARCHITECTURE.md §2.5, OPENCV_BUILD_HISTORY.md, TOMORROW_SESSION_PLAN.md
@@ -52,8 +52,9 @@ The resulting image can then be used for Path C replication.
 
 ### Deployment Path B — Restore from image
 
-**Use when:** Deploying a second or subsequent non-Super J4012 unit from a
-validated image produced by Path A.
+**Use when:**
+- Deploying a new non-Super J4012 unit from a validated image produced by Path A.
+- **Upgrading an existing non-Super J4012 unit** — wipe and restore from the current gold image. This is the only supported upgrade path. In-place upgrades (former Path C) are retired.
 
 ```bash
 # Boot target unit from USB recovery drive, then:
@@ -61,49 +62,32 @@ sudo dd if=jetson_trc_v3.x.x_YYYYMMDD.img of=/dev/nvme0n1 \
     bs=4M status=progress conv=fsync
 ```
 
-After restore, update unit-specific settings only:
-- Static IP if different from reference unit
-- Hostname if required
+After restore, update unit-specific settings:
+```bash
+# Set hostname from SOM serial number
+SERIAL=$(cat /proc/device-tree/serial-number | tr -d '\0')
+sudo hostnamectl set-hostname trc-${SERIAL}
+sudo sed -i "s/ubuntu/trc-${SERIAL}/g" /etc/hosts
+
+# Verify
+hostname
+cat /etc/hosts | grep trc
+```
+
+Static IP does not need to change — 192.168.1.22 is the TRC role address and is
+baked into the image correctly.
 
 **Gate:** Image must be from a non-Super J4012 (J401 carrier). Do not restore
 a non-Super image to a Super J4012 or vice versa — mechanically incompatible.
 
 ---
 
-### Deployment Path C — In-place upgrade of existing unit
+### Deployment Path C — NOT USED
 
-**Use when:** Unit is already running and operational. Goal is to upgrade
-JetPack, OpenCV, VimbaX, or TRC without a full reflash.
-
-**First gate — is the existing JetPack sufficient?**
-
-```bash
-cat /etc/nv_tegra_release | grep REVISION
-```
-
-| Result | Action |
-|--------|--------|
-| `REVISION: 5.0` (L4T 36.5 / JetPack 6.2.2) | JetPack current — skip Phase 0, start at Phase 1 |
-| `REVISION: 4.4` (L4T 36.4.4 / JetPack 6.2.1) | JetPack acceptable — skip Phase 0, start at Phase 1 |
-| `REVISION: 4.3` or earlier | JetPack too old — full reflash required (Path A) |
-
-**Second gate — check L4T packages are held:**
-
-```bash
-apt-mark showhold | grep nvidia-l4t
-```
-
-If L4T packages are NOT held, do this before any apt operations:
-```bash
-sudo apt-mark hold nvidia-l4t-bootloader nvidia-l4t-kernel nvidia-l4t-kernel-dtbs \
-    nvidia-l4t-kernel-headers nvidia-l4t-core nvidia-l4t-init
-```
-
-**Then proceed from the relevant phase:**
-- Upgrade OpenCV only → Phase 5
-- Upgrade VimbaX only → Phase 4
-- Upgrade TRC binary only → Phase 6
-- Full software upgrade → Phase 1 onwards
+> ⛔ **Path C (in-place upgrade) is retired for this fleet.**
+> All upgrades to existing non-Super units use **Path B** — wipe and restore from the
+> current gold image. In-place upgrades introduce drift risk and are not supported.
+> If a unit is too far out of state to restore from image, use Path A to rebuild it.
 
 ---
 
@@ -112,6 +96,10 @@ sudo apt-mark hold nvidia-l4t-bootloader nvidia-l4t-kernel nvidia-l4t-kernel-dtb
 The reComputer Super J4012 uses a different carrier board with higher TDP and
 Super Mode support. It requires a separate setup procedure. Do not use this
 document for Super J4012 units. See future JETSON_SUPER_SETUP.md.
+
+> **IP address:** Super J4012 units will share the same TRC role address
+> (192.168.1.22) as non-Super units. The address belongs to the TRC role,
+> not the hardware variant.
 
 ---
 
@@ -137,7 +125,7 @@ this procedure.
 
 | Parameter | Value |
 |-----------|-------|
-| Jetson static IP | 192.168.1.22 |
+| Jetson static IP | 192.168.1.22 — **role address, shared by all TRC units (non-Super and Super). Only one unit is ever live on the network at a time. The address belongs to the TRC role, not the physical hardware.** |
 | Subnet | 255.255.255.0 |
 | Gateway (deployment) | 192.168.1.1 |
 | Gateway (internet sharing phase) | 192.168.1.208 (Windows NIC) — temporary |
@@ -174,13 +162,16 @@ The non-Super and Super J4012 are mechanically different — do not mix them.
 
 ### 0.3 Put J401 into recovery mode
 
-> **Pre-installed units note:** Seeed J4012 units may ship with JetPack 6.2.2
-> already installed. If `cat /etc/nv_tegra_release` shows `REVISION: 5.0` after
-> EULA acceptance, the unit is already at the correct version. SDK Manager USB
-> flash failures on these units are often soft-fails — the existing OS is intact.
-> Accept EULA, click Skip on SDK component install, and proceed to Phase 1.
-> Do not spend time debugging SDK Manager USB flash on a unit that is already
-> at the correct JetPack version.
+> ⚠️ **Always reflash — no exceptions.**
+> All units must be reflashed with our known-good JetPack 6.2.2 image regardless
+> of what version ships pre-installed. Pre-installed OS may contain unknown
+> packages, OEM customizations, or security vulnerabilities.
+> Boot once to accept EULA, then reflash.
+>
+> **Correct procedure for all units:**
+> 1. Boot without FC REC jumper → accept EULA → complete first-boot setup
+> 2. Power off
+> 3. Short FC REC → connect Micro-USB → power on → reflash via SDK Manager
 > 1. Power on without FC REC jumper
 > 2. Accept EULA on Jetson display
 > 3. Complete minimal first-boot setup (username/password)
@@ -361,6 +352,31 @@ ssh ipg@192.168.1.22
 ```
 
 Once SSH works — disconnect display and keyboard. All remaining steps via SSH.
+
+### 1.1a Set hostname from SOM serial number
+
+Every unit gets a unique hostname derived from its NVIDIA SOM serial number.
+This is the only unit-specific configuration — all other settings are identical
+across the fleet.
+
+```bash
+# Read SOM serial and set hostname
+SERIAL=$(cat /proc/device-tree/serial-number | tr -d '\0')
+sudo hostnamectl set-hostname trc-${SERIAL}
+sudo sed -i "s/ubuntu/trc-${SERIAL}/g" /etc/hosts
+
+# Verify
+hostname
+# Expect: trc-<serial> e.g. trc-1420825016588
+
+cat /etc/hosts | grep trc
+# Expect: 127.0.1.1   trc-<serial>
+```
+
+> **Why SOM serial:** The serial is unique per NVIDIA module from the factory,
+> readable at any time from `/proc/device-tree/serial-number`, and requires no
+> manual tracking or labelling scheme. All units share the same IP (192.168.1.22)
+> so the hostname is the only software-visible unit identity.
 
 ### 1.2 Passwordless sudo
 
@@ -544,25 +560,27 @@ sudo jetson_clocks --show | grep -E "cpu0:|GPU Min"
 > **Note:** jetson_clocks activates 60 seconds after boot when set to boot mode.
 > If clocks appear unlocked immediately after reboot, wait 60s and check again.
 
-### 2.3 Remove desktop environment and LibreOffice
+### 2.3 GStreamer pipeline test
 
-Required for all production units — reduces attack surface, memory footprint,
-and eliminates unnecessary background services.
+Verify the hardware encode pipeline before proceeding. Start Windows receive first:
 
-```bash
-sudo systemctl stop gdm3
-sudo systemctl disable gdm3
-sudo systemctl set-default multi-user.target
-sudo apt remove --purge ubuntu-desktop gdm3 -y
-sudo apt purge libreoffice* -y
-sudo apt autoremove -y
-sudo reboot
+```
+gst-launch-1.0.exe udpsrc port=5000 buffer-size=2097152 caps="application/x-rtp,media=video,encoding-name=H264,payload=96" ! rtpjitterbuffer latency=50 drop-on-latency=true ! rtph264depay ! h264parse ! nvh264dec ! videoconvert n-threads=4 ! fpsdisplaysink sync=false text-overlay=true
 ```
 
-After reboot the unit will boot to console only. All remaining work is via SSH.
+Then on Jetson:
+```bash
+gst-launch-1.0 videotestsrc is-live=true \
+    ! "video/x-raw,width=1280,height=720,framerate=60/1" \
+    ! nvvidconv \
+    ! "video/x-raw(memory:NVMM),format=NV12" \
+    ! nvv4l2h264enc bitrate=10000000 \
+    ! h264parse \
+    ! rtph264pay config-interval=1 pt=96 \
+    ! udpsink host=192.168.1.208 port=5000 sync=false async=false
+```
 
-> **Note:** This is irreversible without reinstalling packages. Confirm SSH access
-> is working before running this step — you will lose local GUI access permanently.
+**Pass:** Live video visible on Windows. Ctrl+C to stop.
 
 ---
 
@@ -613,6 +631,12 @@ ip route show default
 
 ### 3.2 NTP configuration
 
+> **Timing note:** TRC handles all timing decisions internally. The OS provides
+> NTP-disciplined system time via `systemd-timesyncd`. PTP/PHC reading from the
+> NovAtel grandmaster (192.168.1.30) is implemented within the TRC binary as part
+> of Task 4 / NEW-38d — no separate PTP client daemon (`linuxptp`, `ptp4l`) is
+> needed or installed on the OS.
+
 ```bash
 sudo tee /etc/systemd/timesyncd.conf > /dev/null << 'EOF'
 [Time]
@@ -638,24 +662,22 @@ cat /etc/systemd/timesyncd.conf
 
 ### 3.3 USB memory buffer
 
-Required for Alvium USB3 camera DMA headroom. Check if already set:
-```bash
-grep "usbfs" /boot/extlinux/extlinux.conf
-```
+Required for Alvium USB3 camera DMA headroom.
 
-If not present, add `usbcore.usbfs_memory_mb=1000` to the APPEND line:
 ```bash
 # Backup first
 sudo cp /boot/extlinux/extlinux.conf /boot/extlinux/extlinux.conf.bak
 
-# Edit
-sudo vi /boot/extlinux/extlinux.conf
-# Add to APPEND line (before last quote if present):
-#   usbcore.usbfs_memory_mb=1000
+# Check APPEND line before editing — confirm it ends with nv-auto-config
+grep "APPEND" /boot/extlinux/extlinux.conf
 
-# Verify the change
-diff /boot/extlinux/extlinux.conf /boot/extlinux/extlinux.conf.bak
+# Add USB buffer parameter
+sudo sed -i 's/nv-auto-config/nv-auto-config usbcore.usbfs_memory_mb=1000/' \
+    /boot/extlinux/extlinux.conf
+
+# Verify change applied
 grep "usbfs" /boot/extlinux/extlinux.conf
+# Must show: usbcore.usbfs_memory_mb=1000
 ```
 
 Reboot to apply:
@@ -669,19 +691,17 @@ sudo reboot
 
 ```bash
 # IP address
-ip addr show eth0 | grep "inet "
+ip addr show enP8p1s0 | grep "inet "
 # Expect: inet 192.168.1.22/24
 
-# NTP config (correct servers)
-cat /etc/systemd/timesyncd.conf
+# NTP config
+cat /etc/systemd/timesyncd.conf | grep -v "^#" | grep -v "^$"
 # Expect: NTP=192.168.1.33, FallbackNTP=192.168.1.208
 
 # USB buffer in kernel args
 grep "usbfs" /boot/extlinux/extlinux.conf
 # Expect: usbcore.usbfs_memory_mb=1000
-
-# Ping network (if other devices available)
-ping -c 3 192.168.1.208
+```
 ```
 
 **All pass → proceed to Phase 4.**
@@ -770,8 +790,11 @@ sudo reboot
 
 ### 4.6 Verify camera detected
 
+> ⚠️ **Plug in Alvium USB3 camera before running this step.**
+
 ```bash
-/opt/VimbaX_2026-1/bin/ListCameras_VmbCPP
+env GENICAM_GENTL64_PATH=/opt/VimbaX_2026-1/cti/ \
+    /opt/VimbaX_2026-1/bin/ListCameras_VmbCPP
 ```
 
 Expected output (camera details will vary by unit):
@@ -911,47 +934,26 @@ source ~/.bashrc
 ```bash
 source ~/.bashrc
 
-# Create quick test script if not already present
+# Create unified test script
 cat > ~/CV/SETUP/test1.py << 'EOF'
 import cv2
 import numpy as np
 import sys
-print("PYTHON VS: " + sys.version)
-print("NUMPY VS: " + np.__version__)
-print("OPENCV VS: " + cv2.__version__)
+print("PYTHON VS:       " + sys.version)
+print("NUMPY VS:        " + np.__version__)
+print("OPENCV VS:       " + cv2.__version__)
+print("CV2 path:        " + cv2.__file__)
+print("CUDA DNN targets:", cv2.dnn.getAvailableTargets(cv2.dnn.DNN_BACKEND_CUDA))
+print("CUDA devices:    ", cv2.cuda.getCudaEnabledDeviceCount())
 EOF
 
 python3 ~/CV/SETUP/test1.py
-# Expect: Python 3.10.x, NumPy 1.21.x, OpenCV 4.13.0
+# Expect:
+#   OPENCV VS: 4.13.0
+#   CV2 path: /usr/local/lib/python3.10/dist-packages/cv2/__init__.py
+#   CUDA DNN targets: [6, 7]
+#   CUDA devices: 1
 
-# CUDA DNN targets
-python3 -c "
-import cv2
-print('CUDA DNN targets:', cv2.dnn.getAvailableTargets(cv2.dnn.DNN_BACKEND_CUDA))
-print('CUDA devices:    ', cv2.cuda.getCudaEnabledDeviceCount())
-"
-# Expect: targets [6, 7], devices 1
-
-```bash
-# Version and location
-python3 -c "import cv2; print(cv2.__version__); print(cv2.__file__)"
-# Expect: 4.13.0
-# Expect: /usr/local/lib/python3.10/dist-packages/cv2/__init__.py
-
-# CUDA DNN targets
-python3 -c "
-import cv2
-print('Targets:', cv2.dnn.getAvailableTargets(cv2.dnn.DNN_BACKEND_CUDA))
-print('CUDA DNN compiled:', cv2.cuda.getCudaEnabledDeviceCount() > 0)
-"
-# Expect: Targets: [6, 7]
-
-# Key build flags
-python3 -c "import cv2; print(cv2.getBuildInformation())" \
-    | grep -E "NVIDIA CUDA|cuDNN|GStreamer|TBB|FFMPEG"
-# Expect: all YES
-
-# pkg-config works (needed for TRC Makefile)
 pkg-config --modversion opencv4
 # Expect: 4.13.0
 ```
@@ -965,27 +967,26 @@ pkg-config --modversion opencv4
 ### 6.1 Get TRC source
 
 ```bash
-# If not already present — transfer from host:
-scp -r /path/to/TRCv3/v3.0.2 ipg@192.168.1.22:~/CV/TRCv3/
+# Transfer from Windows host:
+scp -r /path/to/TRC/* ipg@192.168.1.22:~/CV/TRC/
 ```
 
 ### 6.2 Update Makefile VimbaX path
 
 ```bash
-cd ~/CV/TRCv3/v3.0.2
+cd ~/CV/TRC
 grep "VIMBAX_DIR" Makefile
-# Current: VIMBAX_DIR := /opt/VimbaX_2025-1
+# Expect: VIMBAX_DIR := /opt/VimbaX_2025-1
 
-# Update to 2026-1
 sed -i 's|VimbaX_2025-1|VimbaX_2026-1|g' Makefile
 grep "VIMBAX_DIR" Makefile
-# Confirm: VIMBAX_DIR := /opt/VimbaX_2026-1
+# Expect: VIMBAX_DIR := /opt/VimbaX_2026-1
 ```
 
 ### 6.3 Build
 
 ```bash
-make clean && make -j$(nproc) 2>&1 | tee ~/trc_build_$(date +%Y%m%d).log
+make clean && make -j$(nproc) 2>&1 | tee ~/CV/TRC/trc_build_$(date +%Y%m%d).log
 ```
 
 Watch for errors. Build should complete in 3–5 minutes.
@@ -1003,7 +1004,7 @@ ldd ./trc | grep -E "opencv_dnn|VmbC"
 
 ```bash
 # model_data/ must be present in the working directory
-ls ~/CV/TRCv3/v3.0.2/model_data/
+ls ~/CV/TRC/model_data/
 # Must show:
 #   frozen_inference_graph.pb
 #   ssd_mobilenet_v3_large_coco_2020_01_14.pbtxt
@@ -1017,7 +1018,7 @@ If missing, copy from known-good source.
 ### ✅ CHECKPOINT 6 — TRC Build
 
 ```bash
-cd ~/CV/TRCv3/v3.0.2
+cd ~/CV/TRC
 
 # Binary exists
 ls -lh trc
@@ -1059,24 +1060,28 @@ EOF
 
 ## Phase 7 — Autostart
 
-### 7.1 Transfer launch scripts
+### 7.1 Transfer launch and setup scripts
 
-Transfer both start scripts to the Jetson:
+Transfer all scripts to the Jetson in one step:
 ```bash
 # From Windows host:
 scp trc_start.sh trc_start_bench.sh ipg@192.168.1.22:~/CV/TRC/
+scp 04_verify_all.sh cleanup_pre_image.sh ipg@192.168.1.22:~/CV/SETUP/
 ```
 
 On Jetson:
 ```bash
 chmod +x ~/CV/TRC/trc_start.sh
 chmod +x ~/CV/TRC/trc_start_bench.sh
+chmod +x ~/CV/SETUP/04_verify_all.sh
+chmod +x ~/CV/SETUP/cleanup_pre_image.sh
 ```
 
-### 7.2 Test bench autostart first
+### 7.2 Configure bench autostart — gold standard for image
 
-Use the bench script (MWIR test source, unicast) for initial autostart testing.
-This lets you verify autostart behaviour without needing MWIR camera or multicast.
+The **bench script is the gold standard for the production image**. Units boot
+into bench mode by default. The switch to production (`trc_start.sh`) is a
+post-deployment step done on-site, not baked into the image.
 
 ```bash
 crontab -e
@@ -1104,9 +1109,13 @@ tail -20 ~/CV/TRC/trc_bench.log
 
 On Windows — confirm stream visible on `192.168.1.208:5000`.
 
-### 7.3 Switch to production autostart
+### 7.3 Switch to production autostart — POST-DEPLOYMENT ONLY
 
-Once bench autostart confirmed working:
+> ⚠️ **Do not do this before imaging.** The bench crontab is the gold standard
+> for the image. Switch to production on-site after the unit is installed and
+> the MWIR camera and multicast network are confirmed available.
+
+On the deployed unit:
 
 ```bash
 crontab -e
@@ -1129,12 +1138,12 @@ Reboot and confirm multicast stream on `239.127.1.21:5000`.
 ps aux | grep trc | grep -v grep
 # Must show trc process running
 
-tail -20 ~/CV/TRC/trc.log
-# Must show startup messages, no fatal errors
+tail -20 ~/CV/TRC/trc_bench.log
+# Must show TRC startup messages, no fatal errors
 
-# Confirm video stream active
-sudo tcpdump -i enP8p1s0 -c 10 host 239.127.1.21
-# Should see UDP packets to multicast group
+# Confirm video stream active (unicast bench mode)
+sudo tcpdump -i enP8p1s0 -c 10 host 192.168.1.208 and port 5000
+# Should see UDP packets to THEIA
 ```
 
 **All pass → proceed to Phase 8.**
@@ -1143,17 +1152,121 @@ sudo tcpdump -i enP8p1s0 -c 10 host 239.127.1.21
 
 ## Phase 8 — Full System Verification Gate
 
-Run the verify script with TRC running:
+### 8.1 Remove desktop environment and LibreOffice
 
+Final pre-imaging step — do this last, after all software is installed and verified.
+Reduces attack surface and memory footprint.
+
+```bash
+sudo systemctl stop gdm3
+sudo systemctl disable gdm3
+sudo systemctl set-default multi-user.target
+sudo apt remove --purge ubuntu-desktop gdm3 -y
+sudo apt purge libreoffice* -y
+sudo apt autoremove -y
+sudo reboot
+```
+
+After reboot unit boots to console only. Confirm SSH and TRC autostart still work:
+```bash
+# After reboot — wait ~60s
+ssh ipg@192.168.1.22
+ps aux | grep trc | grep -v grep
+# Must show trc running
+```
+
+### 8.2 Pre-image cleanup
+
+Run the cleanup script to strip build artifacts, source files, and installer debris
+from the image. This produces a minimal, clean production image.
+
+```bash
+cd ~/CV/SETUP/
+./cleanup_pre_image.sh
+```
+
+**cleanup_pre_image.sh contents:**
+
+```bash
+#!/bin/bash
+# cleanup_pre_image.sh — Strip build artifacts and installer debris before imaging
+# Run once after full build and desktop removal, before 04_verify_all.sh pre-image run.
+# CROSSBOW TRC — Jetson Orin NX
+
+echo "=== TRC Pre-Image Cleanup ==="
+
+# /opt/ — VimbaX installer tarball
+sudo rm -f /opt/VimbaX_Setup-*-Linux_ARM64.tar.gz
+
+# ~/CV/SETUP/ — build scripts, logs, dev artifacts
+rm -f  ~/CV/SETUP/gst-vmbsrc-*.zip
+rm -f  ~/CV/SETUP/install_opencv*.sh
+rm -f  ~/CV/SETUP/opencv_build_*.log
+rm -f  ~/CV/SETUP/test*.py
+rm -rf ~/CV/SETUP/opencv_build_workspace/
+rm -rf ~/CV/SETUP/deploy/
+rm -rf ~/CV/SETUP/gst-vmbsrc/
+
+# ~/CV/TRC/ — build artifacts, source, docs (binary-only production image)
+rm -f ~/CV/TRC/*.o
+rm -f ~/CV/TRC/trc_build_*.log
+rm -f ~/CV/TRC/*.cpp
+rm -f ~/CV/TRC/*.c
+rm -f ~/CV/TRC/*.h
+rm -f ~/CV/TRC/*.hpp
+rm -f ~/CV/TRC/README.md
+rm -f ~/CV/TRC/TRC_MIGRATION.md
+rm -f ~/CV/TRC/Makefile
+rm -f ~/CV/TRC/version.h
+
+echo "=== Cleanup complete. Verify survivors: ==="
+echo "--- ~/CV/SETUP/ ---"
+ls -lh ~/CV/SETUP/
+echo "--- ~/CV/TRC/ ---"
+ls -lh ~/CV/TRC/
+echo "--- /opt/ VimbaX ---"
+ls /opt/ | grep -i vimba
+```
+
+Save and make executable:
+```bash
+chmod +x ~/CV/SETUP/cleanup_pre_image.sh
+```
+
+**Expected survivors after cleanup:**
+
+| Location | Files |
+|---|---|
+| `~/CV/SETUP/` | `04_verify_all.sh`, `cleanup_pre_image.sh`, `jetson_verified_*.txt` |
+| `~/CV/TRC/` | `trc`, `trc_start.sh`, `trc_start_bench.sh`, `trc_bench.log`, `model_data/` |
+| `/opt/` | `VimbaX_2026-1/` only — no installer tarball |
+
+### 8.3 Final verification — two gates
+
+Run the verify script **twice** at different stages. Both results are expected and correct:
+
+**Gate A — Pre-cleanup (run before 8.2):**
 ```bash
 cd ~/CV/SETUP/
 ./04_verify_all.sh
 ```
+Expected: **54 PASS, 0 FAIL** — Makefile present, all checks pass.
 
-**Gate:** Must show **54 PASS, 0 WARN, 0 FAIL** before proceeding to imaging.
+**Gate B — Post-cleanup (run after 8.2):**
+```bash
+cd ~/CV/SETUP/
+./04_verify_all.sh
+```
+Expected: **53 PASS, 1 FAIL** — the Makefile check fails because the Makefile
+was intentionally removed by cleanup. This is correct pre-image state.
 
-The log is saved to `~/CV/SETUP/jetson_verified_YYYYMMDD_HHMMSS.txt` — keep this
-as the definitive pre-image baseline record.
+> ⚠️ **The single FAIL after cleanup is expected and required.** It confirms
+> cleanup ran. Do not attempt to fix it. The equivalent check — that TRC
+> actually links against the correct VimbaX — passes via the ldd check above it.
+> Gate B (53 PASS, 1 expected FAIL) is the imaging gate.
+
+The log is saved to `~/CV/SETUP/jetson_verified_YYYYMMDD_HHMMSS.txt` — keep the
+Gate B log as the definitive pre-image baseline record.
 
 ### Pass criteria reference
 
@@ -1177,7 +1290,7 @@ as the definitive pre-image baseline record.
 | USB buffer | `usbcore.usbfs_memory_mb=1000` |
 | TRC binary | `libopencv_dnn.so.413 => /usr/local/lib/` |
 | TRC binary | `libVmbCPP => /opt/VimbaX_2026-1/` |
-| Makefile | `VIMBAX_DIR := /opt/VimbaX_2026-1` |
+| Makefile | `VIMBAX_DIR := /opt/VimbaX_2026-1` | Gate A only — removed by cleanup. Gate B: this check fails (expected). |
 | Autostart | TRC running after reboot |
 | COCO FP16 | OK |
 | COCO FP32 | OK |
@@ -1238,12 +1351,12 @@ Boot the Jetson from a USB drive (or use another machine to image the NVMe direc
 lsblk | grep nvme
 
 # Image to USB drive (adjust paths)
-sudo dd if=/dev/nvme0n1 of=/media/usb/jetson_trc_v3.0.2_$(date +%Y%m%d).img \
+sudo dd if=/dev/nvme0n1 of=/media/usb/jetson_trc_3.0.2_$(date +%Y%m%d).img \
     bs=4M status=progress conv=fsync
 
 # Record image size and checksum
-sha256sum /media/usb/jetson_trc_v3.0.2_$(date +%Y%m%d).img | tee \
-    /media/usb/jetson_trc_v3.0.2_$(date +%Y%m%d).sha256
+sha256sum /media/usb/jetson_trc_3.0.2_$(date +%Y%m%d).img | tee \
+    /media/usb/jetson_trc_3.0.2_$(date +%Y%m%d).sha256
 ```
 
 **Method B — Image via Jetson SDK Manager backup tools (recommended for full partition layout):**
@@ -1255,7 +1368,7 @@ sudo ./tools/kernel_flash/l4t_backup_restore.sh -e nvme0n1 backup
 
 ```bash
 # Boot new Jetson from USB with recovery tools, then:
-sudo dd if=jetson_trc_v3.0.2_YYYYMMDD.img of=/dev/nvme0n1 \
+sudo dd if=jetson_trc_3.0.2_YYYYMMDD.img of=/dev/nvme0n1 \
     bs=4M status=progress conv=fsync
 
 # After restore, update unit-specific settings:
@@ -1272,7 +1385,7 @@ sudo reboot
 |-------|-------|
 | `System clock synchronized: no` | Expected indoors — `.33` requires GPS sky view outdoors |
 | RTC at epoch zero | Expected on first power-on — resolves after first NTP sync |
-| VimbaX path in Makefiles | Archive versions intentionally left at 2025-1. Only v3.0.2 updated. |
+| VimbaX path in Makefiles | Archive versions intentionally left at 2025-1. TRC path is now ~/CV/TRC — no archive paths. |
 | gst-vmbsrc | NOT used. TRC accesses Alvium directly via VimbaX API. Do not install. |
 | Super Mode | NOT supported on J4012 non-Super (J401 carrier). MAXN is the ceiling. Super J4012 (new carrier) supports it but requires a separate procedure — do not mix images between variants. |
 | `OPENCV_DNN_CUDA` not in getBuildInformation() | Normal for OpenCV 4.11.x+. Confirm via cmake cache or getAvailableTargets(). |
@@ -1284,6 +1397,8 @@ sudo reboot
 
 | Version | Date | Notes |
 |---------|------|-------|
+| 2.2.1 | 2026-04-10 | Phase 7.1: `04_verify_all.sh` and `cleanup_pre_image.sh` added to file push step. Phase 7.3: marked POST-DEPLOYMENT ONLY — bench crontab is image gold standard. Checkpoint 7: corrected log reference `trc.log` → `trc_bench.log`; tcpdump target corrected to unicast bench mode. Phase 8.2: `gst-vmbsrc/` directory added to cleanup script. Pass criteria table: Makefile row annotated with Gate A/B caveat. |
+| 2.2.0 | 2026-04-10 | Path C retired — upgrade path is Path B (image restore). Path B updated to cover upgrades. Path D: Super units share same TRC role IP. IP 192.168.1.22 documented as TRC role address shared by all units. Hostname scheme: `trc-<SOM serial>` from `/proc/device-tree/serial-number` — Phase 1.1a added. Phase 8 restructured: 8.1 desktop removal, 8.2 cleanup script (`cleanup_pre_image.sh`), 8.3 two-gate verify (54 PASS pre-cleanup / 53 PASS + 1 expected FAIL post-cleanup). Bench crontab documented as gold standard for image. |
 | 1.0.0 | 2026-04-09 | Initial — based on live baseline verification of lab Jetson 2026-04-06 |
 
 ---

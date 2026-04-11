@@ -1259,6 +1259,38 @@ Poll timer fires every 20 ms, gated on `IsSensed`. State machine (p1):
 
 All responses routed to `MSG_IPG.ParseDirect(cmd, payload)`.
 
+#### IPG Command Coverage — 3K vs 6K
+
+| Command | Purpose | 3K | 6K | Used |
+|---------|---------|----|----|------|
+| `RMODEL` | Model string (sense) | ✅ | ❌ empty | Sense — 3K path |
+| `RMN` | Model name / hostname | hostname only | ✅ model | Sense — 6K path |
+| `RSN` | Serial number | ✅ | ✅ | Connect |
+| `RHKPS` | HK voltage V | ✅ | ❌ | Poll p0, 3K only |
+| `RBSTPS` | Boost voltage V | ✅ | ❌ | Poll p4, 3K only |
+| `RCT` | Temperature °C | ✅ | ✅ | Poll p1, both |
+| `STA` | Status word 32-bit | ✅ | ✅ | Poll p2, both |
+| `RMEC` | Error word 32-bit | ✅ | ✅ | Poll p3, both |
+| `RCS` | Setpoint % ch1 | ✅ | ✅ | Poll p5, both |
+| `ROP` | Output power W ch1 | ✅ | ✅ | Poll p6, both |
+| `ROPS` | Output power W ch2 | ❌ | ✅ | Future |
+| `SCS <pct>` | Set power % | ✅ | ❌ | On command |
+| `SDC <pct>` | Set power % | ❌ | ✅ | On command |
+| `EMON` / `EMOFF` / `RERR` | Control | ✅ | ✅ | On command |
+
+#### STA Bit Decode — Model-Aware
+
+| Our label | 3K bit | 6K bit |
+|-----------|--------|--------|
+| `mb_sta_emission` | B0: Emission ON | B2: Emission ON |
+| `mb_sta_overheat` | B16: Hi Case Temp | B1: Overheating |
+| `mb_sta_notready` | B9: Not Ready | B11: PSU OFF |
+| `mb_sta_busvolts` | B20: Bus V fault | B25: PSU error |
+| `mb_sta_extctrl` | B5: Ext ctrl enabled | B18: Ext ctrl enabled |
+| `mb_sta_error` | B10: Error present | B19: PSU error |
+| `mb_sta_crit` | B29: Critical error | B29: Critical error |
+| `mb_sta_shutdown` | B31: Ext shutdown | B30: Fiber break |
+
 ---
 
 ### 4.7 TRC — Tracking and Range Computer

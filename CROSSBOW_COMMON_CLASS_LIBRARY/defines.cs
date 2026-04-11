@@ -228,7 +228,7 @@ namespace CROSSBOW
         SET_BDC_HORIZ = 0xAC,  //	VECTOR OF FLOATS HORIZ ELEVATION	float[360]
         SET_HEL_POWER = 0xAD, // SETS LASER POWER    uint8 [0 100]
         CLEAR_HEL_ERROR = 0xAE, // CLEAR LASER ERROR None
-        RES_AF = 0xAF,  // SYSTEM REGISTER RESPONSE
+        SET_HEL_TRAINING_MODE = 0xAF,  // uint8 0=COMBAT 1=TRAINING — sets ipg.isTrainingMode; power clamped to 10% in training
 
         // RESERVING 0xB FOR BDC COMMAND
         SET_BDC_REINIT = 0xB0,  // uint8: 0=NTP, 1=GIMBAL, 2=FUJI, 3=MWIR, 4=FSM, 5=JETSON, 6=INCL, 7=PTP

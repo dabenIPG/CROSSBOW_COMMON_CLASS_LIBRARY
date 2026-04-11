@@ -1,9 +1,14 @@
 # CROSSBOW System Architecture
 
-**Document Version:** 3.3.4
-**Date:** 2026-04-08
-**ICD Reference:** ICD v3.4.0
-**Status:** MCC unified V1/V2 hardware abstraction; FW v3.3.0.
+**Document Version:** 3.3.5
+**Date:** 2026-04-10
+**ICD Reference:** ICD v3.5.0
+**Status:** TRC role IP documented; SOM serial telemetry action item added; JETSON_SETUP.md DOC-2 reference updated.
+
+**v3.3.5 changes (2026-04-10):**
+- §2 Network Topology: TRC (.22) row updated — 192.168.1.22 documented as TRC role address shared by all TRC units (non-Super and Super). Only one unit is ever live at a time. Address belongs to the role, not the hardware.
+- §2.5 TRC Timing: DOC-2 reference updated — JETSON_SETUP.md is no longer pending, it is complete at v2.2.0.
+- §17 Open items: New item added — TRC SOM serial: read `/proc/device-tree/serial-number` at startup into `GlobalState`, pack as `uint64 LE` into TelemetryPacket bytes [49–56]. Tracks ICD v3.5.x TRC REG1 change.
 
 **v3.3.4 changes (MCC unification — 2026-04-08):**
 - §9 MCC Internal Architecture: updated for unified V1/V2 hardware abstraction (`hw_rev.hpp`). FW version updated to 3.3.0.
@@ -163,7 +168,7 @@ MCC additionally uses the GNSS receiver (`.30`) as a **PTP grandmaster** (IEEE 1
 | HEL (IPG laser) | 192.168.1.13 | Laser source (read-only, status embedded in MCC REG1) |
 | BDC (STM32F7) | 192.168.1.20 | Beam director — gimbal, cameras, FSM, MWIR, fire control |
 | Gimbal (Galil) | 192.168.1.21 | Pan/tilt servo drive |
-| TRC (Jetson Orin NX) | 192.168.1.22 | Camera capture, tracker, video encoder |
+| TRC (Jetson Orin NX) | 192.168.1.22 | Camera capture, tracker, video encoder — **role address shared by all TRC units (non-Super and Super). Only one unit live at a time.** |
 | FMC (SAMD21) | 192.168.1.23 | FSM DAC/ADC, focus stage |
 | GPS/GNSS | 192.168.1.30 | NovAtel GNSS receiver — BESTPOS/INS/heading (MCC managed) + **PTP grandmaster** (IEEE 1588, PTP_UDP, multicast, domain 0, UTC_TIME) |
 | RPI/ADSB | 192.168.1.31 | ADS-B decoder |
@@ -322,7 +327,7 @@ timedatectl status                     # verify — confirm NTP service active a
 
 > **PTP:** TRC has no PTP implementation. `ptp4l` integration is tracked as NEW-38d. Until then, `systemd-timesyncd` NTP provides ~1–10ms accuracy — sufficient for current operation.
 
-For full TRC/Jetson setup procedure (OS install, static IP, software deployment), see **JETSON_SETUP.md** (DOC-2 — pending creation).
+For full TRC/Jetson setup procedure (OS install, static IP, software deployment), see **JETSON_SETUP.md v2.2.0** (DOC-2).
 
 ---
 
@@ -1649,7 +1654,7 @@ VERSION_PACK(major, minor, patch):
 | MCC | 3.3.0 | `VERSION_PACK(3,3,0)` |
 | BDC | 3.2.0 | `VERSION_PACK(3,2,0)` |
 | FMC | 3.2.0 | `VERSION_PACK(3,2,0)` |
-| TRC | 3.0.1 | `VERSION_PACK(3,0,1)` |
+| TRC | 3.0.2 | `VERSION_PACK(3,0,2)` |
 | TMC | 3.3.0 | `VERSION_PACK(3,3,0)` |
 
 C# unpack:
@@ -1701,6 +1706,7 @@ Quick reference — high priority items as of session 29:
 
 | ID | Item | Priority |
 |----|------|----------|
+| TRC-SOM-SN | TRC SOM serial — read `/proc/device-tree/serial-number` at startup into `GlobalState` as `uint64`; pack LE into `TelemetryPacket` bytes [49–56]. See ICD TRC REG1 update. `MSG_TRC.cs`: add `SomSerial` property. | 🟡 Medium |
 | THEIA-SHUTDOWN | Graceful STANDBY→OFF sequence — laser safe, relays off, HMI disconnect | 🔴 High |
 | HMI-A3-18 | LCH/KIZ/HORIZ — architecture analyzed; C# emplacement GUI work pending | 🔴 High |
 | FMC-NTP | FMC dt elevated — suspected NTP/USB CDC main loop blocking | 🔴 High |

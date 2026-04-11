@@ -8,13 +8,12 @@
 ## Implementation Sequence
 
 **Step 1 — C# ENG GUI HEL window (direct TCP to laser)** ✅ COMPLETE
-Validated on YLM-3000-SM-VV (3K) hardware 2026-04-10. TCP + UDP coexist simultaneously
-on bench — MCC UDP port 10011 and ENG GUI TCP port 10001 run independently with no
-interference. 6K validation pending tomorrow before Step 2.
+Validated on YLM-3000-SM-VV (3K) and YLM-6000-U3-SM (6K) hardware. TCP + UDP coexist
+simultaneously on bench. Both laser models auto-sensed correctly.
 
-**Step 2 — Firmware (`ipg.hpp` / `ipg.cpp` + MCC)** ⏳ PENDING
-Once 6K validated on ENG GUI, mirror the validated logic into firmware.
-The C# ENG GUI is the ground truth reference for the firmware implementation.
+**Step 2 — Firmware (`ipg.hpp` / `ipg.cpp` + MCC)** ✅ COMPLETE
+Validated on bench 2026-04-10. TCP transport, auto-sense, model-conditional poll,
+training mode, COMBAT gate, TCP drop/reconnect — all confirmed working.
 
 ---
 
@@ -38,6 +37,13 @@ The C# ENG GUI is the ground truth reference for the firmware implementation.
 |-------|--------|-----|
 | SocketException on reconnect | First `Stop()` doesn't fully close socket before second `Start()` | Null `_tcp`/`_stream` in `Stop()` ✅ applied |
 | 6K not yet validated | `SDC` vs `SCS`, bit decode, no `RHKPS`/`RBSTPS` | Test tomorrow on 6K hardware |
+
+### 1.3 Pre-Step 2 Checklist
+
+| Item | Detail | Status |
+|------|--------|--------|
+| ⚠️ **Deploy `defines.hpp` fleet-wide** | `LASER_MODEL` enum + `LASER_MAX_POWER_W()` added to `defines.hpp`. Must be deployed to **all five controllers** (MCC, BDC, TMC, FMC, TRC) before Step 2 firmware build — `defines.hpp` is shared across all controllers. BDC/TMC/FMC/TRC don't use `LASER_MODEL` directly but must compile cleanly with the new definitions. | ⏳ Pending |
+| 6K ENG GUI validation | Connect 6K to HEL ENG GUI, validate sense, poll, `SDC`, STA bits | ⏳ Pending |
 - Status strip slots: `tssModel`, `tssSerialNumber` ✅
 
 ---
@@ -267,6 +273,50 @@ private void btn_mcc_hel_setPower_Click(object sender, EventArgs e)
 ## Step 2 — Firmware (`ipg.hpp` / `ipg.cpp` + MCC)
 
 *Implement after Step 1 is validated on both laser variants via ENG GUI.*
+
+### IPG Command Reference — 3K vs 6K (validated 2026-04-10)
+
+#### Sense / Identity
+
+| Command | 3K | 6K |
+|---------|----|----|
+| `RMODEL\r` | Returns `RMN: YLM-3000-SM-VV` — **3K sense path** | Returns empty string |
+| `RMN\r` | Returns `RMN: IPGP578` (hostname — ignore) | Returns `RMN: YLM-6000-U3-SM` — **6K sense path** |
+| `RSN\r` | Returns serial number | Returns serial number |
+
+**Sense strategy:** Send both `RMODEL` and `RMN` on connect. `TrySenseModel()` parses whichever response contains a `-` delimited power field. `RMN` hostname on 3K has no `-` so is correctly ignored.
+
+#### Poll Commands
+
+| Command | 3K | 6K | Firmware POLL |
+|---------|----|----|---------------|
+| `RHKPS\r` | ✅ HK voltage V | ❌ | Case 0 — 3K only |
+| `RCT\r` | ✅ | ✅ | Case 1 — both |
+| `STA\r` | ✅ | ✅ | Case 2 — both |
+| `RMEC\r` | ✅ | ✅ | Case 3 — both |
+| `RBSTPS\r` | ✅ Boost voltage V | ❌ | Case 4 — 3K only |
+| `RCS\r` | ✅ setpoint % | ✅ setpoint % | Case 5 — both |
+| `ROP\r` | ✅ output power W | ✅ output power W ch1 | Case 6 — both |
+
+#### Set Power
+
+| Command | 3K | 6K |
+|---------|----|----|
+| `SCS <pct>\r` | ✅ | ❌ |
+| `SDC <pct>\r` | ❌ | ✅ |
+
+#### STA Word Bit Decode
+
+| Meaning | 3K bit | 6K bit |
+|---------|--------|--------|
+| Emission ON | 0 | 2 |
+| Overheat | 16 | 1 |
+| Not ready / PSU off | 9 | 11 |
+| External ctrl enabled | 5 | 18 |
+| Error present | 10 | 19 |
+| Critical error | 29 | 29 |
+| Ext shutdown / Fiber break | 31 | 30 |
+| Bus voltage / PSU error | 20 | 25 |
 
 ---
 
@@ -652,16 +702,33 @@ correct bit mask per laser.
 
 ---
 
-## 12. Open Items / Not In Scope
+## 12. Open Items
 
 | Item | Notes |
 |------|-------|
-| ENG GUI direct laser tab | Progress already started — separate work item |
-| 6K ch2 output power (`ROPS`) | Not in current `MSG_IPG` block — future extension |
-| 6K pulse mode commands (`SPRR`, `SPW`, `EGM`) | Not required for CROSSBOW fire control |
+| ENG GUI `chk_HEL_TrainingMode` | Wire checkbox to send `0xAF` via shared `mcc.cs` A2 connection |
+| 6K ch2 output power (`ROPS`) | Not in current poll — future extension |
+| 6K pulse mode (`SPRR`, `SPW`, `EGM`) | Not required for CROSSBOW fire control |
 | 6K aiming beam (`ABN`/`ABF`) | Not required — no guide laser in CROSSBOW path |
-| TCP reconnect / keepalive | W5500 TCP needs connection watchdog — implement in `UPDATE()` |
+| `MSG_MCC.cs` byte [255] parse | Parse `LaserModel` from byte [255]; set on `MSG_IPG` for MCC framed path |
+| `defines.hpp` fleet deployment | Deploy updated `defines.hpp` to all 5 controllers (BDC, TMC, FMC, TRC, MCC) |
+
+## 13. Pending Serial Command Enhancements
+
+After HEL firmware validated on bench:
+
+### TMC Serial Section
+Add `TMC` command to MCC serial with:
+- A1 liveness (already partially exists — expand)
+- Full TMC REG1 dump with field decode (mirrors `PRINT_REG()` style)
+- Any direct TMC commands (PUMP, HEATER, FAN, TARGET TEMP) accessible from MCC serial
+
+### Power OFF Command
+Add a universal power-off shorthand to the serial power commands.
+Candidates: `PWR OFF`, `POWER 0`, or prefix existing commands e.g. `HEL OFF` → sends `SET_POWER(0)`.
+Apply consistently across all power-controllable subsystems.
+Exact command names TBD — decide at implementation time.
 
 ---
 
-*End of plan. All design decisions locked. Proceed to code.*
+*End of plan.*

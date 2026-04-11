@@ -121,7 +121,7 @@ namespace CROSSBOW
         public string HW_REV_Label => HW_REV == 0x01 ? "V1 — relay/solenoids/chargerI2C"
                                     : HW_REV == 0x02 ? "V2 — dualVicor/noSol/noI2C"
                                     : $"unknown (0x{HW_REV:X2})";
-
+        public LASER_MODEL LaserModel { get; private set; } = LASER_MODEL.UNKNOWN;  // byte 255 — v3.5.0
         public bool isVerboseLogEnabled { get; set; } = true;
 
         /// <summary>
@@ -357,7 +357,7 @@ namespace CROSSBOW
         //   [249-252] MCU Temp         float
         //   [253]      TIME_BITS (session 32) — isPTP_En, ptp.isSynched, usingPTP, ntp.isSynched, ntpUsingFB, ntpHasFB
         //   [254]      HW_REV — 0x01=V1, 0x02=V2 (MCC unification session)
-        //   [255]      RESERVED
+        //   [255]      LASER_MODEL — 0x00=UNKNOWN, 0x01=YLM_3K, 0x02=YLR_6K (v3.5.0)
         // =========================================================================
         private void ParseMSG01(byte[] msg, int ndx)
         {
@@ -407,6 +407,10 @@ namespace CROSSBOW
             // [253] TIME_BITS (session 32) — consolidated time source status
             TimeBits = msg[ndx]; ndx++;
             HW_REV = msg[ndx]; ndx++;   // [254] HW_REV — 0x01=V1, 0x02=V2
+            LaserModel = (LASER_MODEL)msg[ndx]; ndx++;  // [255] LASER_MODEL — v3.5.0
+
+            // propagate to IPGMsg so PowerSetting_W and IsEMON decode correctly
+            IPGMsg.LaserModel = LaserModel;
 
             if (dt_us > dtmax)
             {
@@ -493,10 +497,12 @@ namespace CROSSBOW
         // =========================================================================
         // HEL accessors (via IPGMsg)
         // =========================================================================
-        public bool isHEL_EMON           { get { return IsBitSet(IPGMsg.StatusWord,  0); } }
-        public bool isHEL_EXT_EM_ENABLED { get { return IsBitSet(IPGMsg.StatusWord,  5); } }
-        public bool isHEL_NOTREADY       { get { return IsBitSet(IPGMsg.StatusWord,  9); } }
-        public bool isHEL_LowPowerMode   { get { return IsBitSet(IPGMsg.StatusWord, 15); } }
+        public bool isHEL_EMON { get { return IPGMsg.IsEMON; } }       // model-aware — 3K=bit0, 6K=bit2
+        public bool isHEL_NOTREADY { get { return IPGMsg.IsNotReady; } }   // model-aware — 3K=bit9, 6K=bit11
+        public bool isHEL_EXT_EM_ENABLED { get { return IsBitSet(IPGMsg.StatusWord, 5); } }  // 3K only
+        public bool isHEL_LowPowerMode { get { return IsBitSet(IPGMsg.StatusWord, 15); } }  // 3K only — reserved
+        public bool isHEL_Sensed { get { return IPGMsg.IsSensed; } }
+        public int HEL_MaxPower_W { get { return IPGMsg.MaxPower_W; } }
 
         // =========================================================================
         // Helpers

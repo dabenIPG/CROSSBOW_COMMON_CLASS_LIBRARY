@@ -43,7 +43,9 @@ namespace CROSSBOW
 
                 // sense immediately — RMN then RSN before poll starts
                 Send("RMODEL\r");
-                await Task.Delay(150);
+                await Task.Delay(100);
+                Send("RMN\r");
+                await Task.Delay(100);
                 Send("RSN\r");
 
                 // poll timer — 20 ms matching firmware TICK

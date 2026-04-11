@@ -72,7 +72,17 @@ namespace CROSSBOW
             : (StatusWord & (1u << 9)) != 0;
 
         public static bool GetBit(uint word, int bit) => (word & (1u << bit)) != 0;
-
+        private void TrySenseModel(string payload)
+        {
+            var parts = payload.Split('-');
+            if (parts.Length >= 2 && int.TryParse(parts[1], out int power))
+            {
+                if (power == 3000) { LaserModel = LASER_MODEL.YLM_3K; ModelName = payload; }
+                else if (power == 6000) { LaserModel = LASER_MODEL.YLR_6K; ModelName = payload; }
+                else Debug.WriteLine($"IPG ERROR — unrecognised power field: {power}");
+            }
+            else Debug.WriteLine($"IPG ERROR — sense parse failed: '{payload}'");
+        }
         // -------------------------------------------------------------------
         // Parse — reads 21 bytes at msg[ndx], returns updated ndx
         // -------------------------------------------------------------------
@@ -102,19 +112,18 @@ namespace CROSSBOW
             switch (cmd.ToUpper())
             {
                 case "RMODEL":
-                    ModelName = payload;
-                    var parts = payload.Split('-');
-                    if (parts.Length >= 2 && int.TryParse(parts[1], out int power))
-                    {
-                        if (power == 3000) LaserModel = LASER_MODEL.YLM_3K;
-                        else if (power == 6000) LaserModel = LASER_MODEL.YLR_6K;
-                        else Debug.WriteLine($"IPG ERROR — unrecognised laser power: {power}");
-                    }
-                    else Debug.WriteLine($"IPG ERROR — RMODEL parse failed: '{payload}'");
+                    // 3K path — returns model string e.g. "YLM-3000-SM-VV"
+                    // 6K returns empty — ignore if payload empty
+                    if (!string.IsNullOrWhiteSpace(payload))
+                        TrySenseModel(payload);
                     break;
                 case "RMN":
-                    // Machine name (hostname) — store but do not use for sense
-                    Debug.WriteLine($"IPG RMN (hostname): {payload}");
+                    // 3K: returns hostname e.g. "IPGP578" — ignore (no '-')
+                    // 6K: returns model string e.g. "YLM-6000-U3-SM"
+                    if (payload.Contains('-'))
+                        TrySenseModel(payload);
+                    else
+                        Debug.WriteLine($"IPG RMN (hostname): {payload}");
                     break;
                 case "RSN":
                     SerialNumber = payload;
