@@ -1,32 +1,30 @@
-// MSG_FMC.cs  —  ICD v3.3.5 session 33 FMC REG1 parser
+// MSG_FMC.cs  —  ICD v3.5.2 FMC REG1 parser
 //
-// Receives a 521-byte framed response from fmc.cs BackgroundUDPRead.
-// Parse(byte[] frame) validates magic, CRC, STATUS then extracts
-// the 512-byte payload and calls ParseMSG01().
+// FMC REG1 payload layout (ICD v3.5.2, 47 bytes defined):
+//   [0]      CMD BYTE         uint8   = 0xA1
+//   [1]      System State     uint8
+//   [2]      System Mode      uint8
+//   [3–4]    HB_ms            uint16 LE   ms between firmware sends
+//   [5–6]    dt_us            uint16 LE   µs in firmware processing loop
+//   [7]      FMC HEALTH_BITS  uint8       bit0:isReady  bit1-7:RES
+//   [8–11]   Stage Pos        uint32 LE
+//   [12–15]  Stage Err        uint32 LE
+//   [16–19]  Stage Status     uint32 LE
+//   [20–23]  FSM Pos X        int32 LE    ADC readback counts
+//   [24–27]  FSM Pos Y        int32 LE    ADC readback counts
+//   [28–35]  epoch ms         int64 LE    PTP when synched, NTP otherwise
+//   [36–39]  VERSION WORD     uint32 LE   semver: [major:8][minor:12][patch:12]
+//   [40–43]  MCU Temp         float LE    °C
+//   [44]     TIME_BITS        uint8       bit0:isPTP_Enabled bit1:ptp.isSynched bit2:usingPTP
+//                                         bit3:ntp.isSynched bit4:ntpUsingFallback bit5:ntpHasFallback
+//   [45]     HW_REV           uint8       0x01=V1 (SAMD21)  0x02=V2 (STM32F7)
+//   [46]     FMC POWER_BITS   uint8       bit0:isFSM_Powered  bit1:isStageEnabled  bit2-7:RES
+//   [47–63]  RESERVED         0x00
 //
-// FMC REG1 payload layout (ICD v3.3.5 session 33, 45 bytes defined):
-//   [0]      CMD BYTE        uint8   = 0xA1
-//   [1]      System State    uint8
-//   [2]      System Mode     uint8
-//   [3–4]    HB_ms           uint16 LE   ms between firmware sends
-//   [5–6]    dt_us           uint16 LE   µs in firmware processing loop
-//   [7]      FSM STAT BITS   uint8       bit0:isReady bit1:isFSM_Powered bit2-5:RES bit6:isStageEnabled bit7:isUnsolicited
-//   [8–11]   Stage Pos       uint32 LE
-//   [12–15]  Stage Err       uint32 LE
-//   [16–19]  Stage Status    uint32 LE
-//   [20–23]  FSM Pos X       int32 LE    ADC readback counts
-//   [24–27]  FSM Pos Y       int32 LE    ADC readback counts
-//   [28–35]  epoch ms        int64 LE    PTP when synched, NTP otherwise
-//   [36–39]  VERSION WORD    uint32 LE   semver: [major:8][minor:12][patch:12]
-//   [40–43]  MCU Temp        float LE    °C
-//   [44]     TIME_BITS       uint8       bit0:isPTP_Enabled bit1:ptp.isSynched bit2:usingPTP
-//                                        bit3:ntp.isSynched bit4:ntpUsingFallback bit5:ntpHasFallback
-//   [45–63]  RESERVED        0x00
-//
-// Session 33 changes:
-//   Byte 28-35: NTP epoch ms → epoch ms (PTP/NTP) — routes through GetCurrentTime()
-//   Byte 44: RESERVED → TIME_BITS (same layout as MCC/BDC/TMC)
-//   FSM STAT BITS bits 2-3 vacated (ntp.isSynched/ntpUsingFallback moved to TIME_BITS)
+// ICD v3.5.2 changes vs v3.3.5:
+//   Byte [7]  FSM STAT BITS → FMC HEALTH_BITS — isReady only (isFSM_Powered/isStageEnabled moved to [46])
+//   Byte [45] RESERVED → HW_REV (self-detecting hardware revision for IsV1/IsV2)
+//   Byte [46] RESERVED → FMC POWER_BITS (isFSM_Powered bit0, isStageEnabled bit1)
 
 using System;
 using System.Diagnostics;
@@ -54,18 +52,25 @@ namespace CROSSBOW
         public UInt16 HB_ms { get; private set; } = 0;
         public UInt16 dt_us { get; private set; } = 0;
 
-        public byte STATUS_BITS1 { get; private set; } = 0;
+        // FMC HEALTH_BITS — byte [7] — ICD v3.5.2
+        // Renamed from FSM STAT BITS. isReady only — FSM/stage moved to PowerBits [46].
+        public byte HealthBits { get; private set; } = 0;
+        public byte StatusBits1 { get { return HealthBits; } }  // backward-compat alias
 
-        // STATUS_BITS1
-        //   bit 0: isReady
-        //   bit 1: isFSM_Power_Enabled
-        //   bit 2–5: RES
-        //   bit 6: isStageEnabled
-        //   bit 7: isUnsolicitedModeEnabled
-        public bool isReady                  { get { return IsBitSet(STATUS_BITS1, 0); } }
-        public bool isFSM_Power_Enabled      { get { return IsBitSet(STATUS_BITS1, 1); } }
-        public bool isStageEnabled           { get { return IsBitSet(STATUS_BITS1, 6); } }
-        public bool isUnsolicitedModeEnabled { get { return IsBitSet(STATUS_BITS1, 7); } }
+        public bool isReady { get { return IsBitSet(HealthBits, 0); } }
+        // bits 1–7: RES
+
+        // HW_REV — byte [45] — ICD v3.5.2
+        public byte HW_REV { get; private set; } = 0;
+        public bool IsV1 { get { return HW_REV == 0x01; } }
+        public bool IsV2 { get { return HW_REV == 0x02; } }
+        public string HW_REV_Label { get { return IsV1 ? "V1 — SAMD21" : IsV2 ? "V2 — STM32F7" : $"UNKNOWN (0x{HW_REV:X2})"; } }
+
+        // FMC POWER_BITS — byte [46] — ICD v3.5.2
+        // isFSM_Powered and isStageEnabled moved here from STATUS_BITS1.
+        public byte PowerBits { get; private set; } = 0;
+        public bool isFSM_Power_Enabled { get { return IsBitSet(PowerBits, 0); } }
+        public bool isStageEnabled { get { return IsBitSet(PowerBits, 1); } }
 
         public UInt32 StagePosition { get;  set; } = 0;
         public UInt32 StageError    { get; private set; } = 0;
@@ -203,7 +208,7 @@ namespace CROSSBOW
             BDC_Mode     = (BDC_MODES)msg[ndx];     ndx++;                          // [2]
             HB_ms        = BitConverter.ToUInt16(msg, ndx); ndx += sizeof(UInt16);  // [3–4]
             dt_us        = BitConverter.ToUInt16(msg, ndx); ndx += sizeof(UInt16);  // [5–6]
-            STATUS_BITS1 = msg[ndx];                 ndx++;                          // [7]
+            HealthBits = msg[ndx]; ndx++;                                          // [7] FMC HEALTH_BITS
 
             StagePosition = BitConverter.ToUInt32(msg, ndx); ndx += sizeof(UInt32); // [8–11]
             StageError    = BitConverter.ToUInt32(msg, ndx); ndx += sizeof(UInt32); // [12–15]
@@ -215,8 +220,10 @@ namespace CROSSBOW
             _ntpTime   = BitConverter.ToInt64(msg, ndx);  ndx += sizeof(Int64);     // [28–35]
             FW_VERSION = BitConverter.ToUInt32(msg, ndx); ndx += sizeof(UInt32);    // [36–39]
             TEMP_MCU   = BitConverter.ToSingle(msg, ndx); ndx += sizeof(Single);    // [40–43]
-            TimeBits   = msg[ndx];                         ndx++;                    // [44] TIME_BITS
-            // [45–63] RESERVED — skip to end of 64-byte block
+            TimeBits = msg[ndx]; ndx++;                                            // [44] TIME_BITS
+            HW_REV = msg[ndx]; ndx++;                                            // [45] HW_REV
+            PowerBits = msg[ndx]; ndx++;                                            // [46] POWER_BITS
+            // [47–63] RESERVED — skip to end of 64-byte block
 
             return startNdx + 64;
         }

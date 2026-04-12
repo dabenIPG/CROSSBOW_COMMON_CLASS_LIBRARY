@@ -2,8 +2,8 @@
 
 **Document:** `CROSSBOW_ICD_INT_ENG`
 **Doc #:** IPGD-0003
-**Version:** 3.5.1
-**Date:** 2026-04-11 (BDC V1/V2 hardware unification)
+**Version:** 3.5.2
+**Date:** 2026-04-11 (FMC STM32F7 port)
 **Classification:** IPG Internal Use Only
 **Source:** CB_ICD_v1_7.xlsx reconciled with ARCHITECTURE.md (TRC v3.0); `defines.hpp` canonical v3.X.Y
 **Audience:** IPG engineering staff, ENG GUI developers, firmware developers — all five controllers (MCC, BDC, TMC, FMC, TRC)
@@ -11,6 +11,18 @@
 ---
 
 ## Version History
+
+**v3.5.2 changes (FMC STM32F7 port — 2026-04-11):**
+- FMC FW version bumped: `3.2.0` → `3.3.0` (`VERSION_PACK(3,3,0)`).
+- FMC REG1 byte [7] **BREAKING CHANGE** — renamed `FSM STAT BITS` → `FMC HEALTH_BITS`. New layout:
+  - bit 0: `isReady` (unchanged)
+  - bits 1–7: `RES` — `isFSM_Powered` (was bit 1) and `isStageEnabled` (was bit 6) moved to POWER_BITS byte [46].
+  - Old layout: 0:isReady; 1:isFSM_Powered; 2–5:RES; 6:isStageEnabled; 7:RES (isUnsolicitedModeEnabled — retired session 35). Read HW_REV [45] — layout identical on both revisions.
+- FMC REG1 byte [45]: promoted from `RESERVED` → `HW_REV`. `0x01`=V1 (SAMD21 legacy), `0x02`=V2 (STM32F7 / OpenCR). Read before interpreting HEALTH_BITS [7] and POWER_BITS [46].
+- FMC REG1 byte [46]: promoted from `RESERVED` → `FMC POWER_BITS`. bit0=`isFSM_Powered`; bit1=`isStageEnabled`; bits2–7=RES. Mirrors MCC/BDC POWER_BITS pattern.
+- Defined byte count: 45 → 47. Reserved: 19 → 17. Fixed block unchanged at 64 bytes.
+- `MSG_FMC.cs`: `HealthBits`/`PowerBits` properties added; `StatusBits1` retained as backward-compat alias → `HealthBits`. `HW_REV` byte [45] parsed; `IsV1`/`IsV2`/`HW_REV_Label` added. `isFSM_Power_Enabled`/`isStageEnabled` now read from `PowerBits`. `isUnsolicitedModeEnabled` retired.
+- See FMC_STM32_MIGRATION_FINAL.md for full change catalogue.
 
 **v3.5.1 changes (BDC unification — 2026-04-11):**
 - BDC FW version bumped: `3.2.0` → `3.3.0` (`VERSION_PACK(3,3,0)`).
@@ -1125,7 +1137,7 @@ Sent by FMC directly (engineering access) and passed through BDC REG1 as a 64-by
 | 2 | 2 | 3 | 1 | System Mode | uint8 | BDC_MODES enum |
 | 3 | 3 | 5 | 2 | HB_ms | uint16 | ms between sends |
 | 5 | 5 | 7 | 2 | dt_us | uint16 | µs in processing loop |
-| 7 | 7 | 8 | 1 | FSM STAT BITS | uint8 | 0:isReady; 1:isFSM_Powered; 2–5:RES *(ntp.isSynched/ntpUsingFallback moved to TIME_BITS byte 44 — session 33)*; 6:isStage_Enabled; 7:RES *(was isUnsolicitedModeEnabled — retired session 35)* |
+| 7 | 7 | 8 | 1 | FMC HEALTH_BITS | uint8 | 0:isReady; 1–7:RES ⚠️ **Breaking change v3.5.2** — renamed from `FSM STAT BITS`. `isFSM_Powered` (was bit 1) and `isStageEnabled` (was bit 6) moved to POWER_BITS byte [46]. Read HW_REV [45] to confirm revision. |
 | 8 | 8 | 12 | 4 | Stage Pos | uint32 | counts; dist = (counts − 15000) / 0.5 mm |
 | 12 | 12 | 16 | 4 | Stage Err | uint32 | error mask |
 | 16 | 16 | 20 | 4 | Stage Status | uint32 | status mask (24 bits used) |
@@ -1135,9 +1147,11 @@ Sent by FMC directly (engineering access) and passed through BDC REG1 as a 64-by
 | 36 | 36 | 40 | 4 | FMC VERSION WORD | uint32 | |
 | 40 | 40 | 44 | 4 | MCU Temp | float | °C |
 | 44 | 44 | 45 | 1 | TIME_BITS | uint8 | bit0:isPTP_Enabled; bit1:ptp.isSynched; bit2:usingPTP; bit3:ntp.isSynched; bit4:ntpUsingFallback; bit5:ntpHasFallback; bit6–7:RES — session 33 |
-| 45 | 45 | 64 | 19 | RESERVED | — | 0x00 — headroom for future fields |
+| 45 | 45 | 46 | 1 | HW_REV | uint8 | `0x01`=V1 (SAMD21 legacy); `0x02`=V2 (STM32F7 / OpenCR). Read before interpreting HEALTH_BITS [7] and POWER_BITS [46]. — v3.5.2 |
+| 46 | 46 | 47 | 1 | FMC POWER_BITS | uint8 | bit0=`isFSM_Powered`; bit1=`isStageEnabled`; bits2–7=RES. Mirrors MCC/BDC POWER_BITS pattern. — v3.5.2 |
+| 47 | 47 | 64 | 17 | RESERVED | — | 0x00 — headroom for future fields |
 
-**Defined: 45 bytes. Reserved: 19 bytes. Fixed block: 64 bytes.**
+**Defined: 47 bytes. Reserved: 17 bytes. Fixed block: 64 bytes.**
 
 > ⚠ **FSM position note:** `FSM Pos X/Y` here (int32, ADC readback) differs from `FSM_X/Y`
 > in BDC REG1 (int16, commanded). Reconciliation pending — see Action Items.

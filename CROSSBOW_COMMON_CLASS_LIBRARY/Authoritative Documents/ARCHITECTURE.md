@@ -1,9 +1,20 @@
 # CROSSBOW System Architecture
 
-**Document Version:** 3.3.6
+**Document Version:** 3.3.7
 **Date:** 2026-04-11
-**ICD Reference:** ICD v3.5.1
-**Status:** BDC V1/V2 hardware unification complete.
+**ICD Reference:** ICD v3.5.2
+**Status:** FMC STM32F7 port complete.
+
+**v3.3.7 changes (FMC STM32F7 port — 2026-04-11):**
+- §3 Codebase inventory: FMC platform updated SAMD21 → STM32F7 (OpenCR board library). FW version 3.2.x → 3.3.0. STM32 migration deferred note removed.
+- §12 FMC header: platform SAMD21 → STM32F7, FW v3.2.0 → v3.3.0. hw_rev.hpp self-detecting HW_REV byte [45] added.
+- §12.2 FMC socket budget: FW-B4 note updated — ptp.INIT() remains gated due to FW-B3 (W5500 multicast contention with BDC). Socket budget 2/8 always.
+- §12.3 FMC time source: isNTP_Enabled default changed false → true (SAMD21 NTP bug resolved — not applicable on STM32). NTP init unconditional at boot.
+- §12.5 Build Configuration (new): hw_rev.hpp table parallel to §9.6 MCC, §10.9 BDC, §11.6 TMC patterns.
+- §15 Version table: FMC 3.2.0 → 3.3.0.
+- §16 Compatibility matrix: FMC STM32F7 port + hw_rev.hpp entry added.
+- §17 Open items: FMC-NTP closed. FW-B4 updated — BDC/TMC ptp.INIT() also need gate (FW-B3 fleet-wide). FW-B5 added (BDC FSM offset bug). HW-FMC-1 added (power isolation).
+- §2.2a fleet socket budget: BDC/TMC ptp.INIT() notes updated — unconditional needs gate due to FW-B3.
 
 **v3.3.6 changes (BDC unification — 2026-04-11):**
 - §10 BDC Internal Architecture: updated for unified V1/V2 hardware abstraction (`hw_rev.hpp`). FW version updated to 3.3.0.
@@ -219,17 +230,17 @@ Authoritative reference for all embedded controllers. Verified from source files
 
 | Controller | PTP disabled (default) | PTP enabled | Spare (PTP disabled) | Notes |
 |------------|----------------------|-------------|----------------------|-------|
-| MCC | 6/8 | 8/8 | 2 | ptp.INIT() gated — FW-B4 pending |
-| BDC | 7/8 | 7/8 | 1 | ptp.INIT() unconditional at boot ✅ |
-| TMC | 4/8 | 4/8 | 4 | ptp.INIT() unconditional at boot ✅ |
-| FMC | 2/8 | 4/8 | 6 | ptp.INIT() gated — FW-B4 pending |
+| MCC | 6/8 | 8/8 | 2 | ptp.INIT() gated — FW-B3/FW-B4 |
+| BDC | 7/8 | 7/8 | 1 | ptp.INIT() unconditional ⚠️ needs gate — FW-B3 pending |
+| TMC | 4/8 | 4/8 | 4 | ptp.INIT() unconditional ⚠️ needs gate — FW-B3 pending |
+| FMC | 2/8 | 4/8 | 6 | ptp.INIT() gated — FW-B3/FW-B4 |
 | TRC | N/A | N/A | N/A | Linux kernel sockets — no W5500 hardware limit |
 
 **Shared socket pattern (authoritative):**
 - NTP uses `&udpA2` on all four controllers — zero additional sockets
 - BDC TRC/FMC command TX borrows `&udpA2` — zero additional sockets
 - `isPTP_Enabled` gates `ptp.UPDATE()` on all controllers
-- `ptp.INIT()` should be unconditional at boot (BDC/TMC pattern) — MCC/FMC pending FW-B4
+- `ptp.INIT()` gated by `isPTP_Enabled` on MCC and FMC (FW-B3 multicast contention). BDC and TMC still unconditional — pending gate (FW-B3 fleet-wide fix required first).
 
 ### 2.3 Internal Network Topology
 
@@ -347,7 +358,7 @@ For full TRC/Jetson setup procedure (OS install, static IP, software deployment)
 | **BDC** | STM32F7 (OpenCR board library) | Arduino C++ | System controller, PID loops, fire control, subsystem routing |
 | **MCC** | STM32F7 (OpenCR board library) | Arduino C++ | Power management, laser, GNSS, charger, TMC supervision |
 | **TMC** | STM32F7 (OpenCR board library) | Arduino C++ | Thermal management — pump, LCM, Vicor, fans, TPH sensor |
-| **FMC** | SAMD21 (Arduino) | Arduino C++ | FSM SPI DAC/ADC, M3-LS focus stage I2C. STM32 migration deferred (FMC-STM32-1) |
+| **FMC** | STM32F7 (OpenCR board library) | Arduino C++ | FSM SPI DAC/ADC, M3-LS focus stage I2C. FW v3.3.0. V1/V2 hardware abstraction (`hw_rev.hpp`). |
 | **THEIA** | Windows PC | C# / .NET 8 / WinForms | Operator HMI, Xbox controller, video display, fire control |
 | **HYPERION** | Windows PC | C# / .NET 8 / WinForms | Sensor fusion — ADS-B, Echodyne, RADAR, LoRa, Stellarium. Track filtering (6-state Kalman), operator track selection, CUE unicast output to THEIA. |
 | **CUE SIM** | Windows PC | C# / .NET 8 / WinForms | EXT_OPS test and simulation tool — simulated track injection into HYPERION (UDP:15001) or direct to THEIA (UDP:15009). HyperionSniffer for CUE output verification. |
@@ -1555,7 +1566,9 @@ raw pass-through. THEIA parses it as `MSG_TMC`.
 
 ## 12. FMC Internal Architecture
 
-FMC runs on SAMD21 (Arduino), FW v3.2.0, IP: 192.168.1.23.
+FMC runs on STM32F7 (OpenCR board library), FW v3.3.0, IP: 192.168.1.23.
+
+Hardware revision is selected at compile time in `hw_rev.hpp` (`HW_REV_V1` or `HW_REV_V2`). The active revision is reported in REG1 byte [45] (`HW_REV`) so `MSG_FMC.cs` can self-detect the register layout. Read byte [45] before interpreting `HEALTH_BITS` [7] and `POWER_BITS` [46].
 
 ### 12.1 Hardware
 
@@ -1578,20 +1591,20 @@ W5500 has 8 hardware sockets. FMC allocates **2/8 with PTP disabled (current def
 
 DAC (SPI), ADC (SPI), stage (I2C) consume no W5500 sockets. NTP shares `udpA2`.
 
-> ⚠️ **FW-B4 open:** FMC `ptp.INIT()` is gated by `if (isPTP_Enabled)` at boot — same issue as MCC. Fix: call `ptp.INIT()` unconditionally at boot. FMC has ample headroom: 2/8 → 4/8.
+> ⚠️ **FW-B3 constraint:** FMC `ptp.INIT()` is gated by `if (isPTP_Enabled)` at boot. Unlike MCC (FW-B4), FMC's gate is required due to W5500 multicast contention with BDC — both opening ports 319/320 simultaneously causes W5500 socket exhaustion on the shared network. FMC socket budget stays at 2/8 until FW-B3 is resolved fleet-wide.
 
 ### 12.3 FMC Time Source Architecture
 
-FMC mirrors MCC/BDC/TMC time source architecture. `isPTP_Enabled` and `isNTP_Enabled` both default to `false` (FW-B3 deferred; SAMD21 NTP timing open bug). Enable via serial `TIMESRC PTP` or `TIMESRC NTP`.
+FMC mirrors MCC/BDC/TMC time source architecture. `isPTP_Enabled` defaults to `false` (FW-B3 deferred). `isNTP_Enabled` defaults to `true` (SAMD21 NTP bug resolved — not applicable on STM32F7). NTP init is unconditional at boot; PTP init gated by `isPTP_Enabled`.
 
 **`GetCurrentTime()` routing (`fmc.hpp`) — session 35 holdover:**
 ```
 Same EPOCH_MIN_VALID_US guard + holdover path as MCC (section 9.5).
 isPTP_Enabled  = false  (default — FW-B3 deferred)
-isNTP_Enabled  = false  (default — SAMD21 NTP open bug)
+isNTP_Enabled  = true   (default — STM32F7; SAMD21 NTP bug no longer applicable)
 ```
 
-**NTP suppression:** `ntpSuppressedByPTP = true` (default). INIT() guards NTP init behind `isNTP_Enabled` flag.
+**NTP suppression:** `ntpSuppressedByPTP = true` (default).
 
 **Register:** `TIME_BITS` at FMC REG1 byte 44 — identical layout to MCC (253), BDC (391), TMC (61). FSM STAT BITS bits 2-3 vacated (were `ntp.isSynched`/`ntpUsingFallback`) — all time status now in TIME_BITS. Bit 7 (`isUnsolicitedModeEnabled`) retired session 35 — always 0.
 
@@ -1604,6 +1617,18 @@ BDC also separately sets FSM calibration fields directly into `fmcMSG` from BDC 
 > **FSM position note:** `FSM_X/Y` commanded (int16) at BDC REG1 [233–236] and `FSM Pos X/Y`
 > ADC readback (int32) in FMC REG1 [20–27] are correct distinct types — int16 fits the DAC
 > command range; int32 is the signed ADC readback with sign inversion. Not a bug. ✅ Closed #7.
+
+### 12.5 Build Configuration (`hw_rev.hpp`)
+
+| Define | Effect |
+|--------|--------|
+| `HW_REV_V1` | V1 hardware — SAMD21 / MKR layout (legacy) |
+| `HW_REV_V2` | V2 hardware — STM32F7 / OpenCR layout |
+| `FMC_HW_REV_BYTE` | Auto-set — `0x01` (V1) or `0x02` (V2); written to REG1 byte [45] |
+| `FMC_SERIAL` | Auto-set — `SerialUSB` (V1) or `Serial` (V2) — USB CDC serial port abstraction |
+| `FMC_SPI` | Auto-set — `SPI` (V1) or `SPI_IMU` (V2) — FSM DAC/ADC SPI peripheral abstraction |
+| `FSM_POW_ON` / `FSM_POW_OFF` | FSM power enable polarity — `HIGH`/`LOW` both revisions (abstracted for future changes) |
+| `uprintf()` | Cross-platform formatted print via `FMC_SERIAL` — replaces SAMD21 `SerialUSB.printf` workaround |
 
 ---
 
@@ -1702,7 +1727,7 @@ VERSION_PACK(major, minor, patch):
 |------------|----------------|--------------------|
 | MCC | 3.3.0 | `VERSION_PACK(3,3,0)` |
 | BDC | 3.3.0 | `VERSION_PACK(3,3,0)` |
-| FMC | 3.2.0 | `VERSION_PACK(3,2,0)` |
+| FMC | 3.3.0 | `VERSION_PACK(3,3,0)` |
 | TRC | 3.0.2 | `VERSION_PACK(3,0,2)` |
 | TMC | 3.3.0 | `VERSION_PACK(3,3,0)` |
 
@@ -1743,6 +1768,7 @@ UInt32 patch =  VERSION_WORD        & 0xFFF;
 | TMC `SINGLE_LOOP` topology flag | ✅ Session 30 — STATUS_BITS1 bit 6, both revisions |
 | MCC V1/V2 hardware abstraction | ✅ MCC unification — `hw_rev.hpp`, unified codebase FW v3.3.0, HW_REV byte [254] self-detecting. HEALTH_BITS/POWER_BITS breaking change — ICD v3.4.0 required. |
 | BDC V1/V2 hardware abstraction | ✅ BDC unification — `hw_rev.hpp`, unified codebase FW v3.3.0, HW_REV byte [392] self-detecting. HEALTH_BITS/POWER_BITS rename (ICD v3.5.1). Vicor polarity flip V1→V2. Three new thermistors + IP175 switch control on V2. |
+| FMC STM32F7 port + V1/V2 hardware abstraction | ✅ FMC STM32F7 port — `hw_rev.hpp`, unified codebase FW v3.3.0, HW_REV byte [45] self-detecting. HEALTH_BITS byte [7] / POWER_BITS byte [46] (ICD v3.5.2). ptp.INIT() gated FW-B3. FMC_SERIAL/FMC_SPI platform abstraction. |
 
 ---
 
@@ -1759,11 +1785,13 @@ Quick reference — high priority items as of session 29:
 | TRC-SOM-SN | TRC SOM serial — read `/proc/device-tree/serial-number` at startup into `GlobalState` as `uint64`; pack LE into `TelemetryPacket` bytes [49–56]. See ICD TRC REG1 update. `MSG_TRC.cs`: add `SomSerial` property. | 🟡 Medium |
 | THEIA-SHUTDOWN | Graceful STANDBY→OFF sequence — laser safe, relays off, HMI disconnect | 🔴 High |
 | HMI-A3-18 | LCH/KIZ/HORIZ — architecture analyzed; C# emplacement GUI work pending | 🔴 High |
-| FMC-NTP | FMC dt elevated — suspected NTP/USB CDC main loop blocking | 🔴 High |
+| ~~FMC-NTP~~ | ~~FMC dt elevated — suspected NTP/USB CDC main loop blocking~~ ✅ Closed — SAMD21 NTP bug not applicable on STM32F7. isNTP_Enabled default true, NTP init unconditional. | ~~🔴 High~~ |
 | GUI-2 | HMI robust testing — full engagement sequence on live HW | 🔴 High |
 | FW-B3 | PTP DELAY_REQ W5500 contention — `isPTP_Enabled=false` fleet-wide workaround | 🔴 High |
+| FW-B4 | Fleet `ptp.INIT()` gate audit — BDC and TMC `ptp.INIT()` unconditional needs gate (FW-B3 multicast contention fleet-wide). MCC and FMC already gated. Fix BDC boot state machine PTP_INIT step and TMC INIT(). | 🔴 High |
+| FW-B5 | BDC FSM position offsets wrong in `handleA1Frame()` — `fsm_posX_rb` reads offset 24 (should be 20), `fsm_posY_rb` reads offset 28 (should be 24). Wrong values, no crash. Fix in next BDC session. | 🟡 Medium |
+| HW-FMC-1 | FMC/BDC shared power via serial connection — brownout risk on USB power in test. Use dedicated supply for FMC. Verify power rail isolation in production harness. | 🔴 High |
 | GUI-8 | TRC C# client model — apply standardized pattern from session 29 | 🟡 Medium |
-| FW-B4 | MCC and FMC `ptp.INIT()` not unconditional at boot — `TIMESRC PTP` silent failure | 🟡 Medium |
 | FW-C3 | BDC Fuji boot status — `fuji.SETUP()` deferred post-boot, FUJI_WAIT always times out | 🟡 Medium |
 | FW-C4 | BDC A1 ARP backoff not working — `A1 OFF` workaround when TRC offline | 🟡 Medium |
 | FW-C5 | Audit/consolidate IP defines in `defines.hpp` — remove remaining hardcoded IPs | 🟡 Medium |
