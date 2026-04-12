@@ -706,12 +706,14 @@ correct bit mask per laser.
 
 | Item | Notes |
 |------|-------|
-| ENG GUI `chk_HEL_TrainingMode` | Wire checkbox to send `0xAF` via shared `mcc.cs` A2 connection |
 | 6K ch2 output power (`ROPS`) | Not in current poll — future extension |
 | 6K pulse mode (`SPRR`, `SPW`, `EGM`) | Not required for CROSSBOW fire control |
 | 6K aiming beam (`ABN`/`ABF`) | Not required — no guide laser in CROSSBOW path |
-| `isTrainingMode` readback via REG1 | Pack `ipg.isTrainingMode` into `HEALTH_BITS` byte [9] bit 3 (currently RES). Add `isHEL_TrainingMode` accessor to `MSG_MCC.cs`. Replace `chk_hel_trainingMode` write-only control in `frmMCC` with `mb_hel_trainingMode` StatusLabel readback alongside the existing checkbox. Requires `mcc.cpp`, `MSG_MCC.cs`, `frmMCC.cs`, `frmMCC_Designer.cs`, ICD update. |
-| `defines.hpp` fleet deployment | Deploy updated `defines.hpp` to all 5 controllers (BDC, TMC, FMC, TRC, MCC) |
+| **HB counter — BAT** | `HB_BAT` always 0. Add `lastMsgRx_ms` to `bat` class, stamp on each received packet, compute delta at REG1 pack time. Same pattern as `ipg.HB_RX_ms`. |
+| **HB counter — GNSS** | `HB_GNSS` always 0. Add `lastMsgRx_ms` to `gnss` class, stamp on each received position fix, compute delta at REG1 pack time. |
+| **HB counter — CRG** | `HB_CRG` always 0. V1 only — CRG has no I2C on V2. Gate packing behind `#if defined(HW_REV_V1)` or check `isV2`. Add receive timestamp if CRG polling exists. |
+| **HB counter — TIME (was NTP)** | `HB_NTP` byte [130] is stamped on NTP packet receive only. Should also stamp on PTP sync event. Consider renaming `HB_NTP` → `HB_TIME` in firmware, ICD, and `MSG_MCC.cs` to reflect dual PTP/NTP source. |
+| **HB counter — `lastTick_*` cleanup** | `lastTick_BAT`, `lastTick_CRG`, `lastTick_GNSS`, `lastTick_HEL` declared in `mcc.hpp` but never written — remove stubs or wire up when HB counters are implemented. |
 
 ## 13. Pending Serial Command Enhancements
 

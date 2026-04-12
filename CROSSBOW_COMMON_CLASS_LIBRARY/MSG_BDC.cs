@@ -84,9 +84,12 @@ namespace CROSSBOW
 
         // ── Status / device bits ──────────────────────────────────────────────
         public byte DeviceEnabledBits { get; private set; } = 0;
-        public byte DeviceReadyBits   { get; private set; } = 0;
-        public byte StatusBits        { get; private set; } = 0;
-        public byte StatusBits2       { get; private set; } = 0;
+        public byte DeviceReadyBits { get; private set; } = 0;
+        public byte HealthBits { get; private set; } = 0;   // byte [10] — renamed from StatusBits
+        public byte PowerBits { get; private set; } = 0;   // byte [11] — renamed from StatusBits2
+        // Backward-compat aliases — existing call sites unbroken
+        public byte StatusBits => HealthBits;
+        public byte StatusBits2 => PowerBits;
 
         public bool isVerboseLogEnabled { get; set; } = true;
 
@@ -186,7 +189,22 @@ namespace CROSSBOW
         // ── Temperatures ──────────────────────────────────────────────────────
         // ICD v3.0.0 session 4: TEMPERATURE_VICOR is int8 (was float)
         public sbyte TEMPERATURE_VICOR { get; private set; } = 0;
-        public float  TEMPERATURE      { get; private set; } = 0;
+
+        // ── V2 temperature sensors (BDC Controller 1.0 Rev A) ────────────────
+        // 0 on V1 — backward-compatible (was RESERVED 0x00)
+        public sbyte TEMP_RELAY { get; private set; } = 0;
+        public sbyte TEMP_BAT { get; private set; } = 0;
+        public sbyte TEMP_USB { get; private set; } = 0;
+
+        // ── Hardware revision ─────────────────────────────────────────────────
+        public byte HW_REV { get; private set; } = 0;
+        public bool IsV1 => HW_REV == 0x01;
+        public bool IsV2 => HW_REV == 0x02;
+        public string HW_REV_Label => HW_REV == 0x01 ? "V1"
+                                    : HW_REV == 0x02 ? "V2 — Controller 1.0 Rev A"
+                                    : $"unknown (0x{HW_REV:X2})";
+
+        public float TEMPERATURE { get; private set; } = 0;
         public float  PRESSURE         { get; private set; } = 0;
         public float  HUMIDITY         { get; private set; } = 0;
 
@@ -405,9 +423,9 @@ namespace CROSSBOW
 
             // [8-11] Device / status bits
             DeviceEnabledBits = msg[ndx]; ndx++;
-            DeviceReadyBits   = msg[ndx]; ndx++;
-            StatusBits        = msg[ndx]; ndx++;
-            StatusBits2       = msg[ndx]; ndx++;
+            DeviceReadyBits = msg[ndx]; ndx++;
+            HealthBits = msg[ndx]; ndx++;   // byte [10] — was StatusBits
+            PowerBits = msg[ndx]; ndx++;   // byte [11] — was StatusBits2
 
             // [12-19] epoch ms uint64 (PTP when synched, NTP otherwise — session 32)
             _epochTime = BitConverter.ToUInt64(msg, ndx); ndx += sizeof(UInt64);
@@ -527,6 +545,14 @@ namespace CROSSBOW
 
             // [391] TIME_BITS (session 32) — consolidated time source status
             TimeBits = msg[ndx]; ndx++;
+
+            // [392] HW_REV — 0x01=V1, 0x02=V2 (BDC Controller 1.0 Rev A)
+            HW_REV = msg[ndx]; ndx++;
+
+            // [393-395] V2 temperature sensors — 0x00 on V1 (backward-compatible)
+            TEMP_RELAY = (sbyte)msg[ndx]; ndx++;
+            TEMP_BAT = (sbyte)msg[ndx]; ndx++;
+            TEMP_USB = (sbyte)msg[ndx]; ndx++;
         }
 
         // =========================================================================
@@ -554,17 +580,15 @@ namespace CROSSBOW
         public bool isINC_DeviceReady { get { return IsBitSet(DeviceReadyBits, 6); } }
         public bool isPTP_DeviceReady { get { return IsBitSet(DeviceReadyBits, 7); } }
 
-        // StatusBits accessors  (byte 10)
-        // bit 0: isReady  bits 1-6: RES (time bits moved to TimeBits byte 391 — session 32)
-        // bit 7: RES (was isUnSolicitedEnabled — retired session 35)
-        // Named time properties below redirect to TimeBits for backward compatibility.
+        // HealthBits accessors [byte 10] — renamed from StatusBits (ICD v3.5.0 BDC unification)
+        // bit 0: isReady   bit 1: isSwitchEnabled (V2 only)   bits 2-7: RES
         // =========================================================================
-        public bool isBDCReady { get { return IsBitSet(StatusBits, 0); } }
-        // isUnSolicitedMode_Enabled retired session 35 — bit 7 always 0
+        public bool isBDCReady { get { return IsBitSet(HealthBits, 0); } }
+        public bool isSwitchEnabled { get { return IsV2 && IsBitSet(HealthBits, 1); } }
 
         public bool ntpUsingFallback { get { return tb_ntpUsingFallback; } }   // → TimeBits bit 4
-        public bool ntpHasFallback   { get { return tb_ntpHasFallback;   } }   // → TimeBits bit 5
-        public bool usingPTP         { get { return tb_usingPTP;         } }   // → TimeBits bit 2
+        public bool ntpHasFallback { get { return tb_ntpHasFallback; } }   // → TimeBits bit 5
+        public bool usingPTP { get { return tb_usingPTP; } }   // → TimeBits bit 2
 
         // Derived: active time source label — mirrors firmware TIME_SOURCE enum
         public string activeTimeSourceLabel
@@ -577,14 +601,16 @@ namespace CROSSBOW
             }
         }
 
-        public bool isPID_Enabled    { get { return IsBitSet(StatusBits2, 0); } }
-        public bool isVPID_Enabled   { get { return IsBitSet(StatusBits2, 1); } }
-        public bool isFT_Enabled     { get { return IsBitSet(StatusBits2, 2); } }
-        public bool isVicor_Enabled  { get { return IsBitSet(StatusBits2, 3); } }
-        public bool isRelay1_Enabled { get { return IsBitSet(StatusBits2, 4); } }
-        public bool isRelay2_Enabled { get { return IsBitSet(StatusBits2, 5); } }
-        public bool isRelay3_Enabled { get { return IsBitSet(StatusBits2, 6); } }
-        public bool isRelay4_Enabled { get { return IsBitSet(StatusBits2, 7); } }
+        // PowerBits accessors [byte 11] — renamed from StatusBits2 (ICD v3.5.0 BDC unification)
+        // Bit layout unchanged — rename only.
+        public bool isPID_Enabled { get { return IsBitSet(PowerBits, 0); } }
+        public bool isVPID_Enabled { get { return IsBitSet(PowerBits, 1); } }
+        public bool isFT_Enabled { get { return IsBitSet(PowerBits, 2); } }
+        public bool isVicor_Enabled { get { return IsBitSet(PowerBits, 3); } }
+        public bool isRelay1_Enabled { get { return IsBitSet(PowerBits, 4); } }
+        public bool isRelay2_Enabled { get { return IsBitSet(PowerBits, 5); } }
+        public bool isRelay3_Enabled { get { return IsBitSet(PowerBits, 6); } }
+        public bool isRelay4_Enabled { get { return IsBitSet(PowerBits, 7); } }
 
         // =========================================================================
         // VoteBits1 [164] — BDC override + geometry status

@@ -2,12 +2,33 @@
 
 **Document:** `CROSSBOW_ICD_INT_OPS`
 **Doc #:** IPGD-0004
-**Version:** 3.3.8
-**Date:** 2026-04-07 (session 30)
+**Version:** 3.5.1
+**Date:** 2026-04-11 (BDC V1/V2 hardware unification)
 
 ---
 
 ## Version History
+
+**v3.5.1 changes (BDC unification — 2026-04-11):**
+- BDC FW version bumped: `3.2.0` → `3.3.0`.
+- BDC REG1 byte [10] **BREAKING CHANGE** — renamed `BDC STAT BITS` → `HEALTH_BITS`. New layout: 0:isReady; 1:isSwitchEnabled(V2 only, 0 on V1); 2–7:RES. Old layout: 0:isReady; 1–7:RES.
+- BDC REG1 byte [11] — renamed `BDC STAT BITS2` → `POWER_BITS`. Bit layout unchanged — rename only.
+- BDC REG1 byte [392]: `RESERVED` → `HW_REV` (`0x01`=V1, `0x02`=V2). Read before interpreting HEALTH_BITS bit 1.
+- BDC REG1 bytes [393–395]: `RESERVED` → `TEMP_RELAY` / `TEMP_BAT` / `TEMP_USB` (int8 °C, V2 live; V1 always `0x00`). Backward-compatible — old clients reading these bytes previously received `0x00`.
+- Defined byte count updated: 392 → 396. Reserved: 120 → 116.
+
+**v3.5.0 changes (IPG 6K integration — 2026-04-10):**
+- `0xAF SET_HEL_TRAINING_MODE` added to A3 command whitelist — now accessible to INT_OPS clients. `uint8 0=COMBAT, 1=TRAINING`. Sets MCC training mode — power clamped to 10% when active.
+- MCC REG1 byte [9] `HEALTH_BITS` bit 3: `RES` → `isTrainingMode`. INT_OPS clients may read to confirm training mode state.
+- MCC REG1 byte [131] `HEL HB` — now live (was always 0). Reflects laser TCP response interval in s/10 units. Stale > 2.0s indicates laser comms loss.
+- MCC REG1 byte [254]: `RESERVED` → `HW_REV` (`0x01`=V1, `0x02`=V2). Read before interpreting byte [9] and byte [10].
+- MCC REG1 byte [255]: `RESERVED` → `LASER_MODEL` (`0x00`=UNKNOWN, `0x01`=YLM_3K, `0x02`=YLM_6K). Populated after laser auto-sense on connect.
+- `LASER_MODEL` enum: `YLR_6K` renamed → `YLM_6K` to match actual wire model string `YLM-6000-U3-SM`.
+
+**v3.4.0 changes (MCC unification — 2026-04-08):**
+- MCC REG1 byte [9] **BREAKING CHANGE** — renamed `MCC STAT BITS` → `HEALTH_BITS`. New layout: 0:isReady; 1:isChargerEnabled; 2:isNotBatLowVoltage; 3–7:RES. Old layout: 0:isReady; 1:isSolenoid1_En; 2:isSolenoid2_En; 3:isLaserPower_En; 4:isChargerEnabled; 5:isNotBatLowVoltage.
+- MCC REG1 byte [10] **BREAKING CHANGE** — renamed `MCC STAT BITS2` → `POWER_BITS`. Bit N = `MCC_POWER` value N. Revision-independent — unused outputs always 0. Old layout: 3:isVicorEnabled; 4:isRelay1En; 5:isRelay2En; 6:isRelay3En; 7:isRelay4En.
+- MCC REG1 byte [254]: `RESERVED` → `HW_REV`. Read before interpreting bytes [9] and [10].
 
 **v3.3.8 changes (session 30 — 2026-04-07):**
 - TMC REG1 embedded block (MCC REG1 bytes [66–129]) updated — layout changes are transparent to INT_OPS clients that treat the TMC block as opaque, but THEIA/HMI clients parsing TMC sub-fields must be aware:
@@ -222,6 +243,7 @@ For EXT_OPS interface definition see `CROSSBOW_ICD_EXT_OPS` (IPGD-0005).
 | 0xAC | SET_BDC_HORIZ | Set horizon elevation vector | float[360] | BDC |
 | 0xAD | SET_HEL_POWER | Set laser power level | uint8 [0–100] % | MCC |
 | 0xAE | CLEAR_HEL_ERROR | Clear laser error state | none | MCC |
+| 0xAF | SET_HEL_TRAINING_MODE | Set training/combat mode — training clamps power to 10% | uint8 0=COMBAT, 1=TRAINING | MCC |
 
 ---
 
@@ -323,10 +345,10 @@ Fixed block size: **256 bytes** in payload, always padded to 512-byte payload.
 | 5 | 5 | 7 | 2 | dt_us | uint16 | µs in processing loop |
 | 7 | 7 | 8 | 1 | MCC DEVICE_ENABLED_BITS | uint8 | 0:NTP; 1:TMC; 2:HEL; 3:BAT; 4:PTP; 5:CRG; 6:GNSS; 7:BDC |
 | 8 | 8 | 9 | 1 | MCC DEVICE_READY_BITS | uint8 | 0:NTP; 1:TMC; 2:HEL; 3:BAT; 4:PTP; 5:CRG; 6:GNSS; 7:BDC |
-| 9 | 9 | 10 | 1 | MCC STAT BITS | uint8 | 0:isReady; 1:isSolenoid1_En; 2:isSolenoid2_En; 3:isLaserPower_En; 4:isChargerEnabled; 5:isNotBatLowVoltage; 6:RES; 7:RES *(was isUnsolicitedModeEnabled — retired session 35)* |
-| 10 | 10 | 11 | 1 | MCC STAT BITS2 | uint8 | 0–2:RES *(moved to TIME_BITS byte 253 — session 32)*; 3:isVicorEnabled; 4:isRelay1En; 5:isRelay2En; 6:isRelay3En; 7:isRelay4En |
+| 9 | 9 | 10 | 1 | MCC HEALTH_BITS | uint8 | 0:isReady; 1:isChargerEnabled; 2:isNotBatLowVoltage; 3:isTrainingMode (v3.5.0); 4–7:RES ⚠ **Breaking change v3.4.0** — old layout: 0:isReady; 1:isSolenoid1_En; 2:isSolenoid2_En; 3:isLaserPower_En; 4:isChargerEnabled; 5:isNotBatLowVoltage. Read HW_REV [254] to confirm version. |
+| 10 | 10 | 11 | 1 | MCC POWER_BITS | uint8 | Bit N = MCC_POWER value N. Revision-independent — unused outputs always 0. 0:isPwr_GpsRelay(V1); 1:isPwr_VicorBus(V1); 2:isPwr_LaserRelay(both); 3:isPwr_GimVicor(V2); 4:isPwr_TmsVicor(V2); 5:isPwr_SolHel(V1); 6:isPwr_SolBda(V1); 7:RES ⚠ **Breaking change v3.4.0** — old layout: 3:isVicorEnabled; 4:isRelay1En; 5:isRelay2En; 6:isRelay3En; 7:isRelay4En. |
 | 11 | 11 | 12 | 1 | MCC VOTE BITS | uint8 | 0:isLaserTotalHW_Vote_rb; 1:isNotAbort_Vote_rb; 2:isArmed_Vote_rb; 3:isBDA_Vote_rb; 4:isEMON_rb; 5:isLaserFireRequested_Vote; 6:isLaserTotal_Vote_rb; 7:isCombat_Vote_rb |
-| 12 | 12 | 20 | 8 | NTP epoch Time | uint64 | ms since epoch |
+| 12 | 12 | 20 | 8 | epoch Time (PTP/NTP) | uint64 | ms since epoch — PTP when synched, NTP otherwise |
 | 20 | 20 | 21 | 1 | Temp 1 (Charger) | int8 | °C |
 | 21 | 21 | 22 | 1 | Temp 2 (AIR) | int8 | °C |
 | 22 | 22 | 26 | 4 | TPH: Temp | float | °C |
@@ -347,11 +369,11 @@ Fixed block size: **256 bytes** in payload, always padded to 512-byte payload.
 | 58 | 58 | 62 | 4 | Laser SetPoint | float | % |
 | 62 | 62 | 66 | 4 | Laser Output Power | float | W |
 | 66 | 66 | 130 | 64 | TMC FULL REG | TMC_REG | 64-byte block — thermal status. Byte [62] within this block = HW_REV (0x01=V1, 0x02=V2). THEIA clients parsing TMC sub-fields must read HW_REV before decoding STAT BITS1 bit 5 and bytes [17–18], [39–40] — layout differs by hardware revision. See INT_ENG TMC REG1 section for full decode. |
-| 130 | 130 | 131 | 1 | NTP HB | uint8 | s/10 |
-| 131 | 131 | 132 | 1 | HEL HB | uint8 | s/10 |
-| 132 | 132 | 133 | 1 | BAT HB | uint8 | s/10 |
-| 133 | 133 | 134 | 1 | CRG HB | uint8 | s/10 |
-| 134 | 134 | 135 | 1 | GNSS HB | uint8 | s/10 |
+| 130 | 130 | 131 | 1 | TIME HB | uint8 | s/10 — NTP receive interval. ⚠ Pending: also stamp on PTP sync. |
+| 131 | 131 | 132 | 1 | HEL HB | uint8 | s/10 — laser TCP response interval. Live v3.5.0. Stale > 2.0s = comms loss. |
+| 132 | 132 | 133 | 1 | BAT HB | uint8 | s/10 — ⚠ always 0, pending implementation |
+| 133 | 133 | 134 | 1 | CRG HB | uint8 | s/10 — ⚠ always 0, V1 only, pending implementation |
+| 134 | 134 | 135 | 1 | GNSS HB | uint8 | s/10 — ⚠ always 0, pending implementation |
 | 135 | 135 | 136 | 1 | GNSS SOLN STATUS | uint8 | enum |
 | 136 | 136 | 137 | 1 | GNSS POS TYPE | uint8 | enum |
 | 137 | 137 | 138 | 1 | INS SOLN STATUS | uint8 | enum |
@@ -386,10 +408,11 @@ Fixed block size: **256 bytes** in payload, always padded to 512-byte payload.
 | 245 | 245 | 249 | 4 | MCC VERSION WORD | uint32 | VERSION_PACK(major, minor, patch) |
 | 249 | 249 | 253 | 4 | MCU Temp | float | °C |
 | 253 | 253 | 254 | 1 | TIME_BITS | uint8 | bit0:isPTP_Enabled; bit1:ptp.isSynched; bit2:usingPTP; bit3:ntp.isSynched; bit4:ntpUsingFallback; bit5:ntpHasFallback; bit6–7:RES |
-| 254 | 254 | 256 | 2 | RESERVED | — | 0x00 |
+| 254 | 254 | 255 | 1 | HW_REV | uint8 | 0x01=V1 (relay bus/solenoids/charger I2C); 0x02=V2 (dual Vicor/no solenoids/no I2C). Read before interpreting HEALTH_BITS [9] and POWER_BITS [10]. — v3.4.0 |
+| 255 | 255 | 256 | 1 | LASER_MODEL | uint8 | `0x00`=UNKNOWN/not sensed; `0x01`=YLM_3K (YLM-3000-SM-VV, 3000W); `0x02`=YLM_6K (YLM-6000-U3-SM, 6000W). Populated after laser auto-sense on TCP connect. — v3.5.0 |
 | 256 | 256 | 512 | 256 | RESERVED | — | 0x00 — padded to 512 |
 
-**Defined: 254 bytes. Padded to 512 bytes. Always followed by A3 frame overhead.**
+**Defined: 256 bytes. Padded to 512 bytes. Always followed by A3 frame overhead.**
 
 > **Time source decode (HMI — session 32):** Read `TIME_BITS` at byte 253.
 > `TIME_BITS[2]=1` → PTP active (GNSS time). `TIME_BITS[2]=0` + `TIME_BITS[3]=1` → NTP serving.
@@ -416,8 +439,8 @@ Embedded sub-registers (opaque to INT_OPS clients — field detail in full ICD):
 | 6 | 6 | 8 | 2 | dt_us | uint16 | µs in processing loop |
 | 8 | 8 | 9 | 1 | BDC DEVICE_ENABLED_BITS | uint8 | 0:NTP; 1:GIMBAL; 2:FUJI; 3:MWIR; 4:FSM; 5:JETSON; 6:INCL; 7:PTP *(session 32)* |
 | 9 | 9 | 10 | 1 | BDC DEVICE_READY_BITS | uint8 | 0:NTP; 1:GIMBAL; 2:FUJI; 3:MWIR; 4:FSM; 5:JETSON; 6:INCL; 7:PTP *(ptp.isSynched — session 32)* |
-| 10 | 10 | 11 | 1 | BDC STAT BITS | uint8 | 0:isReady; 1–6:RES *(session 32)*; 7:RES *(was isUnsolicitedModeEnabled — retired session 35)* |
-| 11 | 11 | 12 | 1 | BDC STAT BITS2 | uint8 | 0:isPidEnabled; 1:isVPidEnabled; 2:isFTTrackEnabled; 3:isVicorEnabled; 4:isRelay1En; 5:isRelay2En; 6:isRelay3En; 7:isRelay4En |
+| 10 | 10 | 11 | 1 | BDC HEALTH_BITS | uint8 | 0:isReady; 1:isSwitchEnabled(V2 only, 0 on V1); 2–7:RES ⚠ **Renamed v3.5.1** from `BDC STAT BITS`. Read HW_REV [392] before interpreting bit 1. |
+| 11 | 11 | 12 | 1 | BDC POWER_BITS | uint8 | 0:isPidEnabled; 1:isVPidEnabled; 2:isFTTrackEnabled; 3:isVicorEnabled; 4:isRelay1En; 5:isRelay2En; 6:isRelay3En; 7:isRelay4En ⚠ **Renamed v3.5.1** from `BDC STAT BITS2` — bit layout unchanged. |
 | 12 | 12 | 20 | 8 | epoch Time (PTP/NTP) | uint64 | ms since epoch — PTP when synched, NTP otherwise |
 | 20 | 20 | 21 | 1 | GIMBAL STATUS BITS | uint8 | 0:isReady; 1:isConnected; 2:isStarted; 3–7:RES |
 | 21 | 21 | 25 | 4 | Gimbal Pan Count | int32 | from galil (dr) |
@@ -475,9 +498,13 @@ Embedded sub-registers (opaque to INT_OPS clients — field detail in full ICD):
 | 383 | 383 | 387 | 4 | BDC VERSION WORD | uint32 | VERSION_PACK(major, minor, patch) |
 | 387 | 387 | 391 | 4 | MCU Temp | float | °C |
 | 391 | 391 | 392 | 1 | TIME_BITS | uint8 | bit0:isPTP_Enabled; bit1:ptp.isSynched; bit2:usingPTP; bit3:ntp.isSynched; bit4:ntpUsingFallback; bit5:ntpHasFallback; bit6–7:RES |
-| 392 | 392 | 512 | 120 | RESERVED | — | 0x00 |
+| 392 | 392 | 393 | 1 | HW_REV | uint8 | `0x01`=V1; `0x02`=V2 (Controller 1.0 Rev A). Read before interpreting HEALTH_BITS [10] bit 1. — v3.5.1 |
+| 393 | 393 | 394 | 1 | TEMP_RELAY | int8 | Relay area temp °C. V2 live; V1 always `0x00`. — v3.5.1 |
+| 394 | 394 | 395 | 1 | TEMP_BAT | int8 | Battery-in area temp °C. V2 live; V1 always `0x00`. — v3.5.1 |
+| 395 | 395 | 396 | 1 | TEMP_USB | int8 | USB 5V area temp °C. V2 live; V1 always `0x00`. — v3.5.1 |
+| 396 | 396 | 512 | 116 | RESERVED | — | 0x00 |
 
-**Defined: 392 bytes. Reserved: 120 bytes. Fixed block: 512 bytes.**
+**Defined: 396 bytes. Reserved: 116 bytes. Fixed block: 512 bytes.**
 
 > **Time source decode (HMI — session 32):** Read `TIME_BITS` at byte 391.
 > `TIME_BITS[2]=1` → PTP active (GNSS time). `TIME_BITS[2]=0` + `TIME_BITS[3]=1` → NTP serving.
@@ -519,7 +546,7 @@ uint32 bits[31:24] = major
 uint32 bits[23:12] = minor
 uint32 bits[11:0]  = patch
 ```
-Current firmware versions (session 30): MCC = `VERSION_PACK(3,2,0)` = `0x03002000`. BDC = `VERSION_PACK(3,2,0)` = `0x03002000`. TMC = `VERSION_PACK(3,3,0)` = `0x03003000`. FMC = `VERSION_PACK(3,2,0)` = `0x03002000`. TRC = `VERSION_PACK(3,0,1)` = `0x03000001`.
+Current firmware versions: MCC = `VERSION_PACK(3,3,0)` = `0x03003000`. BDC = `VERSION_PACK(3,3,0)` = `0x03003000`. TMC = `VERSION_PACK(3,3,0)` = `0x03003000`. FMC = `VERSION_PACK(3,2,0)` = `0x03002000`. TRC = `VERSION_PACK(3,0,1)` = `0x03000001`.
 
 ---
 

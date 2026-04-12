@@ -2,8 +2,8 @@
 
 **Document:** `CROSSBOW_ICD_INT_ENG`
 **Doc #:** IPGD-0003
-**Version:** 3.5.0
-**Date:** 2026-04-10 (IPG 6K integration — Phase 1 ENG GUI)
+**Version:** 3.5.1
+**Date:** 2026-04-11 (BDC V1/V2 hardware unification)
 **Classification:** IPG Internal Use Only
 **Source:** CB_ICD_v1_7.xlsx reconciled with ARCHITECTURE.md (TRC v3.0); `defines.hpp` canonical v3.X.Y
 **Audience:** IPG engineering staff, ENG GUI developers, firmware developers — all five controllers (MCC, BDC, TMC, FMC, TRC)
@@ -11,6 +11,24 @@
 ---
 
 ## Version History
+
+**v3.5.1 changes (BDC unification — 2026-04-11):**
+- BDC FW version bumped: `3.2.0` → `3.3.0` (`VERSION_PACK(3,3,0)`).
+- BDC REG1 byte [10] **BREAKING CHANGE** — renamed `BDC STAT BITS` → `HEALTH_BITS`. New layout:
+  - bit 0: `isReady` (unchanged)
+  - bit 1: `isSwitchEnabled` — **V2 only** (=`!isSwitchDisabled`; always `0` on V1)
+  - bits 2–7: `RES`
+  - Old layout: 0:isReady; 1–6:RES; 7:RES (was isUnsolicitedModeEnabled — retired session 35).
+- BDC REG1 byte [11] — renamed `BDC STAT BITS2` → `POWER_BITS`. **Bit layout unchanged** — rename only:
+  - 0:isPidEnabled; 1:isVPidEnabled; 2:isFTTrackEnabled; 3:isVicorEnabled; 4:isRelay1En; 5:isRelay2En; 6:isRelay3En; 7:isRelay4En
+- BDC REG1 bytes [392–395]: promoted from `RESERVED` — four new fields:
+  - [392] `HW_REV` uint8 — `0x01`=V1, `0x02`=V2 (BDC Controller 1.0 Rev A). Read before interpreting HEALTH_BITS bit 1.
+  - [393] `TEMP_RELAY` int8 — relay area NTC thermistor °C (V2 live; V1 always `0x00`)
+  - [394] `TEMP_BAT` int8 — battery-in area NTC thermistor °C (V2 live; V1 always `0x00`)
+  - [395] `TEMP_USB` int8 — USB 5V area NTC thermistor °C (V2 live; V1 always `0x00`)
+  - Bytes [396–511] remain RESERVED. Defined count: 392 → 396. Reserved: 120 → 116.
+- `MSG_BDC.cs`: `HealthBits`/`PowerBits` properties added; `StatusBits`/`StatusBits2` retained as backward-compat aliases. `HW_REV` byte [392] parsed; `IsV1`/`IsV2`/`HW_REV_Label` added. `isSwitchEnabled` accessor added (V2-aware). `TEMP_RELAY`/`TEMP_BAT`/`TEMP_USB` properties added.
+- See BDC_HW_DELTA.md for full change catalogue.
 
 **v3.5.0 changes (IPG 6K integration Phase 1 — ENG GUI direct TCP — 2026-04-10):**
 - `LASER_MODEL` enum added to `defines.hpp` and `defines.cs`: `UNKNOWN=0x00`, `YLM_3K=0x01`, `YLM_6K=0x02`. Inline function `LASER_MAX_POWER_W()` added to `defines.hpp`. `LaserModelExt` static class (`MaxPower_W()`, `IsSensed()`, `Label()`) added to `defines.cs`.
@@ -33,7 +51,7 @@
 - `0xAF SET_HEL_TRAINING_MODE` — was `RES_AF` (reserved stub). `uint8 0=COMBAT, 1=TRAINING`. Sets `ipg.isTrainingMode` — power clamped to 10% when training. `INT_ENG` only.
 - MCC serial commands added: `HEL` (status dump), `HELPOW <0-100>` (set power), `HELCLR` (clear errors), `HELTRAIN <0|1>` (training mode). All gated on `isHEL_Valid()`.
 - Firmware `ipg.hpp`/`ipg.cpp` rewritten: UDP→TCP, auto-sense, model-conditional poll, `LASER_MODEL model_type`, `isSensed()`, `isResponding()`, `isEMON()` model-aware switch, `isTrainingMode`, `lastMsgRx_ms`/`HB_RX_ms` liveness tracking, `parseLine()`/`trySenseModel()` helpers.
-- `mcc.hpp`: `isHEL_Valid()` added. `isTrainingMode` + `TRAINING_POWER_PCT` moved from `IPG` class to `MCC` class — training mode is MCC policy, not laser state.
+- MCC REG1 byte [131] `HEL HB` — was always 0 (stub). Now packs `ipg.HB_RX_ms / 100` (laser TCP response interval in x0.1s units). `HEL_STATUS` in `mcc.cs` uses this for liveness — stale > 2.0s → ERROR. BAT/CRG/GNSS HB counters remain 0 pending subsystem timing implementation.
 - `mcc.cpp`: byte [255] packed as `LASER_MODEL_BITS()`; `HEALTH_BITS()` bit 3 = `isTrainingMode`; `StateManager()` COMBAT gate on `isHEL_Valid()`; `0xAF` handler sets `isTrainingMode` + applies power immediately; `HELTRAIN` serial command moved to MCC-level (out of HEL section).
 
 **v3.4.0 changes (MCC unification — 2026-04-08):**
@@ -874,11 +892,11 @@ Fixed block size: **256 bytes**.
 | 58 | 58 | 62 | 4 | Laser SetPoint | float | % |
 | 62 | 62 | 66 | 4 | Laser Output Power | float | W |
 | 66 | 66 | 130 | 64 | TMC FULL REG | TMC_REG | 64-byte fixed block — see TMC REG1 |
-| 130 | 130 | 131 | 1 | NTP HB | uint8 | s/10 |
-| 131 | 131 | 132 | 1 | HEL HB | uint8 | s/10 |
-| 132 | 132 | 133 | 1 | BAT HB | uint8 | s/10 |
-| 133 | 133 | 134 | 1 | CRG HB | uint8 | s/10 |
-| 134 | 134 | 135 | 1 | GNSS HB | uint8 | s/10 |
+| 130 | 130 | 131 | 1 | TIME HB | uint8 | s/10 — stamped on NTP packet receive. ⚠ Pending: also stamp on PTP sync event; rename `HB_NTP` → `HB_TIME` in firmware + C#. |
+| 131 | 131 | 132 | 1 | HEL HB | uint8 | s/10 — laser TCP response interval. `ipg.HB_RX_ms / 100`. Stale > 2.0s → `HEL_STATUS` ERROR. — v3.5.0 |
+| 132 | 132 | 133 | 1 | BAT HB | uint8 | s/10 — ⚠ Pending: always 0. Requires `lastMsgRx_ms` on bat class. |
+| 133 | 133 | 134 | 1 | CRG HB | uint8 | s/10 — ⚠ Pending: always 0. V1 only (no CRG I2C on V2). Requires `lastMsgRx_ms` on crg class. |
+| 134 | 134 | 135 | 1 | GNSS HB | uint8 | s/10 — ⚠ Pending: always 0. Requires `lastMsgRx_ms` on gnss class. |
 | 135 | 135 | 136 | 1 | GNSS SOLN STATUS | uint8 | enum |
 | 136 | 136 | 137 | 1 | GNSS POS TYPE | uint8 | enum |
 | 137 | 137 | 138 | 1 | INS SOLN STATUS | uint8 | enum |
@@ -946,8 +964,8 @@ Embedded sub-registers:
 | 6 | 6 | 8 | 2 | dt_us | uint16 | µs in processing loop |
 | 8 | 8 | 9 | 1 | BDC DEVICE_ENABLED_BITS | uint8 | 0:NTP; 1:GIMBAL; 2:FUJI; 3:MWIR; 4:FSM; 5:JETSON; 6:INCL; 7:PTP *(BDC_DEVICES::PTP — session 32)* |
 | 9 | 9 | 10 | 1 | BDC DEVICE_READY_BITS | uint8 | 0:NTP; 1:GIMBAL; 2:FUJI; 3:MWIR; 4:FSM; 5:JETSON; 6:INCL; 7:PTP *(ptp.isSynched — session 32)* |
-| 10 | 10 | 11 | 1 | BDC STAT BITS | uint8 | 0:isReady; 1–6:RES *(ntpUsingFallback/ntpHasFallback moved to TIME_BITS byte 391 — session 32)*; 7:RES *(was isUnsolicitedModeEnabled — retired session 35)* |
-| 11 | 11 | 12 | 1 | BDC STAT BITS2 | uint8 | 0:isPidEnabled; 1:isVPidEnabled; 2:isFTTrackEnabled; 3:isVicorEnabled; 4:isRelay1En; 5:isRelay2En; 6:isRelay3En; 7:isRelay4En |
+| 10 | 10 | 11 | 1 | BDC HEALTH_BITS | uint8 | 0:isReady; 1:isSwitchEnabled(V2 only, 0 on V1); 2–7:RES ⚠ **Breaking change v3.5.1** — renamed from `BDC STAT BITS`. Old layout: 0:isReady; 1–6:RES; 7:RES (isUnsolicitedModeEnabled retired session 35). Read HW_REV [392] — bit 1 always 0 on V1. |
+| 11 | 11 | 12 | 1 | BDC POWER_BITS | uint8 | 0:isPidEnabled; 1:isVPidEnabled; 2:isFTTrackEnabled; 3:isVicorEnabled; 4:isRelay1En; 5:isRelay2En; 6:isRelay3En; 7:isRelay4En ⚠ **Renamed v3.5.1** from `BDC STAT BITS2` — bit layout unchanged. |
 | 12 | 12 | 20 | 8 | epoch Time (PTP/NTP) | uint64 | ms since epoch — PTP when synched, NTP otherwise |
 | 20 | 20 | 21 | 1 | GIMBAL STATUS BITS | uint8 | 0:isReady; 1:isConnected; 2:isStarted; 3–7:RES |
 | 21 | 21 | 25 | 4 | Gimbal Pan Count | int32 | from galil (dr) |
@@ -1023,9 +1041,13 @@ Embedded sub-registers:
 | 383 | 383 | 387 | 4 | BDC VERSION WORD | uint32 | |
 | 387 | 387 | 391 | 4 | MCU Temp | float | °C |
 | 391 | 391 | 392 | 1 | TIME_BITS | uint8 | bit0:isPTP_Enabled; bit1:ptp.isSynched; bit2:usingPTP; bit3:ntp.isSynched; bit4:ntpUsingFallback; bit5:ntpHasFallback; bit6–7:RES — session 32 |
-| 392 | 392 | 512 | 120 | RESERVED | — | 0x00 — headroom to 512 |
+| 392 | 392 | 393 | 1 | HW_REV | uint8 | `0x01`=V1 (original hardware); `0x02`=V2 (Controller 1.0 Rev A). Read before interpreting HEALTH_BITS [10] bit 1. — v3.5.1 |
+| 393 | 393 | 394 | 1 | TEMP_RELAY | int8 | Relay area NTC thermistor °C. V2 live; V1 always `0x00`. — v3.5.1 |
+| 394 | 394 | 395 | 1 | TEMP_BAT | int8 | Battery-in area NTC thermistor °C. V2 live; V1 always `0x00`. — v3.5.1 |
+| 395 | 395 | 396 | 1 | TEMP_USB | int8 | USB 5V area NTC thermistor °C. V2 live; V1 always `0x00`. — v3.5.1 |
+| 396 | 396 | 512 | 116 | RESERVED | — | 0x00 — headroom to 512 |
 
-**Defined: 392 bytes. Reserved: 120 bytes. Fixed block: 512 bytes.**
+**Defined: 396 bytes. Reserved: 116 bytes. Fixed block: 512 bytes.**
 
 > ⚠ **FSM position note:** `FSM_X/Y` (int16, commanded) differs from `FSM Pos X/Y` in the FMC
 > pass-through (int32, ADC readback). Reconciliation pending — see Action Items.
