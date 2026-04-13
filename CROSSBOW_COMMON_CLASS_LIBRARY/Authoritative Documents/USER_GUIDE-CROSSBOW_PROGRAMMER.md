@@ -225,7 +225,7 @@ If the text area is empty or the response looks truncated, the board may still b
 
 | Command | Description |
 |---|---|
-| `STATE <n>` | Set system state: 0=OFF, 1=STNDBY, 2=ISR, 3=COMBAT, 0xAA=MAINT, 0xFF=FAULT |
+| `STATE <n>` | Set system state: 0=OFF, 1=STNDBY, 2=ISR, 3=COMBAT, 4=MAINT, 5=FAULT |
 | `MODE <n>` | Set gimbal mode: 0=OFF, 1=POS, 2=RATE, 3=CUE, 4=ATRACK, 5=FTRACK |
 | `TEMP <10–40>` | Set chiller target temperature in °C (firmware clamps to [10, 40]) |
 | `FAN <ch> <spd>` | Set input fan speed: ch=0 or 1, spd=0=OFF / 1=LO / 2=HI |

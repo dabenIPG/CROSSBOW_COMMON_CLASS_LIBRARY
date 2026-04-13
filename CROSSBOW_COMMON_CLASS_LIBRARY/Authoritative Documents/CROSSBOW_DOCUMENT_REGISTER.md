@@ -39,28 +39,28 @@ This register is the canonical reference for all CROSSBOW project documents. It 
   <td><code>CROSSBOW_ICD_INT_ENG.docx</code></td>
   <td>CROSSBOW ICD — Internal Engineering</td>
   <td>IPGD-0003</td>
-  <td>3.4.0</td>
-  <td>✅ Current</td>
-  <td>2026-04-08</td>
+  <td>3.6.0</td>
+  <td>⚠️ .md current — docx pending regen</td>
+  <td>2026-04-13</td>
   <td><code>CROSSBOW_ICD_INT_ENG.md</code></td>
   <td><code>gen_eng_icd.js</code></td>
 </tr>
 <tr>
-  <td colspan="8"><em>Full internal engineering ICD covering all five controllers (MCC, BDC, TMC, FMC, TRC) — all INT_ENG and INT_OPS commands, full register layouts, ASCII command reference, and enumeration definitions. Classification: IPG Internal Use Only. Issued to IPG engineering staff only. Note: source .md is at v3.5.2 (2026-04-11) — docx not yet regenerated from latest source.</em></td>
+  <td colspan="8"><em>Full internal engineering ICD covering all five controllers (MCC, BDC, TMC, FMC, TRC) — all INT_ENG and INT_OPS commands, full register layouts, ASCII command reference, and enumeration definitions. Classification: IPG Internal Use Only. Issued to IPG engineering staff only. v3.6.0 (2026-04-13): CB-20260412 command space restructuring, FW v4.0.0 fleet-wide, FW-C10 REG1 CMD_BYTE 0xA1→0x00.</em></td>
 </tr>
 
 <tr>
   <td><code>CROSSBOW_ICD_INT_OPS.docx</code></td>
   <td>CROSSBOW ICD — Internal Operations</td>
   <td>IPGD-0004</td>
-  <td>3.3.8</td>
-  <td>✅ Current</td>
-  <td>2026-04-07</td>
+  <td>3.6.0</td>
+  <td>⚠️ .md current — docx pending regen</td>
+  <td>2026-04-13</td>
   <td><code>CROSSBOW_ICD_INT_OPS.md</code></td>
   <td><code>gen_int_ops_icd.js</code></td>
 </tr>
 <tr>
-  <td colspan="8"><em>ICD for Tier 1 integrators and vendor HMI builders — full A3 operator command set (MCC and BDC via port 10050, magic 0xCB 0x58). Reference spec for THEIA and bespoke HMI implementations. Classification: CONTROLLED. Distributed to Tier 1 integrators alongside IPGD-0005.</em></td>
+  <td colspan="8"><em>ICD for Tier 1 integrators and vendor HMI builders — full A3 operator command set (MCC and BDC via port 10050, magic 0xCB 0x58). Reference spec for THEIA and bespoke HMI implementations. Classification: CONTROLLED. Distributed to Tier 1 integrators alongside IPGD-0005. v3.6.0 (2026-04-13): CB-20260412 command space restructuring, FW v4.0.0, FW-C10 REG1 CMD_BYTE note.</em></td>
 </tr>
 
 <tr>
@@ -197,28 +197,28 @@ This register is the canonical reference for all CROSSBOW project documents. It 
   <td>—</td>
   <td>CROSSBOW System Architecture</td>
   <td>IPGD-0006</td>
-  <td>3.3.4</td>
-  <td>✅ Current</td>
-  <td>2026-04-08</td>
+  <td>3.3.7</td>
+  <td>⚠️ Pending ARCH-1 update pass</td>
+  <td>2026-04-11</td>
   <td><code>ARCHITECTURE.md</code></td>
   <td>—</td>
 </tr>
 <tr>
-  <td colspan="8"><em>System architecture reference. Covers subsystem relationships, interface topology, A1/A2/A3 port assignments, data flows, client access model, and MCC PTP/NTP time source architecture. Note: source .md is at v3.3.7 (2026-04-11) — register not yet updated to reflect BDC unification (v3.3.6) and FMC STM32F7 port (v3.3.7) entries.</em></td>
+  <td colspan="8"><em>System architecture reference. Covers subsystem relationships, interface topology, A1/A2/A3 port assignments, data flows, client access model, and MCC PTP/NTP time source architecture. v3.3.7 (2026-04-11): FMC STM32F7 migration, BDC V1/V2 unification. Pending ARCH-1: CB-20260412 command space, FW v4.0.0, V1/V2 subsections for all controllers, FW_PATTERNS appendix updates, ICD ref bump to v3.6.0.</em></td>
 </tr>
 
 <tr>
   <td>—</td>
   <td>CROSSBOW Changelog and Action Item Register</td>
   <td>IPGD-0019</td>
-  <td>1.0.0</td>
+  <td>1.2.0</td>
   <td>✅ Current</td>
-  <td>2026-04-12</td>
+  <td>2026-04-13</td>
   <td><code>CROSSBOW_CHANGELOG.md</code></td>
   <td>—</td>
 </tr>
 <tr>
-  <td colspan="8"><em>Unified changelog and action item register. Part 1: session-by-session narrative log. Part 2: all open action items (priority-ordered, subsystem-grouped by FW controller and SW component). Part 3: full closure archive grouped by session. Supersedes unregistered working files <code>Embedded_Controllers_ACTION_ITEMS.md</code> and <code>Embedded_Controllers_CLOSED_ACTION_ITEMS.md</code> (both retired — see §5). Classification: IPG Internal Use Only.</em></td>
+  <td colspan="8"><em>Unified changelog and action item register. Part 1: session-by-session narrative log. Part 2: all open action items (priority-ordered, subsystem-grouped by FW controller and SW component). Part 3: full closure archive grouped by session. v1.2.0 (2026-04-13): CB-20260412 fleet-wide pass complete (MCC/BDC/TMC/FMC/TRC), BDC/TMC/FMC unification sessions captured, all TRC migration items captured. Supersedes unregistered working files <code>Embedded_Controllers_ACTION_ITEMS.md</code> and <code>Embedded_Controllers_CLOSED_ACTION_ITEMS.md</code> (both retired). Classification: IPG Internal Use Only.</em></td>
 </tr>
 
 <tr>
@@ -240,14 +240,13 @@ This register is the canonical reference for all CROSSBOW project documents. It 
   <td>GStreamer Installation Guide</td>
   <td>IPGD-0008</td>
   <td>3.0.0</td>
-  <td>✅ Current</td>
-  <td>2026-03-16</td>
+  <td>⚠️ Active — update pass pending (GST-1)</td>
+  <td>2026-03-15</td>
   <td><code>GSTREAMER_INSTALL.md</code></td>
   <td>—</td>
 </tr>
 <tr>
-  <td colspan="8"><em>Installation and configuration guide for GStreamer on CROSSBOW platform targets. Covers package dependencies, pipeline configuration, and video stream verification.</em></td>
-</tr>
+  <td colspan="8"><em>Installation and configuration guide for GStreamer on THEIA operator PC (Windows MSVC). Covers install, nvh264dec/avdec_h264, verified pipeline parameters, unicast/multicast config, EmguCV notes, and known quirks. v3.0.0 (2026-03-15). Pending GST-1 update: §8 multicast references retired 0xD1 ORIN_SET_STREAM_MULTICAST (multicast now via --dest-host launch flag ✅ working); §11 30fps references retired 0xD2; TRC binary name `multi_streamer` → `trc`. Pipeline parameters (buffer, latency, PixelShift) confirmed correct.</em></td>
 
 <tr>
   <td>—</td>
@@ -282,13 +281,27 @@ This register is the canonical reference for all CROSSBOW project documents. It 
   <td>OpenCV CUDA DNN Build Procedure</td>
   <td>IPGD-0017</td>
   <td>1.0</td>
-  <td>✅ Current</td>
-  <td>2026-03-16</td>
+  <td>⛔ Archived — superseded by JETSON_SETUP.md (IPGD-0020)</td>
+  <td>2026-03-09</td>
   <td><code>OPENCV_CUDA_BUILD.md</code></td>
   <td>—</td>
 </tr>
 <tr>
-  <td colspan="8"><em>Build procedure for OpenCV 4.11.0 with CUDA DNN on Jetson Orin NX (aarch64/JetPack). Covers prerequisites, cmake flags, verification steps, COCO inference probe, and troubleshooting. Required for TRC COCO hardware validation.</em></td>
+  <td colspan="8"><em>Gen 2 build procedure for OpenCV 4.11.0/4.12.0 with CUDA DNN on Jetson Orin NX. Superseded by JETSON_SETUP.md (IPGD-0020) Phase 1 which covers Gen 3 (4.13.0). References stale binary name `multi_streamer` and path `~/CV/TRCv3/v20/`. Archived as historical record alongside OPENCV_BUILD_HISTORY.md. Active procedure: IPGD-0020 + `install_opencv4_13_0_Jetpack6_2_2.sh`.</em></td>
+</tr>
+
+<tr>
+  <td>—</td>
+  <td>OpenCV Build History — Jetson Orin NX</td>
+  <td>IPGD-0017a</td>
+  <td>—</td>
+  <td>⛔ Archived — cmake flag rationale preserved for future upgrades</td>
+  <td>2026-04-09</td>
+  <td><code>OPENCV_BUILD_HISTORY.md</code></td>
+  <td><code>install_opencv4_13_0_Jetpack6_2_2.sh</code></td>
+</tr>
+<tr>
+  <td colspan="8"><em>Three-generation build history (Gen1: 4.8.0 apt, Gen2: 4.12.0, Gen3: 4.13.0). Contains cmake flag comparison table and issue rationale (OPENCV_DNN_CUDA discovery, dist-packages vs site-packages, TBB fix, CUDA_FAST_MATH rationale) — valuable for future OpenCV upgrades. Verification sections reference stale paths. Archived. The cmake flag rationale table should be appended to JETSON_SETUP.md (IPGD-0020) on next update. Companion script `install_opencv4_13_0_Jetpack6_2_2.sh` remains active — referenced by IPGD-0020.</em></td>
 </tr>
 
 <tr>
@@ -302,7 +315,35 @@ This register is the canonical reference for all CROSSBOW project documents. It 
   <td>—</td>
 </tr>
 <tr>
-  <td colspan="8"><em>NovAtel GNSS receiver configuration reference. Covers network/IP setup, WiFi disable, ICOM UDP config, receiver mode/PPP, antenna lever arm offsets, IMU orientation, PTP grandmaster configuration (PTPMODE ENABLE_FINETIME, PTPTIMESCALE UTC_TIME), MCC data stream setup, and full commissioning sequence. IPG Internal Use Only.</em></td>
+  <td colspan="8"><em>NovAtel GNSS receiver configuration reference. Covers network/IP setup, WiFi disable, ICOM UDP config, receiver mode/PPP, antenna lever arm offsets, IMU orientation, PTP grandmaster configuration (PTPMODE ENABLE_FINETIME, PTPTIMESCALE UTC_TIME), MCC data stream setup, and full commissioning sequence. IPG Internal Use Only. ⚠️ Document header incorrectly states IPGD-0007 — correct number is IPGD-0018. Fix on next edit. Minor: §7 step numbering skips step 4; two sub-sections labelled "3.1".</em></td>
+</tr>
+
+<tr>
+  <td>—</td>
+  <td>TRC Jetson Orin NX Setup Procedure</td>
+  <td>IPGD-0020</td>
+  <td>2.2.1</td>
+  <td>✅ Current</td>
+  <td>2026-04-10</td>
+  <td><code>JETSON_SETUP.md</code></td>
+  <td>—</td>
+</tr>
+<tr>
+  <td colspan="8"><em>Full setup and deployment procedure for TRC Jetson Orin NX (non-Super J4012, J401 carrier, JetPack 6.2.2). Covers four deployment paths: A=fresh build, B=image restore (including upgrades), C=retired, D=Super J4012 (future). Includes SDK Manager flash, OpenCV 4.13.0 build, VimbaX 2026-1, GStreamer, TRC binary deployment, overlayFS read-only rootfs, and gold image creation. Confirmed on 3 units (54 PASS, 0 FAIL). Binary: `~/CV/TRC/trc`. Startup: `trc_start.sh`/`trc_start_bench.sh`. IPG Internal Use Only.</em></td>
+</tr>
+
+<tr>
+  <td>—</td>
+  <td>TRC Jetson Super J4012 Setup Procedure</td>
+  <td>IPGD-0021</td>
+  <td>—</td>
+  <td>⏳ Pending</td>
+  <td>—</td>
+  <td><code>JETSON_SUPER_SETUP.md</code></td>
+  <td>—</td>
+</tr>
+<tr>
+  <td colspan="8"><em>Setup procedure for reComputer Super J4012 (new carrier, higher TDP, Super Mode support). Not yet written — Super J4012 units share TRC role IP 192.168.1.22 but are mechanically incompatible with non-Super images. Do not apply JETSON_SETUP.md (IPGD-0020) to Super units. See JETSON_SETUP.md §Overview Path D for placeholder.</em></td>
 </tr>
 
 </tbody>

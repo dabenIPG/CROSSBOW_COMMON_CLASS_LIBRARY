@@ -15,6 +15,10 @@
 **v3.6.0 changes (ICD command space restructuring — 2026-04-12 CB-20260412):**
 A block fully assigned INT_OPS — all 16 slots active commands. See `CROSSBOW_CHANGELOG.md` (IPGD-0019) CB-20260412 entry for full design rationale.
 
+**CB-20260412 firmware version:** All five controllers target `VERSION_PACK(4,0,0)`. This is a major bump driven by the breaking command space restructuring. Clients use `FW_VERSION >> 24 >= 4` (IsV4) to gate v4.0.0 behaviour.
+
+**FW-C10 — REG1 CMD_BYTE change:** REG1 payload byte [0] (`cmd_byte`) changes from `0xA1` (legacy `RES_A1` outbound marker) to `0x00` in v4.0.0. C# parsers must accept both `0x00` (v4.0.0+) and `0xA1` (legacy pre-FW-C10) as valid REG1 frames. The byte carries no semantic meaning — it is a framing artefact only. Applies to all five controllers.
+
 New commands assigned:
 - `0xA1 SET_HEL_TRAINING_MODE` — moved from `0xAF`. Promoted INT_ENG→INT_OPS. Safety enforced in firmware (10% power clamp), not scope.
 - `0xA3 SET_TIMESRC` — new time source control. INT_OPS, all five controllers, routing by IP. Prerequisite: FW-C8 (rejection handler removal at `0xA3` first).
@@ -1214,12 +1218,11 @@ fixed block (bytes 60–123). Fixed block size: **64 bytes**.
 > initialised to `VERSION_PACK(3,0,1) = 0x03000001`. Wire format unchanged — `version_word` field at
 > bytes [1–4] still carries `VERSION_PACK(major, minor, patch)`.
 >
-> **Version word encoding — controller comparison:**
-> - **TRC:** `VERSION_PACK(3,0,1)` via `version.h` macro — semver only
-> - **MCC:** `VERSION_PACK(3,1,0)` = `0x03001000` *(updated session 28 — PTP integration)*
-> - **BDC / FMC:** `VERSION_PACK(3,0,1)` = `0x03000001`
-> - **TMC:** `VERSION_PACK(3,0,2)` = `0x03000002`
-> - **MCC / BDC / TMC / FMC:** legacy date-bitfield `versionPacked` — semver migration pending (open item #13)
+> **Version word encoding — controller comparison (CB-20260412):**
+> - **All five controllers:** `VERSION_PACK(4,0,0)` = `0x04000000` — CB-20260412 fleet-wide version bump
+> - **IsV4 gate:** `FW_VERSION >> 24 >= 4` — clients use this to detect ICD v3.6.0 command space
+>
+> *(Previous versions: TRC `3.0.2`, MCC `3.3.1`, BDC `3.3.1`, TMC `3.3.4`, FMC `3.3.0` — all superseded)*
 
 > **Implementation note:** `ntpEpochTime` is populated from `std::chrono::system_clock`,
 > NTP-synchronized at the Jetson OS level.

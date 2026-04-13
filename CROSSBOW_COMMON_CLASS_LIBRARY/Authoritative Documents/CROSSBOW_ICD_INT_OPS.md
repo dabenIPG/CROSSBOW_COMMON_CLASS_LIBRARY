@@ -12,6 +12,10 @@
 **v3.6.0 changes (ICD command space restructuring — 2026-04-12 CB-20260412):**
 A block fully INT_OPS — all 16 slots active. Changes affecting INT_OPS clients:
 
+**CB-20260412 firmware version:** All five controllers target `VERSION_PACK(4,0,0)`. Clients gate v4.0.0 behaviour using `FW_VERSION >> 24 >= 4` (IsV4 / SW_MAJOR >= 4).
+
+**FW-C10 — REG1 CMD_BYTE change:** REG1 frame byte [3] (CMD_BYTE) changes from `0xA1` to `0x00` in v4.0.0 firmware. INT_OPS clients must accept both `0x00` (v4.0.0+) and `0xA1` (legacy) as valid REG1 frames.
+
 - `0xA1 SET_HEL_TRAINING_MODE` — moved from `0xAF`. Now accessible at `0xA1`. Promoted INT_ENG→INT_OPS — safety enforced in firmware (10% power clamp), not scope restriction.
 - `0xA2 SET_NTP_CONFIG` — promoted INT_ENG→INT_OPS. Now accessible via A3. 0 bytes=resync; 1 byte=set primary octet; 2 bytes=set primary+fallback. Routing by destination IP.
 - `0xA3 SET_TIMESRC` — new command. INT_OPS, all five controllers, routing by IP. Controls PTP/NTP time source selection. Payload: `0=OFF, 1=NTP, 2=PTP, 3=AUTO`. ⚠ Pending FW-C8 (rejection handler removal) before live in firmware.
