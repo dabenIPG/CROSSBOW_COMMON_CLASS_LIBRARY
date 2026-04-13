@@ -253,11 +253,6 @@ namespace CROSSBOW
             set { Send(BuildA2Frame((byte)ICD.SET_UNSOLICITED, new[] { (byte)(value ? 1 : 0) })); }
         }
 
-        // 0xA1 GET_REGISTER1
-        public void REQ_REG_01()
-        {
-            Send(BuildA2Frame((byte)ICD.RES_A1));
-        }
 
         // 0xA2 SET_NTP_CONFIG (INT only)
         // 0 bytes  = force resync on current server

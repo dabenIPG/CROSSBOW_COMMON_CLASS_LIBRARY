@@ -131,6 +131,8 @@ namespace CROSSBOW
                 return $"{major}.{minor}.{patch}";
             }
         }
+        public uint FW_MAJOR => (FW_VERSION >> 24) & 0xFF;   // firmware major version
+        public bool IsV4 => FW_MAJOR >= 4;                   // true = ICD v3.6.0 command space (v4.0.0+)
 
         // MCU Temperature
         public float TEMP_MCU { get; private set; } = 0;
@@ -189,7 +191,7 @@ namespace CROSSBOW
             Array.Copy(frame, PAYLOAD_OFFSET, payload, 0, PAYLOAD_LEN);
 
             byte cmd = payload[0];
-            if (cmd == (byte)ICD.RES_A1)
+            if (cmd == 0x00 || cmd == 0xA1)  // REG1 CMD_BYTE: 0x00 (v4.0.0) | 0xA1 (legacy pre-FW-C10)
                 ParseMSG01(payload, 0);
             //else if (cmd == (byte)ICD.GET_REGISTER2)
             //    ParseMSG02(payload, 0);

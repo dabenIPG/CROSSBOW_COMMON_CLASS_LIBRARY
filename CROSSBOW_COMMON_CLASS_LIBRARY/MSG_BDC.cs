@@ -81,6 +81,8 @@ namespace CROSSBOW
                 return $"{major}.{minor}.{patch}";
             }
         }
+        public uint FW_MAJOR => (FW_VERSION >> 24) & 0xFF;   // firmware major version
+        public bool IsV4 => FW_MAJOR >= 4;
 
         // ── Status / device bits ──────────────────────────────────────────────
         public byte DeviceEnabledBits { get; private set; } = 0;
@@ -304,7 +306,7 @@ namespace CROSSBOW
             lastMsgRx = now;
 
             ICD cmd = (ICD)frame[3];
-            if (cmd == ICD.RES_A1 || cmd == ICD.FRAME_KEEPALIVE)
+            if ((byte)cmd == 0x00 || (byte)cmd == 0xA1 || cmd == ICD.FRAME_KEEPALIVE)  // REG1 CMD_BYTE: 0x00 (v4.0.0) | 0xA1 (legacy pre-FW-C10)
                 ParseMSG01(frame, PAYLOAD_OFFSET + 1);
         }
 
@@ -319,7 +321,7 @@ namespace CROSSBOW
             int ndx = 0;
             ICD cmd = (ICD)msg[ndx]; ndx++;
 
-            if (cmd == ICD.RES_A1 || cmd == ICD.FRAME_KEEPALIVE)
+            if ((byte)cmd == 0x00 || (byte)cmd == 0xA1 || cmd == ICD.FRAME_KEEPALIVE)  // REG1 CMD_BYTE: 0x00 (v4.0.0) | 0xA1 (legacy pre-FW-C10)
                 ParseMSG01(msg, ndx);
         }
 
@@ -596,7 +598,7 @@ namespace CROSSBOW
             get
             {
                 if (usingPTP) return "PTP";
-                if (isNTP_DeviceReady) return ntpUsingFallback ? "NTP (fallback)" : "NTP";
+                if (tb_isNTP_Synched) return ntpUsingFallback ? "NTP (fallback)" : "NTP";
                 return "NONE";
             }
         }

@@ -4,7 +4,7 @@
 // StatusBits0 at BDC REG1 byte [59] is set externally before ParseMsg().
 //
 // TRC REG1 layout (64 bytes):
-//   [0]      cmd_byte        uint8   always 0xA1
+//   [0]      cmd_byte        uint8   0x00 (v4.0.0) | 0xA1 (legacy pre-FW-C10)
 //   [1–4]    version_word    uint32
 //   [5]      systemState     uint8
 //   [6]      systemMode      uint8
@@ -66,6 +66,8 @@ namespace CROSSBOW
                 return $"{major}.{minor}.{patch}";
             }
         }
+        public uint SW_MAJOR => (SW_VERSION_WORD >> 24) & 0xFF;   // software major version
+        public bool IsV4 => SW_MAJOR >= 4;                        // true = ICD v3.6.0 command space (v4.0.0+)
 
         private Int64   _ntpTime { get; set; } = 0;
         public DateTime ntpTime  { get { return DateTimeOffset.FromUnixTimeMilliseconds(_ntpTime).UtcDateTime; } }
@@ -120,7 +122,7 @@ namespace CROSSBOW
             RX_HB     = (DateTime.UtcNow - lastMsgRx).TotalMilliseconds;
             lastMsgRx = DateTime.UtcNow;
 
-            ndx++;                                                                          // [0]  cmd_byte (0xA1)
+            ndx++;                                                                          // [0]  cmd_byte (0x00 v4.0.0 | 0xA1 legacy)
 
             SW_VERSION_WORD   = BitConverter.ToUInt32(rxBuff, ndx); ndx += sizeof(UInt32); // [1–4]
             System_State      = (SYSTEM_STATES)rxBuff[ndx]; ndx++;                        // [5]

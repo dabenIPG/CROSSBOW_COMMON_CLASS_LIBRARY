@@ -2,12 +2,35 @@
 
 **Document:** `CROSSBOW_ICD_INT_OPS`
 **Doc #:** IPGD-0004
-**Version:** 3.5.1
-**Date:** 2026-04-11 (BDC V1/V2 hardware unification)
+**Version:** 3.6.0
+**Date:** 2026-04-12 (ICD command space restructuring — CB-20260412)
 
 ---
 
 ## Version History
+
+**v3.6.0 changes (ICD command space restructuring — 2026-04-12 CB-20260412):**
+A block fully INT_OPS — all 16 slots active. Changes affecting INT_OPS clients:
+
+- `0xA1 SET_HEL_TRAINING_MODE` — moved from `0xAF`. Now accessible at `0xA1`. Promoted INT_ENG→INT_OPS — safety enforced in firmware (10% power clamp), not scope restriction.
+- `0xA2 SET_NTP_CONFIG` — promoted INT_ENG→INT_OPS. Now accessible via A3. 0 bytes=resync; 1 byte=set primary octet; 2 bytes=set primary+fallback. Routing by destination IP.
+- `0xA3 SET_TIMESRC` — new command. INT_OPS, all five controllers, routing by IP. Controls PTP/NTP time source selection. Payload: `0=OFF, 1=NTP, 2=PTP, 3=AUTO`. ⚠ Pending FW-C8 (rejection handler removal) before live in firmware.
+- `0xA9 SET_REINIT` — new unified reinitialise command. Replaces `0xB0` (BDC) and `0xE0` (MCC). Routing implicit by destination IP. Payload: `uint8 subsystem` (controller-specific).
+- `0xAA SET_DEVICES_ENABLE` — new unified device enable/disable. Replaces `0xBE` (INT_ENG, not in this doc) and `0xE1` (MCC). Routing implicit by destination IP. Payload: `uint8 device; uint8 0/1`.
+- `0xAB SET_FIRE_VOTE` — laser fire vote. Moved from `0xE6` (INT_ENG). Promoted to INT_OPS. Heartbeat required — vote drops on disconnect.
+- `0xAF SET_CHARGER` — new merged charger command. Replaces `0xE3` (PMS_CHARGER_ENABLE) and `0xED` (PMS_SET_CHARGER_LEVEL, was INT_ENG). Level required on every call. V1 only.
+- `0xD1 ORIN_ACAM_COCO_ENABLE` — moved from `0xDF`. Now accessible at `0xD1`.
+
+**⚠️ HMI implementation note:** `defines.cs` enum values for the following names change. Code using enum names is unaffected — only recompile required. Changed: `SET_HEL_TRAINING_MODE` (`0xAF`→`0xA1`), `ORIN_ACAM_COCO_ENABLE` (`0xDF`→`0xD1`). New: `SET_REINIT`, `SET_DEVICES_ENABLE`, `SET_FIRE_VOTE`, `SET_CHARGER`, `SET_TIMESRC`. Removed: `SET_BDC_REINIT`, `SET_MCC_REINIT`, `SET_MCC_DEVICES_ENABLE`, `PMS_CHARGER_ENABLE`, `PMS_SET_FIRE_REQUESTED_VOTE`. See DEF-1 (IPGD-0019) for full list.
+
+Retired from INT_OPS (removed from this document):
+- `0xB0 SET_BDC_REINIT` — superseded by `0xA9 SET_REINIT`
+- `0xD8 ORIN_SET_TESTPATTERN` — retired; ASCII `TESTSRC` covers ENG use
+- `0xDF ORIN_ACAM_COCO_ENABLE` — moved to `0xD1`
+- `0xE0 SET_MCC_REINIT` — superseded by `0xA9 SET_REINIT`
+- `0xE1 SET_MCC_DEVICES_ENABLE` — superseded by `0xAA SET_DEVICES_ENABLE`
+- `0xE3 PMS_CHARGER_ENABLE` — merged into `0xAF SET_CHARGER`
+- `0xED PMS_SET_CHARGER_LEVEL` — merged into `0xAF SET_CHARGER`
 
 **v3.5.1 changes (BDC unification — 2026-04-11):**
 - BDC FW version bumped: `3.2.0` → `3.3.0`.
@@ -232,18 +255,21 @@ For EXT_OPS interface definition see `CROSSBOW_ICD_EXT_OPS` (IPGD-0005).
 | Byte | Enum | Description | Payload | INT_OPS Target |
 |------|------|-------------|---------|----------------|
 | 0xA0 | SET_UNSOLICITED | Subscribe/unsubscribe to unsolicited telemetry push. Sets per-slot `wantsUnsolicited` on the sender's client table entry. `{0x01}` = subscribe; `{0x00}` = unsubscribe. | uint8 0=off, 1=on | MCC, BDC |
-| 0xA1 | RES_A1 | **RETIRED inbound (session 35)** — returns `STATUS_CMD_REJECTED`. `0xA1` remains the outbound `CMD_BYTE` in REG1 frames. Use `0xA4 {0x01}` for solicited REG1. | — | MCC, BDC |
-| 0xA2 | SET_NTP_CONFIG | **INT_ENG only** — NTP server configuration and resync. Not available on A3 external port. See INT_ENG ICD (IPGD-0003) for full specification. | — | MCC |
-| 0xA3 | RES_A3 | **RETIRED (session 35)** — returns `STATUS_CMD_REJECTED`. | — | MCC, BDC |
-| 0xA4 | FRAME_KEEPALIVE | Register/keepalive — replaces `EXT_FRAME_PING` (session 35). Empty payload = ACK only (byte 0=`0x01`, bytes 1–2=echo SEQ_NUM, bytes 3–6=uptime_ms). Payload `{0x01}` = ACK + solicited REG1 (rate-gated 1 Hz per slot; suppressed if subscribed). Any accepted frame auto-registers sender and refreshes 60-second liveness. | 0 or 1 byte | MCC, BDC |
+| 0xA1 | SET_HEL_TRAINING_MODE | Set training/combat mode — training clamps laser power to 10% regardless of `SET_HEL_POWER`. **Moved from `0xAF` (v3.6.0). Promoted to INT_OPS** — safety enforced in firmware, not scope. | uint8 0=COMBAT, 1=TRAINING | MCC |
+| 0xA2 | SET_NTP_CONFIG | Configure NTP server and/or force resync. **Promoted INT_ENG→INT_OPS (v3.6.0).** 0 bytes = force resync on current server. 1 byte `[p]` = set primary server to `192.168.1.p` + resync. 2 bytes `[p, f]` = set primary + fallback + resync. Routing by destination IP. | 0–2 bytes (see description) | MCC, BDC |
+| 0xA3 | SET_TIMESRC | Set active time source. **New v3.6.0.** Controls PTP/NTP selection. Routing by destination IP — each controller applies independently. ⚠ Pending FW-C8 (handler removal) before live. | uint8 0=OFF, 1=NTP, 2=PTP, 3=AUTO | MCC, BDC |
+| 0xA4 | FRAME_KEEPALIVE | Register/keepalive. Empty payload = ACK only (byte 0=`0x01`, bytes 1–2=echo SEQ_NUM, bytes 3–6=uptime_ms). Payload `{0x01}` = ACK + solicited REG1 (rate-gated 1 Hz per slot; suppressed if subscribed). Any accepted frame auto-registers sender and refreshes 60-second liveness. | 0 or 1 byte | MCC, BDC |
 | 0xA5 | SET_SYSTEM_STATE | Set system state | uint8 (SYSTEM_STATES enum) | MCC, BDC |
 | 0xA6 | SET_GIMBAL_MODE | Set gimbal/tracker mode | uint8 (BDC_MODES enum) | MCC, BDC |
 | 0xA7 | SET_LCH_MISSION_DATA | Load LCH/KIZ mission data, clear all windows | uint8 which (0=KIZ,1=LCH); uint8 isValid; uint64 startTimeMission_min; uint64 stopTimeMission_max; int16 az1; int16 el1; int16 az2; int16 el2; uint16 nTargets; uint16 nTotalWindows | BDC |
 | 0xA8 | SET_LCH_TARGET_DATA | Load LCH/KIZ target with windows | uint8 which (0=KIZ,1=LCH); uint16 nWindows; uint16 startTimeTarget_min; uint16 stopTimeTarget_max; uint16 az1; uint16 el1; uint16 az2; uint16 el2; nWindows×[uint16 wt1, uint16 wt2] | BDC |
+| 0xA9 | SET_REINIT | Unified controller reinitialise. **New v3.6.0. Replaces `0xB0` (BDC) and `0xE0` (MCC).** Routing implicit by destination IP/port. TMC and FMC not supported. Note: PTP subsystem index differs (BDC=7, MCC=4). | uint8 subsystem (BDC: 0=NTP,1=GIM,2=FUJI,3=MWIR,4=FSM,5=JET,6=INCL,7=PTP; MCC: 0=NTP,1=TMC,2=HEL,3=BAT,4=PTP,5=CRG,6=GNSS,7=BDC) | MCC, BDC |
+| 0xAA | SET_DEVICES_ENABLE | Unified device enable/disable. **New v3.6.0. Replaces `0xE1` (MCC).** Routing implicit by destination IP/port. TMC and FMC not supported. | uint8 device (BDC: 0=NTP,1=GIM,2=FUJI,3=MWIR,4=FSM,5=JET,6=INCL,7=PTP; MCC: 0=NTP,1=TMC,2=HEL,3=BAT,4=PTP,5=CRG,6=GNSS,7=BDC); uint8 0/1 | MCC, BDC |
+| 0xAB | SET_FIRE_VOTE | Laser fire requested vote. **New v3.6.0. Moved from `0xE6` (INT_ENG), promoted to INT_OPS.** Continuous heartbeat required — vote drops on client disconnect. Heartbeat is the safety gate. | uint8 0/1 | MCC |
 | 0xAC | SET_BDC_HORIZ | Set horizon elevation vector | float[360] | BDC |
 | 0xAD | SET_HEL_POWER | Set laser power level | uint8 [0–100] % | MCC |
 | 0xAE | CLEAR_HEL_ERROR | Clear laser error state | none | MCC |
-| 0xAF | SET_HEL_TRAINING_MODE | Set training/combat mode — training clamps power to 10% | uint8 0=COMBAT, 1=TRAINING | MCC |
+| 0xAF | SET_CHARGER | Set charger state and current level. **New v3.6.0. Merges `0xE3` and `0xED`.** Level required on every call — enables and sets level simultaneously. Cannot enable without specifying level; if already enabled, changes level immediately. V1 only — V2 returns STATUS_CMD_REJECTED. | uint8 level: 0=disable, 10=low, 30=med, 55=high | MCC |
 
 ---
 
@@ -251,7 +277,6 @@ For EXT_OPS interface definition see `CROSSBOW_ICD_EXT_OPS` (IPGD-0005).
 
 | Byte | Enum | Description | Payload | INT_OPS Target |
 |------|------|-------------|---------|----------------|
-| 0xB0 | SET_BDC_REINIT | Reinitialise BDC subsystem | uint8 subsystem (0=NTP, 1=GIMBAL, 2=FUJI, 3=MWIR, 4=FSM, 5=JETSON, 6=INCL, 7=PTP) | BDC |
 | 0xB2 | SET_GIM_POS | Set gimbal position | int32 pan, int32 tilt | BDC |
 | 0xB3 | SET_GIM_SPD | Set gimbal speed | int16 pan, int16 tilt | BDC |
 | 0xB4 | SET_CUE_OFFSET | Set cue track offset (AZ, EL) | float az_deg, float el_deg | BDC |
@@ -290,31 +315,26 @@ For EXT_OPS interface definition see `CROSSBOW_ICD_EXT_OPS` (IPGD-0005).
 | Byte | Enum | Description | Payload | INT_OPS Target |
 |------|------|-------------|---------|----------------|
 | 0xD0 | ORIN_CAM_SET_ACTIVE | Set active camera | uint8 BDC_CAM_IDS (0=VIS, 1=MWIR) | BDC |
+| 0xD1 | ORIN_ACAM_COCO_ENABLE | Enable/disable COCO intra-trackbox inference. **Moved from `0xDF` (v3.6.0).** Model must be loaded (ISR lifecycle). Camera switch auto-disables COCO. | uint8 op [, uint8 param]: 0=off, 1=on, 2=load, 3=unload, 4=set_drift, 5=set_interval | BDC |
 | 0xD3 | ORIN_SET_STREAM_OVERLAYS | Set HUD overlay bitmask. bit0=Reticle, bit1=TrackPreview, bit2=TrackBox, bit3=CueChevrons, bit4=AC_Projections, bit5=AC_LeaderLines, bit6=FocusScore, bit7=OSD | uint8 bitmask | BDC |
 | 0xD4 | ORIN_ACAM_SET_CUE_FLAG | Set cue flag indicator (HUD chevrons) | uint8 0/1 | BDC |
 | 0xD5 | ORIN_ACAM_SET_TRACKGATE_SIZE | Set track gate width/height | uint8 w, uint8 h (pixels, min 16) | BDC |
 | 0xD6 | ORIN_ACAM_ENABLE_FOCUSSCORE | Enable focus score computation | uint8 0/1 | BDC |
 | 0xD7 | ORIN_ACAM_SET_TRACKGATE_CENTER | Set track gate preview center (no tracker init) | uint16 x, uint16 y (pixels) | BDC |
-| 0xD8 | ORIN_SET_STREAM_TESTPATTERNS | Enable test pattern for specified camera. | uint8 cam_id (0=VIS, 1=MWIR) + uint8 enable (0=off, 1=on) | BDC |
 | 0xDA | ORIN_ACAM_RESET_TRACKB | Reset MOSSE tracker to current preview gate | none | BDC |
 | 0xDB | ORIN_ACAM_ENABLE_TRACKERS | Enable/disable tracker for active camera | uint8 tracker_id (0=AI, 1=MOSSE, 2=Centroid, 3=Kalman); uint8 0/1 | BDC |
 | 0xDC | ORIN_ACAM_SET_ATOFFSET | Set AT reticle offset | int8 dx, int8 dy (pixels, −128 to 127) | BDC |
 | 0xDD | ORIN_ACAM_SET_FTOFFSET | Set FT (fine-track) offset | int8 dx, int8 dy (pixels, −128 to 127) | BDC |
 | 0xDE | ORIN_SET_VIEW_MODE | Set compositor output view | uint8 (0=CAM1, 1=CAM2, 2=PIP4, 3=PIP8) | BDC |
-| 0xDF | ORIN_ACAM_COCO_ENABLE | Enable/disable COCO intra-trackbox inference. Model must be loaded (ISR lifecycle). Camera switch auto-disables COCO. | uint8 op [, uint8 param]: 0=off, 1=on, 2=load, 3=unload, 4=set_drift, 5=set_interval | BDC |
 
 ---
 
-## 0xE0–0xEF — MCC / PMS / TMS Commands
+## 0xE0–0xEF — MCC / TMS Commands
 
 | Byte | Enum | Description | Payload | INT_OPS Target |
 |------|------|-------------|---------|----------------|
-| 0xE0 | SET_MCC_REINIT | Reinitialise MCC subsystem | uint8 subsystem (0=NTP, 1=TMC, 2=HEL, 3=BAT, 4=PTP, 5=CRG, 6=GNSS, 7=BDC) — index 0=NTP only; index 4=PTP only | MCC |
-| 0xE1 | SET_MCC_DEVICES_ENABLE | Enable/disable MCC-managed device | uint8 device (0=NTP, 1=TMC, 2=HEL, 3=BAT, 4=PTP, 5=CRG, 6=GNSS, 7=BDC); uint8 0/1 — device 4 (PTP): `0` forces NTP-only mode | MCC |
-| 0xE3 | PMS_CHARGER_ENABLE | Enable charger | uint8 0/1 | MCC |
 | 0xE7 | TMS_INPUT_FAN_SPEED | Set fan speed | uint8 which (0/1); uint8 speed (0=off, 128=low, 255=high) | MCC |
 | 0xEB | TMS_SET_TARGET_TEMP | Set TMS target temperature | uint8 temp °C — **enforced range [10–40°C]**; firmware clamps silently. | MCC |
-| 0xED | PMS_SET_CHARGER_LEVEL | Set charger current level | uint8 level (low=10, med=30, high=55) | MCC |
 
 ---
 
@@ -331,9 +351,9 @@ For EXT_OPS interface definition see `CROSSBOW_ICD_EXT_OPS` (IPGD-0005).
 
 ---
 
-## MCC Register 1 — Response to `0xA1`
+## MCC Register 1 (REG1)
 
-Sent by MCC in response to `GET_REGISTER1` (0xA1) or on an unsolicited basis.
+Sent by MCC on an unsolicited basis (when subscribed via `0xA0 SET_UNSOLICITED`) or in response to a solicited request (`0xA4 {0x01}`, rate-gated 1 Hz per slot). Frame CMD_BYTE is `0xA1` — legacy protocol constant, not a command (pending migration to `0x00` per FW-C10).
 Fixed block size: **256 bytes** in payload, always padded to 512-byte payload.
 
 | Byte | From | To | nBytes | Name | Type | Notes |
@@ -420,9 +440,9 @@ Fixed block size: **256 bytes** in payload, always padded to 512-byte payload.
 
 ---
 
-## BDC Register 1 — Response to `0xA1`
+## BDC Register 1 (REG1)
 
-Sent by BDC in response to `GET_REGISTER1` (0xA1) or on an unsolicited basis.
+Sent by BDC on an unsolicited basis (when subscribed via `0xA0 SET_UNSOLICITED`) or in response to a solicited request (`0xA4 {0x01}`, rate-gated 1 Hz per slot). Frame CMD_BYTE is `0xA1` — legacy protocol constant, not a command (pending migration to `0x00` per FW-C10).
 Fixed block size: **512 bytes**.
 
 Embedded sub-registers (opaque to INT_OPS clients — field detail in full ICD):
@@ -627,13 +647,13 @@ TRC (Jetson Orin NX, 192.168.1.22) encodes and streams a single H.264 RTP video 
 
 | Parameter | Value | Notes |
 |-----------|-------|-------|
-| Transport | UDP RTP unicast (default) | Multicast pending — see `0xD1` |
+| Transport | UDP RTP unicast | Production configuration |
 | Destination (unicast) | 192.168.1.208 : 5000 | THEIA operator PC |
 | Port | **5000** (UDP, fixed) | |
 | Protocol | RTP — payload type 96, encoding H264 | |
 | Codec | H.264 hardware encoded | Jetson `nvv4l2h264enc` |
 | Resolution | **1280 × 720** (fixed) | Must be configured explicitly — auto-detect produces invalid frames |
-| Framerate | **60 fps** (fixed) | 30 fps option pending — see `0xD2` |
+| Framerate | **60 fps** (fixed) | Framerate and multicast are compile/launch time config — not runtime-controllable via ICD |
 | Bitrate | **10 Mbps** (fixed) | |
 | E2E latency (HW decode) | 30–80 ms | NVIDIA `nvh264dec` |
 | E2E latency (SW decode) | 50–100 ms | Software `avdec_h264` |
@@ -648,26 +668,6 @@ TRC (Jetson Orin NX, 192.168.1.22) encodes and streams a single H.264 RTP video 
 | Jitter buffer | 50 ms, `drop-on-latency=true` | Absorbs Jetson encoder timing jitter |
 | Resolution | Explicit 1280×720 | Auto-detect produces invalid frames |
 | PixelShift correction | −420 px horizontal | Fixed alignment artefact of Jetson encoder — must be applied in receiver |
-
-### Framerate Control — `0xD2 ORIN_SET_STREAM_60FPS` (Pending)
-
-`0xD2` is defined in this ICD but the firmware handler is not yet implemented.
-
-| Payload | Effect |
-|---------|--------|
-| `{0x01}` | 60 fps (default, current) |
-| `{0x00}` | 30 fps — recommended for software-decode receivers |
-
-### Multicast — `0xD1 ORIN_SET_STREAM_MULTICAST` (Pending)
-
-`0xD1` is defined in this ICD but the firmware handler is not yet implemented.
-
-| Parameter | Value |
-|-----------|-------|
-| Multicast group | `239.127.1.21` (site-local, CROSSBOW reserved) |
-| Port | 5000 (unchanged) |
-| Requirement | Receiver NIC on 192.168.1.x subnet; multicast routing enabled on switch |
-| Benefit | Multiple simultaneous receivers without duplicate unicast streams from TRC |
 
 ---
 

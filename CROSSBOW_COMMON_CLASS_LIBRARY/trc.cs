@@ -49,10 +49,6 @@ namespace CROSSBOW
         public Single VIS_FOCUS_SCORE { get; private set; } = 0;
 
         public bool HUD_Overlays { set { SendUDPBytes(new byte[] { (byte)ICD.ORIN_SET_STREAM_OVERLAYS, Convert.ToByte(value) }); } }
-        public bool EnableTestPatterns { set { SendUDPBytes(new byte[] { (byte)ICD.ORIN_SET_STREAM_TESTPATTERNS, Convert.ToByte(value) }); } }
-        public bool StreamMulticast_Enable { set { SendUDPBytes(new byte[] { (byte)ICD.ORIN_SET_STREAM_MULTICAST, Convert.ToByte(value) }); } }
-        public bool Stream60FPS_Enable { set { SendUDPBytes(new byte[] { (byte)ICD.ORIN_SET_STREAM_60FPS, Convert.ToByte(value) }); } }
-
 
         public void setTrackBox(Point pt)
         {

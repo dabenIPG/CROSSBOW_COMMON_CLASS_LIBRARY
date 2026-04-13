@@ -1,53 +1,49 @@
 # IPG 6K Laser Integration Plan
 **CROSSBOW MCC — HEL Subsystem**
-**Date:** 2026-04-09
-**Status:** Pre-implementation — design locked, pending code
+**Date:** 2026-04-10
+**Status:** Step 1 complete ✅ — validated on YLM-3K hardware. Step 2 (firmware) pending — 6K validation tomorrow before FW work begins.
 
 ---
 
 ## Implementation Sequence
 
-**Step 1 — C# ENG GUI HEL window (direct TCP to laser)**
-Build and validate the direct laser connection in the engineering GUI first. This gives
-us a fast debug loop on the real hardware before touching any firmware. The ENG GUI talks
-directly to the laser over TCP — no MCC in the path. Sense logic, command routing, and
-response parsing are all validated here first.
+**Step 1 — C# ENG GUI HEL window (direct TCP to laser)** ✅ COMPLETE
+Validated on YLM-3000-SM-VV (3K) and YLM-6000-U3-SM (6K) hardware. TCP + UDP coexist
+simultaneously on bench. Both laser models auto-sensed correctly.
 
-**Step 2 — Firmware (`ipg.hpp` / `ipg.cpp` + MCC)**
-Once Step 1 is proven on both laser variants, mirror the validated logic into firmware.
-The C# ENG GUI serves as the ground truth reference for the firmware implementation.
+**Step 2 — Firmware (`ipg.hpp` / `ipg.cpp` + MCC)** ✅ COMPLETE
+Validated on bench 2026-04-10. TCP transport, auto-sense, model-conditional poll,
+training mode, COMBAT gate, TCP drop/reconnect — all confirmed working.
 
 ---
 
-## Step 1 — C# ENG GUI HEL Window
+## Step 1 — C# ENG GUI HEL Window ✅ COMPLETE
 
-### 1.1 Current State Assessment
+### 1.1 Validated Findings (2026-04-10)
 
-#### `hel.cs` — problems
-| Issue | Detail |
-|-------|--------|
-| Wrong transport | `UdpClient` on port `10011` — must be `TcpClient` on port `10001` |
-| Parse non-functional | `Parse()` body almost entirely commented out |
-| No sense logic | No `LASER_MODEL` detection, no `RMN` auto-sense on connect |
-| No poll loop | Commands only sent on button click — no periodic telemetry pull |
-| `MSG_IPG.ParseRsp()` | Called in `Parse()` but method does not exist in `MSG_IPG.cs` |
-| RSN/RMODEL discarded | Responses received but not stored |
+| Item | Finding |
+|------|---------|
+| Transport | TCP port 10001 ✅ confirmed |
+| MCC coexistence | MCC UDP 10011 + ENG GUI TCP 10001 run simultaneously — no conflict ✅ |
+| Sense command | `RMODEL` (not `RMN`) — `RMN` returns hostname (e.g. `IPGP578`), not model string |
+| Model string | `RMODEL: YLM-3000-SM-VV` — parse on `-` delimiter, second token = `3000` |
+| Serial number | `RSN: PL2546496` ✅ |
+| Poll loop | Starts after sense, `RHKPS` confirmed flowing ✅ |
+| 6K validation | ⏳ Pending tomorrow |
 
-#### `frmHEL.cs` — problems
-| Issue | Detail |
-|-------|--------|
-| Timer mostly dead | Only 2 labels updated — most controls unwired |
-| No EMON/EMOFF | Buttons missing from designer and form |
-| Model/SN never shown | `tssModel` / `tssSerialNumber` in designer but never populated |
-| Progress bar max hardcoded | `prog_mcc_hel_power.Maximum = 3000` in designer — must be dynamic |
-| System state radio buttons | `radStateCombat` / `radStateSURVL` / `rdoStateSTNDBY` irrelevant for direct laser comms — remove or repurpose |
+### 1.2 Known Issues / Remaining
 
-#### `frmHEL_Designer.cs` — what already exists (keep)
-- HK volts, bus volts, case temp labels ✅
-- Status word / error word labels (binary display) ✅
-- Output power and setpoint progress bars ✅
-- EM ON / NOT READY checkboxes (read-only) ✅
-- Clear errors button + set power button/spinner ✅
+| Issue | Detail | Fix |
+|-------|--------|-----|
+| SocketException on reconnect | First `Stop()` doesn't fully close socket before second `Start()` | Null `_tcp`/`_stream` in `Stop()` ✅ applied |
+| 6K not yet validated | `SDC` vs `SCS`, bit decode, no `RHKPS`/`RBSTPS` | Test tomorrow on 6K hardware |
+
+### 1.3 Pre-Step 2 Checklist
+
+| Item | Detail | Status |
+|------|--------|--------|
+| ⚠️ **Deploy `defines.hpp` fleet-wide** | `LASER_MODEL` enum + `LASER_MAX_POWER_W()` added to `defines.hpp`. Must be deployed to **all five controllers** (MCC, BDC, TMC, FMC, TRC) before Step 2 firmware build — `defines.hpp` is shared across all controllers. BDC/TMC/FMC/TRC don't use `LASER_MODEL` directly but must compile cleanly with the new definitions. | ⏳ Pending |
+| 6K ENG GUI validation | Connect 6K to HEL ENG GUI, validate sense, poll, `SDC`, STA bits | ⏳ Pending |
 - Status strip slots: `tssModel`, `tssSerialNumber` ✅
 
 ---
@@ -81,12 +77,12 @@ Send("RSN\r");   // serial number
 `Parse()` handles `RMN` response:
 ```csharp
 case "RMN":
-    // e.g. "YLM-3000-SM-VV" or "YLR-6000-???"
+    // e.g. "YLM-3000-SM-VV" or "YLM-6000-U3-SM-???"
     string[] parts = payload.Trim().Split('-');
     if (parts.Length >= 2 && int.TryParse(parts[1], out int power))
     {
         if      (power == 3000) LaserModel = LASER_MODEL.YLM_3K;
-        else if (power == 6000) LaserModel = LASER_MODEL.YLR_6K;
+        else if (power == 6000) LaserModel = LASER_MODEL.YLM_6K;
         else                    LaserModel = LASER_MODEL.UNKNOWN;
     }
     ModelName    = payload.Trim();
@@ -158,7 +154,7 @@ private void Send(string cmd)
 // Model-aware set power
 public void SET_POWER(float pct)
 {
-    string cmd = LaserModel == LASER_MODEL.YLR_6K ? "SDC " : "SCS ";
+    string cmd = LaserModel == LASER_MODEL.YLM_6K ? "SDC " : "SCS ";
     Send($"{cmd}{pct:F1}\r");
 }
 
@@ -183,7 +179,7 @@ public bool        IsEMON
     get
     {
         // normalized — same bit logic as firmware isEMON()
-        return LaserModel == LASER_MODEL.YLR_6K
+        return LaserModel == LASER_MODEL.YLM_6K
             ? (IPGMsg.StatusWord & (1u << 2)) != 0
             : (IPGMsg.StatusWord & (1u << 0)) != 0;
     }
@@ -278,12 +274,56 @@ private void btn_mcc_hel_setPower_Click(object sender, EventArgs e)
 
 *Implement after Step 1 is validated on both laser variants via ENG GUI.*
 
+### IPG Command Reference — 3K vs 6K (validated 2026-04-10)
+
+#### Sense / Identity
+
+| Command | 3K | 6K |
+|---------|----|----|
+| `RMODEL\r` | Returns `RMN: YLM-3000-SM-VV` — **3K sense path** | Returns empty string |
+| `RMN\r` | Returns `RMN: IPGP578` (hostname — ignore) | Returns `RMN: YLM-6000-U3-SM` — **6K sense path** |
+| `RSN\r` | Returns serial number | Returns serial number |
+
+**Sense strategy:** Send both `RMODEL` and `RMN` on connect. `TrySenseModel()` parses whichever response contains a `-` delimited power field. `RMN` hostname on 3K has no `-` so is correctly ignored.
+
+#### Poll Commands
+
+| Command | 3K | 6K | Firmware POLL |
+|---------|----|----|---------------|
+| `RHKPS\r` | ✅ HK voltage V | ❌ | Case 0 — 3K only |
+| `RCT\r` | ✅ | ✅ | Case 1 — both |
+| `STA\r` | ✅ | ✅ | Case 2 — both |
+| `RMEC\r` | ✅ | ✅ | Case 3 — both |
+| `RBSTPS\r` | ✅ Boost voltage V | ❌ | Case 4 — 3K only |
+| `RCS\r` | ✅ setpoint % | ✅ setpoint % | Case 5 — both |
+| `ROP\r` | ✅ output power W | ✅ output power W ch1 | Case 6 — both |
+
+#### Set Power
+
+| Command | 3K | 6K |
+|---------|----|----|
+| `SCS <pct>\r` | ✅ | ❌ |
+| `SDC <pct>\r` | ❌ | ✅ |
+
+#### STA Word Bit Decode
+
+| Meaning | 3K bit | 6K bit |
+|---------|--------|--------|
+| Emission ON | 0 | 2 |
+| Overheat | 16 | 1 |
+| Not ready / PSU off | 9 | 11 |
+| External ctrl enabled | 5 | 18 |
+| Error present | 10 | 19 |
+| Critical error | 29 | 29 |
+| Ext shutdown / Fiber break | 31 | 30 |
+| Bus voltage / PSU error | 20 | 25 |
+
 ---
 
 ## 1. Background
 
 MCC currently drives a single laser type — the IPG YLM-3000-SM-VV (3K) — via the `ipg` class
-in `ipg.hpp` / `ipg.cpp`. A second laser, the IPG YLR-6000 (6K), is being integrated. The two
+in `ipg.hpp` / `ipg.cpp`. A second laser, the IPG YLM-6000-U3-SM (6K), is being integrated. The two
 lasers share the same Ethernet command interface structure but differ in:
 
 - Command mnemonics (e.g. `SCS` vs `SDC` for set power)
@@ -342,7 +382,7 @@ enum class LASER_MODEL : uint8_t
 {
     UNKNOWN = 0x00,
     YLM_3K  = 0x01,   // bit 0 — YLM-3000-SM-VV
-    YLR_6K  = 0x02    // bit 1 — YLR-6000
+    YLM_6K  = 0x02    // bit 1 — YLM-6000-U3-SM
 };
 
 inline uint16_t LASER_MAX_POWER_W(LASER_MODEL m)
@@ -350,7 +390,7 @@ inline uint16_t LASER_MAX_POWER_W(LASER_MODEL m)
     switch (m)
     {
         case LASER_MODEL::YLM_3K: return 3000;
-        case LASER_MODEL::YLR_6K: return 6000;
+        case LASER_MODEL::YLM_6K: return 6000;
         default:                  return 0;
     }
 }
@@ -362,7 +402,7 @@ public enum LASER_MODEL : byte
 {
     UNKNOWN = 0x00,
     YLM_3K  = 0x01,
-    YLR_6K  = 0x02
+    YLM_6K  = 0x02
 }
 
 public static class LaserModelExt
@@ -372,7 +412,7 @@ public static class LaserModelExt
         switch (m)
         {
             case LASER_MODEL.YLM_3K: return 3000;
-            case LASER_MODEL.YLR_6K: return 6000;
+            case LASER_MODEL.YLM_6K: return 6000;
             default:                 return 0;
         }
     }
@@ -395,7 +435,7 @@ On `INIT()`, immediately after TCP connect, send `RMN\r` and wait for the respon
 ### Expected responses
 ```
 3K → "RMN: YLM-3000-SM-VV"   power field = 3000
-6K → "RMN: YLR-6000-???"     power field = 6000
+6K → "RMN: YLM-6000-U3-SM-???"     power field = 6000
 ```
 
 ### Parse logic
@@ -406,7 +446,7 @@ if (dash != nullptr)
 {
     int power = atoi(dash + 1);
     if      (power == 3000) { model_type = LASER_MODEL::YLM_3K; isInit = true; }
-    else if (power == 6000) { model_type = LASER_MODEL::YLR_6K; isInit = true; }
+    else if (power == 6000) { model_type = LASER_MODEL::YLM_6K; isInit = true; }
     else
     {
         model_type = LASER_MODEL::UNKNOWN;
@@ -465,7 +505,7 @@ bool isReady() { return isStarted && isConnected && isInit; }
 ```cpp
 bool isEMON()
 {
-    if (model_type == LASER_MODEL::YLR_6K)
+    if (model_type == LASER_MODEL::YLM_6K)
         return ((status_word & (1U << 2)) != 0);   // 6K: emission = bit 2
     return ((status_word & (1U << 0)) != 0);        // 3K: emission = bit 0
 }
@@ -479,7 +519,7 @@ caller changes.
 void SET_POWER(float _pow)
 {
     if (model_type == LASER_MODEL::UNKNOWN) return;   // guard
-    tcpClient.print(model_type == LASER_MODEL::YLR_6K ? F("SDC ") : F("SCS "));
+    tcpClient.print(model_type == LASER_MODEL::YLM_6K ? F("SDC ") : F("SCS "));
     tcpClient.print(_pow, 1);
     tcpClient.print(F(" \r"));
 }
@@ -532,7 +572,7 @@ No equivalent commands exist on the 6K. Fields remain at their initialised value
 
 | Byte | From | To | nBytes | Name | Type | Notes |
 |------|------|----|--------|------|------|-------|
-| 255 | 255 | 256 | 1 | **LASER_MODEL** | uint8 | `LASER_MODEL` enum. `0x00`=UNKNOWN/not sensed; `0x01`=YLM_3K; `0x02`=YLR_6K. Was RESERVED. |
+| 255 | 255 | 256 | 1 | **LASER_MODEL** | uint8 | `LASER_MODEL` enum. `0x00`=UNKNOWN/not sensed; `0x01`=YLM_3K; `0x02`=YLM_6K. Was RESERVED. |
 
 **Backwards compatible** — old C# clients reading `0x00` here see `UNKNOWN` which is a safe
 default (they were reading reserved zero before).
@@ -662,16 +702,35 @@ correct bit mask per laser.
 
 ---
 
-## 12. Open Items / Not In Scope
+## 12. Open Items
 
 | Item | Notes |
 |------|-------|
-| ENG GUI direct laser tab | Progress already started — separate work item |
-| 6K ch2 output power (`ROPS`) | Not in current `MSG_IPG` block — future extension |
-| 6K pulse mode commands (`SPRR`, `SPW`, `EGM`) | Not required for CROSSBOW fire control |
+| 6K ch2 output power (`ROPS`) | Not in current poll — future extension |
+| 6K pulse mode (`SPRR`, `SPW`, `EGM`) | Not required for CROSSBOW fire control |
 | 6K aiming beam (`ABN`/`ABF`) | Not required — no guide laser in CROSSBOW path |
-| TCP reconnect / keepalive | W5500 TCP needs connection watchdog — implement in `UPDATE()` |
+| **HB counter — BAT** | `HB_BAT` always 0. Add `lastMsgRx_ms` to `bat` class, stamp on each received packet, compute delta at REG1 pack time. Same pattern as `ipg.HB_RX_ms`. |
+| **HB counter — GNSS** | `HB_GNSS` always 0. Add `lastMsgRx_ms` to `gnss` class, stamp on each received position fix, compute delta at REG1 pack time. |
+| **HB counter — CRG** | `HB_CRG` always 0. V1 only — CRG has no I2C on V2. Gate packing behind `#if defined(HW_REV_V1)` or check `isV2`. Add receive timestamp if CRG polling exists. |
+| **HB counter — TIME (was NTP)** | `HB_NTP` byte [130] is stamped on NTP packet receive only. Should also stamp on PTP sync event. Consider renaming `HB_NTP` → `HB_TIME` in firmware, ICD, and `MSG_MCC.cs` to reflect dual PTP/NTP source. |
+| **HB counter — `lastTick_*` cleanup** | `lastTick_BAT`, `lastTick_CRG`, `lastTick_GNSS`, `lastTick_HEL` declared in `mcc.hpp` but never written — remove stubs or wire up when HB counters are implemented. |
+
+## 13. Pending Serial Command Enhancements
+
+After HEL firmware validated on bench:
+
+### TMC Serial Section
+Add `TMC` command to MCC serial with:
+- A1 liveness (already partially exists — expand)
+- Full TMC REG1 dump with field decode (mirrors `PRINT_REG()` style)
+- Any direct TMC commands (PUMP, HEATER, FAN, TARGET TEMP) accessible from MCC serial
+
+### Power OFF Command
+Add a universal power-off shorthand to the serial power commands.
+Candidates: `PWR OFF`, `POWER 0`, or prefix existing commands e.g. `HEL OFF` → sends `SET_POWER(0)`.
+Apply consistently across all power-controllable subsystems.
+Exact command names TBD — decide at implementation time.
 
 ---
 
-*End of plan. All design decisions locked. Proceed to code.*
+*End of plan.*

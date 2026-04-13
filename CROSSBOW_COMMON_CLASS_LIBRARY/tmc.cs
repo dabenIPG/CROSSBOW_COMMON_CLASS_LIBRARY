@@ -137,7 +137,7 @@ namespace CROSSBOW
                             HB_RX_ms = (DateTime.UtcNow - lastMsgRx).TotalMilliseconds;
                             lastMsgRx = DateTime.UtcNow;
 
-                            if (frame[3] == (byte)ICD.RES_A1)
+                            if (frame[3] == 0x00 || frame[3] == 0xA1)  // REG1 CMD_BYTE: 0x00 (v4.0.0) | 0xA1 (legacy pre-FW-C10)
                                 LatestMSG.Parse(frame);
                             else
                                 Debug.WriteLine($"TMC: A2 ACK rx CMD=0x{frame[3]:X2}");

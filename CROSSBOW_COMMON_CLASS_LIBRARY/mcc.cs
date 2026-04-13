@@ -187,7 +187,7 @@ namespace CROSSBOW
                             HB_RX_ms = (now - lastMsgRx).TotalMilliseconds;
                             lastMsgRx = now;
 
-                            if (rxBuff[3] == (byte)ICD.RES_A1)
+                            if (rxBuff[3] == 0x00 || rxBuff[3] == 0xA1)  // REG1 CMD_BYTE: 0x00 (v4.0.0) | 0xA1 (legacy pre-FW-C10)
                                 LatestMSG.Parse(rxBuff);
                             else
                                 Debug.WriteLine($"MCC: A3 ACK rx CMD=0x{rxBuff[3]:X2}");
@@ -215,7 +215,7 @@ namespace CROSSBOW
                             HB_RX_ms = (DateTime.UtcNow - lastMsgRx).TotalMilliseconds;
                             lastMsgRx = DateTime.UtcNow;
 
-                            if (frame[3] == (byte)ICD.RES_A1)
+                            if (frame[3] == 0x00 || frame[3] == 0xA1)  // REG1 CMD_BYTE: 0x00 (v4.0.0) | 0xA1 (legacy pre-FW-C10)
                             {
                                 byte[] payload = new byte[PAYLOAD_LEN];
                                 Array.Copy(frame, PAYLOAD_OFFSET, payload, 0, PAYLOAD_LEN);
@@ -393,18 +393,11 @@ namespace CROSSBOW
             Send((byte)ICD.SET_GIMBAL_MODE, new byte[] { Convert.ToByte(mode) });
         }
 
-        // 0xE3 PMS_CHARGER_ENABLE
-        public bool ChargeEnabled
+        // 0xAF SET_CHARGER — merged from 0xE3+0xED (v4.0.0). Level required every call.
+        // level=0: disable. level>0: enable+set. V2: rejects level>0 (no charger I2C).
+        public void SetCharger(CHARGE_LEVELS level)
         {
-            set { Send((byte)ICD.PMS_CHARGER_ENABLE, new byte[] { Convert.ToByte(value) }); }
-        }
-
-        // 0xED PMS_SET_CHARGER_LEVEL — V1 only (I2C to DBU3200)
-        // V2: firmware returns STATUS_CMD_REJECTED (no charger I2C).
-        // Guard the call site with LatestMSG.IsV2 before sending on V2 hardware.
-        public CHARGE_LEVELS ChargeLevel
-        {
-            set { Send((byte)ICD.PMS_SET_CHARGER_LEVEL, new byte[] { Convert.ToByte(value) }); }
+            Send((byte)ICD.SET_CHARGER, new byte[] { (byte)level });
         }
 
         // 0xAD SET_HEL_POWER
@@ -423,7 +416,7 @@ namespace CROSSBOW
         {
             Send((byte)ICD.SET_HEL_TRAINING_MODE, new byte[] { (byte)(en ? 1 : 0) });
         }
-        // 0xE6 PMS_SET_FIRE_REQUESTED_VOTE — continuous heartbeat required while active
+        // 0xAB SET_FIRE_REQUESTED_VOTE — moved from 0xE6, INT_OPS (v4.0.0) — heartbeat required
         public bool wasLaserFireRequested { get; private set; } = false;
         public Stopwatch LaserFireStopwatch { get; set; } = new Stopwatch();
 
@@ -432,7 +425,7 @@ namespace CROSSBOW
             set
             {
                 wasLaserFireRequested = value;
-                Send((byte)ICD.PMS_SET_FIRE_REQUESTED_VOTE, new byte[] { Convert.ToByte(value) });
+                Send((byte)ICD.SET_FIRE_REQUESTED_VOTE, new byte[] { Convert.ToByte(value) });
                 if (wasLaserFireRequested)
                     LaserFireStopwatch.Restart();
                 else
@@ -454,14 +447,14 @@ namespace CROSSBOW
         public void ReInitDevice(MCC_DEVICES dev)
         {
             if (!AssertIntEng("ReInitDevice")) return;
-            Send((byte)ICD.SET_MCC_REINIT, new byte[] { (byte)dev });
+            Send((byte)ICD.SET_REINIT, new byte[] { (byte)dev });
         }
 
         // 0xE1 SET_MCC_DEVICES_ENABLE
         public void EnableDevice(MCC_DEVICES dev, bool en)
         {
             if (!AssertIntEng("EnableDevice")) return;
-            Send((byte)ICD.SET_MCC_DEVICES_ENABLE, new byte[] { (byte)dev, (byte)(en ? 1 : 0) });
+            Send((byte)ICD.SET_DEVICES_ENABLE, new byte[] { (byte)dev, (byte)(en ? 1 : 0) });
         }
 
         // 0xE7 TMS_INPUT_FAN_SPEED

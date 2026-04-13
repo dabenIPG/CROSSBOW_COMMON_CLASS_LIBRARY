@@ -127,6 +127,8 @@ namespace CROSSBOW
                 }
             }
         }
+        public uint FW_MAJOR => (FW_VERSION >> 24) & 0xFF;   // firmware major version
+        public bool IsV4 => FW_MAJOR >= 4;
 
         public DateTime      lastMsgRx           { get; private set; } = DateTime.UtcNow;
 
@@ -348,7 +350,7 @@ namespace CROSSBOW
             // All other CMD_BYTEs (0xA0 subscribe ACK, 0xA4 bare ACK, etc.) have
             // zero-filled payloads — update liveness only, no REG1 parse.
             byte cmdByte = frame[3];
-            if (cmdByte != (byte)ICD.RES_A1 && cmdByte != (byte)ICD.FRAME_KEEPALIVE)
+            if (cmdByte != 0x00 && cmdByte != 0xA1 && cmdByte != (byte)ICD.FRAME_KEEPALIVE)  // 0x00 (v4.0.0) | 0xA1 (legacy pre-FW-C10)
             {
                 lastMsgRx = DateTime.UtcNow;
                 return true;

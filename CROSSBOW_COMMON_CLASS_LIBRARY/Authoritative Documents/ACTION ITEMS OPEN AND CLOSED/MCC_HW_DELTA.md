@@ -50,21 +50,27 @@ PTP/NTP time, and fire control vote aggregation.
 | GNSS power | Via GPS relay | **Always powered at boot** |
 | `isBDC_Ready` gate | Set by SOL_BDA (BDA solenoid on) | Set by GIM_VICOR enable in StateManager |
 
-### Confirmed Pin Polarity
+### Confirmed Pin Polarity — Hardware Verified 2026-04-08
 
-| Output | V1 pin | V1 polarity | V2 pin | V2 polarity | Mechanism |
-|--------|--------|-------------|--------|-------------|-----------|
-| GPS_RELAY | 83 | HIGH=ON | — | — | NO opto |
-| VICOR_BUS | A0 | LOW=ON | — | — | Inverted drive |
-| LASER_RELAY | 20 | HIGH=ON | 20 | HIGH=ON | NO opto |
-| GIM_VICOR | — | — | A0 | LOW=ON | Inverted drive (HW-1) |
-| TMS_VICOR | — | — | 83 | HIGH=ON | NC opto -> Vicor PC pin (HW-2) |
-| SOL_HEL | 5 | HIGH=ON | — | — | Electromechanical |
-| SOL_BDA | 8 | HIGH=ON | — | — | Electromechanical |
-| CHARGER | 6 | HIGH=ON | 82 | HIGH=ON | GPIO |
+| Output | V1 pin | V1 polarity | V1 opto | V2 pin | V2 polarity | V2 opto |
+|--------|--------|-------------|---------|--------|-------------|---------|
+| GPS_RELAY | 83 | HIGH=ON | NO | — | — | — |
+| VICOR_BUS | A0 | LOW=ON | NO (inverted drive) | — | — | — |
+| LASER_RELAY | 20 | HIGH=ON | NO | **83** | HIGH=ON | NO |
+| GIM_VICOR | — | — | — | A0 | **HIGH=ON** | **NC** |
+| TMS_VICOR | — | — | — | **20** | HIGH=ON | **NC** |
+| SOL_HEL | 5 | HIGH=ON | Electromechanical | — | — | — |
+| SOL_BDA | 8 | HIGH=ON | Electromechanical | — | — | — |
+| CHARGER | 6 | HIGH=ON | GPIO | 82 | HIGH=ON | GPIO |
 
-> HW-1: GIM_VICOR polarity analytically derived — verify on first V2 bring-up
-> HW-2: TMS_VICOR polarity analytically derived — verify on first V2 bring-up
+> ✅ HW-1 CLOSED: GIM_VICOR (A0) = HIGH=ON confirmed — V2 uses NC opto, polarity inverted vs V1.
+> ✅ HW-2 CLOSED: TMS_VICOR (pin 20) = HIGH=ON confirmed — NC opto, same drive polarity as V1 laser.
+>
+> Key findings vs initial assumption:
+> - Pins 83 and 20 did NOT swap — functions changed, pin numbers stayed the same as V1
+> - A0 polarity INVERTED on V2 (NO opto→NC opto): LOW=ON (V1) → HIGH=ON (V2)
+> - Pins 83 and 20 HIGH=ON on both revisions — polarity unchanged despite function change
+> - unified `pin_defs_mcc.hpp` and `hw_rev.hpp` require surgical correction (see open items)
 
 ---
 
@@ -81,9 +87,9 @@ PTP/NTP time, and fire control vote aggregation.
 | Define | V1 Pin | V2 Pin | Notes |
 |--------|--------|--------|-------|
 | `PIN_CHARGER_ENABLE` | 6 | 82 | Pin 82 was CHARGER_MODE on V1 |
-| `PIN_RELAY1_ENABLE` | 83 | 20 | V1=GPS relay; V2=laser relay |
-| `PIN_RELAY2_ENABLE` | 20 | 83 | V1=laser relay; V2=TMS_VICOR NC opto |
-| `PIN_VICOR_EN` | A0 | A0 | Same pin, different load and purpose |
+| `PIN_RELAY1_ENABLE` | 83 | 83 | V1=GPS relay; V2=laser relay — **same pin, function changed** |
+| `PIN_RELAY2_ENABLE` | 20 | 20 | V1=laser relay; V2=TMS_VICOR NC opto — **same pin, function changed** |
+| `PIN_VICOR_EN` | A0 | A0 | Same pin; V1=NO opto LOW=ON; V2=NC opto HIGH=ON — **polarity inverted** |
 
 ---
 
@@ -311,16 +317,18 @@ void SetChargeLevel(CHARGE_LEVELS level); // V1 only — I2C to DBU3200
 
 | File | Status | Notes |
 |------|--------|-------|
-| `hw_rev.hpp` | ✅ Complete | Revision gate, polarity macros, `MCC_HW_REV_BYTE` |
-| `pin_defs_mcc.hpp` | ✅ Complete | Full V1/V2 guards |
+| `hw_rev.hpp` | ✅ Complete | Revision gate, polarity macros corrected (GIM_VICOR HIGH=ON), `MCC_HW_REV_BYTE` |
+| `pin_defs_mcc.hpp` | ✅ Complete | V1/V2 guards; pins 83/20 corrected (no swap); `PIN_CRG_ALARM` added V2 |
 | `defines.hpp` | ✅ Complete | Fleet canonical; `MCC_POWER` 7 values; enums removed; commands updated |
-| `mcc.hpp` | ✅ Complete | `HEALTH_BITS`, `POWER_BITS`, `isPwr_*` flags, wrappers removed |
-| `mcc.cpp` | ⚠️ Compile testing | Manual comment merge complete — awaiting compile result |
-| `MCC.ino` | ✅ Complete | V1/V2 guards on `Wire.begin()`, solenoid `pinMode` |
+| `mcc.hpp` | ✅ Complete | `HEALTH_BITS`, `POWER_BITS`, `isPwr_*` flags, wrappers removed; `isChargerAlarm` added |
+| `mcc.cpp` | ✅ Compiling | Pin/polarity corrections applied; `isChargerAlarm` + `buf[244]` bit 6 both revisions; serial STATUS updated |
+| `MCC.ino` | ✅ Complete | V1/V2 guards on `Wire.begin()`, solenoid `pinMode`, `PIN_CRG_ALARM` `pinMode` |
 | `defines.cs` | ✅ Complete | `MCC_POWER` added; `MCC_SOLENOIDS`/`RELAYS`/`VICORS` removed; `0xE2`/`E4`/`EC` updated |
 | `mcc.cs` | ✅ Complete | `EnablePower()` replaces `EnableSolenoid`/`EnableRelay`/`VicorEnable` |
 | `MSG_MCC.cs` | ✅ Complete | `HealthBits`/`PowerBits`/`HW_REV`/`IsV1`/`IsV2`/`pb_*` added; compat aliases retained |
-| `frmMCC.cs` | ⚠️ Partial | Compile errors fixed; `HW_REV_Label` in tssVersion; `ApplyHwRevLayout()` pending |
+| `MSG_CMC.cs` | ✅ Complete | `isCrgAlarm` accessor added (STATUS_BITS1 bit 6); header comment updated |
+| `frmMCC.cs` | ⚠️ Partial | `ApplyHwRevLayout()` done; power readbacks updated to `pb_*`; `isCrgAlarm` GUI readback pending CRG-1 polarity confirm |
+| `frmMCC_Designer.cs` | ⚠️ Pending | `mb_CrgAlarm_rb` new StatusLabel to add to `groupBox12` — pending CRG-1 |
 
 ---
 
@@ -335,7 +343,18 @@ void SetChargeLevel(CHARGE_LEVELS level); // V1 only — I2C to DBU3200
 
 ---
 
-## 10. Stale V2 Regressions Discarded
+## 10. Hardware Verification — Completed
+
+| ID | Result | Detail |
+|----|--------|--------|
+| HW-1 | ✅ Confirmed | GIM_VICOR (A0) = HIGH=ON — NC opto, polarity inverted vs V1 (was LOW=ON) |
+| HW-2 | ✅ Confirmed | TMS_VICOR (pin 20) = HIGH=ON — NC opto |
+| PIN-SWAP | ✅ Confirmed | Pins 83 and 20 did NOT swap — functions changed, pin numbers stayed same as V1 |
+| V1 verify | ✅ Confirmed | V1 pindefs and polarity verified on hardware |
+
+---
+
+## 11. Stale V2 Regressions Discarded
 
 | Item | V1 (kept) | V2 (discarded) |
 |------|-----------|----------------|
@@ -352,14 +371,13 @@ void SetChargeLevel(CHARGE_LEVELS level); // V1 only — I2C to DBU3200
 
 ---
 
-## 11. Open Items — Next Session
+## 12. Open Items — Next Session
 
 | ID | Status | Item |
 |----|--------|------|
-| COMPILE | ⚠️ Pending | `mcc.cpp` compile result — fix any errors |
-| MCC-HW4 | ⚠️ Pending | `frmMCC.cs` `ApplyHwRevLayout()` — implement |
-| HW-1 | ⚠️ Verify HW | `POL_PWR_GIM_ON = LOW` — confirm on V2 bring-up |
-| HW-2 | ⚠️ Verify HW | `POL_PWR_TMS_ON = HIGH` — confirm on V2 bring-up |
-| OQ-5 | ⚠️ Pending | BDC and FMC `defines.hpp` — deploy merged canonical file |
-| OQ-6 | ⚠️ Pending | `defines.cs` parity: `TMC_VICORS`, `FRAME_KEEPALIVE`, `BDC_DEVICES.PTP` |
+| CRG-1 | ⚠️ Action | D42 is a "charge good/enabled" indicator — HIGH=charging OK. Rename `PIN_CRG_ALARM` → `PIN_CRG_OK`; invert logic: `isChargerAlarm = (digitalRead(PIN_CRG_OK) == LOW)`; update `mcc.cpp`, `mcc.hpp`, `pin_defs_mcc.hpp`, serial STATUS output |
+| CRG-2 | ⚠️ Pending CRG-1 | Map `PIN_CRG_OK` read → `isCRG_Ready` in `mcc.hpp` V2 so device status panel matches V1 |
+| CRG-3 | ⚠️ Pending CRG-1 | `frmMCC.cs` + designer — `mb_CrgAlarm_rb` control and readback wired to `isCrgAlarm` |
+| OQ-5 | ✅ CLOSED | BDC and FMC `defines.hpp` merged canonical file deployed |
+| OQ-6 | ✅ CLOSED | `defines.cs` verified correct — `TMC_VICORS.PUMP1=2/PUMP2=4`, `FRAME_KEEPALIVE=0xA4`, `BDC_DEVICES.PTP=7` all confirmed this session |
 | INT_OPS | ⚠️ Verify | Confirm `0xED` not on INT_OPS whitelist — add V2 rejection note if listed |

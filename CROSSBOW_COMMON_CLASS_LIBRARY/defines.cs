@@ -7,10 +7,13 @@ using System.Threading.Tasks;
 // ─── CROSSBOW ICD defines.cs ──────────────────────────────────────────────────
 // Authoritative shared enum and command byte definitions for all CROSSBOW C#
 // applications (THEIA HMI, TRC3_ENG_GUI). Canonical source of truth — matches
-// ICD v3.4.0 and defines.hpp v3.X.Y.
+// ICD v3.6.0 and defines.hpp v3.X.Y.
 // Do not edit per-application. All changes must be reflected in the ICD document
 // and kept in sync with defines.hpp.
-// Version: 3.4.0 | Date: 2026-04-04 | Session 35
+// Version: 4.0.0 | Date: 2026-04-12 | CB-20260412
+// ⚠ MAJOR VERSION — ICD v3.6.0 command space restructuring (CB-20260412).
+// All five controller firmware targets VERSION_PACK(4,0,0).
+// C# clients gate new commands on LatestMSG.IsV4 (FW_VERSION >> 24 >= 4).
 // ─────────────────────────────────────────────────────────────────────────────
 
 namespace CROSSBOW
@@ -155,6 +158,7 @@ namespace CROSSBOW
 
     public enum CHARGE_LEVELS
     {
+        DISABLE = 0,
         LO = 10,  //
         MED = 30, //
         HI = 55,  //
@@ -214,25 +218,25 @@ namespace CROSSBOW
     public enum ICD
     {
         SET_UNSOLICITED = 0xA0,  // Subscribe/unsubscribe to unsolicited 100 Hz push. {0x01}=subscribe, {0x00}=unsubscribe. Any accepted command auto-registers the sender. Does NOT affect A1 stream.
-        RES_A1 = 0xA1,  // ⚠ RETIRED inbound (session 35) — returns STATUS_CMD_REJECTED. Value 0xA1 still appears as CMD_BYTE in received unsolicited REG1 frames; parsers must still accept it on RX.
-        SET_NTP_CONFIG = 0xA2,  // NTP config (INT only, A2 only): 0 bytes=resync | byte[p]=set primary last octet | bytes[p,f]=set primary+fallback last octet
-        RES_A3 = 0xA3,  // ⚠ RETIRED (session 35) — returns STATUS_CMD_REJECTED. Was GET_REGISTER3 deprecated stub.
+        SET_HEL_TRAINING_MODE = 0xA1,  // Moved from 0xAF (v3.6.0). Promoted to INT_OPS. Training clamps power to 10% regardless of SET_HEL_POWER. uint8 0=COMBAT 1=TRAINING
+        SET_NTP_CONFIG = 0xA2,  // Promoted INT_ENG→INT_OPS (v3.6.0). 0 bytes=resync | byte[p]=set primary last octet | bytes[p,f]=set primary+fallback last octet. Routing by destination IP.
+        SET_TIMESRC = 0xA3,  // Assigned v3.6.0. Set active time source. Routing by IP — each controller applies independently. Prereq: FW-C8 (rejection handler removal) before live. uint8 0=OFF 1=NTP 2=PTP 3=AUTO
         FRAME_KEEPALIVE = 0xA4,  // Register/keep-alive. Empty = register + ACK (ping fields: version, echo_seq, uptime_ms). Payload {0x01} = register + return REG1 now (rate-gated: max 1 Hz per client; suppressed if wantsUnsolicited). INT_ENG: all 5 controllers. INT_OPS: MCC/BDC only. Session 35: was EXT_FRAME_PING (A3/MCC/BDC only).
         SET_SYSTEM_STATE = 0xA5,  //byte (SYSTEM_STATES)
         SET_GIMBAL_MODE = 0xA6,  //byte (BDC_MODES)
         SET_LCH_MISSION_DATA = 0xA7,  // Loads LCH mission data and clears all windows (see ICD)
         SET_LCH_TARGET_DATA = 0xA8,  // Loads LCH target with windows (see ICD)
-        PRINT_LCH_DATA = 0xA9,  // byte which [0 KIZ, 1 LCH], byte detail [0 false, 1 true]
-        SET_BDC_VOTE_OVERRIDE = 0xAA,  // byte vote [0=HORIZ,1=KIZ,2=LCH,3=BDC], byte 0/1
-        SET_BCAST_FIRECONTROL_STATUS = 0xAB,  //  	BYTE STATUS OF FIRECONTROL (MCC VOTE BITS)
+        SET_REINIT = 0xA9,  // Assigned v3.6.0. Unified controller reinitialise. Replaces 0xB0 (BDC) and 0xE0 (MCC). Routing by IP. TMC/FMC not supported. uint8 subsystem (BDC: 0=NTP,1=GIM,2=FUJI,3=MWIR,4=FSM,5=JET,6=INCL,7=PTP | MCC: 0=NTP,1=TMC,2=HEL,3=BAT,4=PTP,5=CRG,6=GNSS,7=BDC)
+        SET_DEVICES_ENABLE = 0xAA,  // Assigned v3.6.0. Unified device enable/disable. Replaces 0xBE (BDC) and 0xE1 (MCC). Routing by IP. TMC/FMC not supported. uint8 device (same indices as SET_REINIT); uint8 0/1
+        SET_FIRE_REQUESTED_VOTE = 0xAB,  // Moved from 0xE6 (v3.6.0). Promoted to INT_OPS. Laser fire vote. uint8 0/1 — heartbeat required; watchdog cancels after 500ms silence.
         SET_BDC_HORIZ = 0xAC,  //	VECTOR OF FLOATS HORIZ ELEVATION	float[360]
         SET_HEL_POWER = 0xAD, // SETS LASER POWER    uint8 [0 100]
         CLEAR_HEL_ERROR = 0xAE, // CLEAR LASER ERROR None
-        SET_HEL_TRAINING_MODE = 0xAF,  // uint8 0=COMBAT 1=TRAINING — sets ipg.isTrainingMode; power clamped to 10% in training
+        SET_CHARGER = 0xAF,  // Assigned v3.6.0. Merges 0xE3 (PMS_CHARGER_ENABLE) and 0xED (PMS_SET_CHARGER_LEVEL). Level required on every call. V1 only — V2 returns STATUS_CMD_REJECTED (no charger I2C). uint8 level: 0=disable 10=low 30=med 55=high
 
         // RESERVING 0xB FOR BDC COMMAND
-        SET_BDC_REINIT = 0xB0,  // uint8: 0=NTP, 1=GIMBAL, 2=FUJI, 3=MWIR, 4=FSM, 5=JETSON, 6=INCL, 7=PTP
-        SET_GIM_HOME = 0xB1,  // HOME POSITION (PAN/TILT)
+        RES_B0 = 0xB0,  // ⚠ RETIRED v3.6.0 — SET_BDC_REINIT superseded by SET_REINIT (0xA9). Returns STATUS_CMD_REJECTED pending FW-C8.
+        SET_BDC_VOTE_OVERRIDE = 0xB1,  // Moved from 0xAA (v3.6.0). INT_ENG. Override individual BDC geometry vote bit. byte vote (0=HORIZ,1=KIZ,2=LCH,3=BDA); byte 0/1
         SET_GIM_POS = 0xB2,  // POSITION (PAN/TILT)
         SET_GIM_SPD = 0xB3,  // SPEED (PAN/TILT)
         SET_CUE_OFFSET = 0xB4,  // CUE OFFSETS (float/float)
@@ -245,7 +249,7 @@ namespace CROSSBOW
         SET_SYS_ATT = 0xBB,  // GIMBAL ANGLES?
         SET_BDC_VICOR_ENABLE = 0xBC,  //	VICOR ON/OFF	byte 0/1	
         SET_BDC_RELAY_ENABLE = 0xBD,  //	RELAY X ON/OFF	byte 1,2,3,4; byte 0/1	relay 1 based 
-        SET_BDC_DEVICES_ENABLE = 0xBE,  // ENABLE DEVICE BYTE ENUM; BYTE ON/OFF (see enum)
+        RES_BE = 0xBE,  // ⚠ RETIRED v3.6.0 — SET_BDC_DEVICES_ENABLE superseded by SET_DEVICES_ENABLE (0xAA). Returns STATUS_CMD_REJECTED pending FW-C8.
         RES_BF = 0xBF,  // BDC REGISTER RESPONSE
 
         // RESERVING 0xC FOR CAM COMMANDS
@@ -268,37 +272,37 @@ namespace CROSSBOW
 
         // RESERVING 0xD FOR ORIN/TRACKER COMMANDS
         ORIN_CAM_SET_ACTIVE = 0xD0,  // ACTIVE CAMERA
-        ORIN_SET_STREAM_MULTICAST = 0xD1, // ENABLE STREAM MULTICAST	byte: 0/1 [1: enabled default]
-        ORIN_SET_STREAM_60FPS = 0xD2, // ENABLE STREAM 60FPS 	byte: 0/1 [0: 30FPS, 1: 60 FPS default]
+        ORIN_ACAM_COCO_ENABLE = 0xD1,  // Moved from 0xDF (v3.6.0). Enable/disable COCO inference. uint8 op [, uint8 param]
+        RES_D2 = 0xD2,  // ⚠ RETIRED v3.6.0 — ORIN_SET_STREAM_60FPS retired; framerate is compile/launch time only. ASCII FRAMERATE covers ENG use.
         ORIN_SET_STREAM_OVERLAYS = 0xD3,  // STREAM OVERLAY BITMASK — see HUD_OVERLAY_FLAGS enum
         ORIN_ACAM_SET_CUE_FLAG = 0xD4,  // byte 0/1
         ORIN_ACAM_SET_TRACKGATE_SIZE = 0xD5,  // uint8, unit8
         ORIN_ACAM_ENABLE_FOCUSSCORE = 0xD6,  // byte 0/1
         ORIN_ACAM_SET_TRACKGATE_CENTER = 0xD7,  // uint16, uint16
-        ORIN_SET_STREAM_TESTPATTERNS = 0xD8, // ENABLE CAPTURE TEST STREAMS	byte : 0 / 1[0:disabled default]
+        RES_D8 = 0xD8,  // ⚠ RETIRED v3.6.0 — ORIN_SET_TESTPATTERNS retired; ASCII TESTSRC covers ENG use; TRC binary handler never implemented.
         ORIN_ACAM_COCO_CLASS_FILTER = 0xD9,  // filter COCO inference to class ID  uint8 (0-79; 0xFF=all) //
         ORIN_ACAM_RESET_TRACKB = 0xDA, //  	RESET TRACK B TO CURRENT TRACK BOX  none
         ORIN_ACAM_ENABLE_TRACKERS = 0xDB,  // ENABLE TRACKERS FOR ACTIVE CAMERA
         ORIN_ACAM_SET_ATOFFSET = 0xDC,  // SET AT OFFSET FOR ACTIVE CAMERA
         ORIN_ACAM_SET_FTOFFSET = 0xDD,  // SET FT OFFSET FOR ACTIVE CAMERA
         ORIN_SET_VIEW_MODE = 0xDE,  // VIEW MODE — 0=CAM1, 1=CAM2, 2=PIP4, 3=PIP8
-        ORIN_ACAM_COCO_ENABLE = 0xDF,  // enable/disable COCO intra-trackbox inference  uint8 op [, uint8 param]
+        RES_DF = 0xDF,  // ⚠ RETIRED v3.6.0 — ORIN_ACAM_COCO_ENABLE moved to 0xD1.
 
         // RESERVED 0xE (MAYBE TMS/PMS STUFF?)
-        SET_MCC_REINIT = 0xE0,  // uint8: 0=NTP, 1=TMC, 2=HEL, 3=BAT, 4=PTP, 5=CRG, 6=GNSS, 7=BDC
-        SET_MCC_DEVICES_ENABLE = 0xE1,  // uint8: 0=NTP, 1=TMC, 2=HEL, 3=BAT, 4=PTP, 5=CRG, 6=GNSS, 7=BDC; uint8 0/1 — device 4 (PTP) enable/disable PTP slave; device 0 (NTP) controls NTP only
+        SET_BCAST_FIRECONTROL_STATUS = 0xE0,  // Moved from 0xAB (v3.6.0). INT_ENG. Internal vote sync MCC→BDC→TRC. byte voteBitsMcc (VOTE_BITS_MCC); byte voteBitsBdc (VOTE_BITS_BDC)
+        RES_E1 = 0xE1,  // ⚠ RETIRED v3.6.0 — SET_MCC_DEVICES_ENABLE superseded by SET_DEVICES_ENABLE (0xAA). Returns STATUS_CMD_REJECTED pending FW-C8.
         PMS_POWER_ENABLE = 0xE2,  // uint8(MCC_POWER); uint8 0/1 — INT_ENG only, both revisions. Replaces PMS_SOL_ENABLE/PMS_RELAY_ENABLE/PMS_VICOR_ENABLE.
-        PMS_CHARGER_ENABLE = 0xE3,  // ENABLE CHARGER	on/off byte 0/1
+        RES_E3 = 0xE3,  // ⚠ RETIRED v3.6.0 — PMS_CHARGER_ENABLE merged into SET_CHARGER (0xAF). Returns STATUS_CMD_REJECTED pending FW-C8.
         RES_E4 = 0xE4,  // ⚠ RETIRED — was PMS_RELAY_ENABLE. Use PMS_POWER_ENABLE with GPS_RELAY or LASER_RELAY.
         RES_E5 = 0xE5,  //	
-        PMS_SET_FIRE_REQUESTED_VOTE = 0xE6,  //	LASER FIRE VOTE REQUEST	byte on/off	Must be sent continous
+        RES_E6 = 0xE6,  // ⚠ RETIRED v3.6.0 — SET_FIRE_VOTE moved to 0xAB and promoted to INT_OPS. Returns STATUS_CMD_REJECTED pending FW-C8.
         TMS_INPUT_FAN_SPEED = 0xE7,  // which byte 0/1; speed (0=off, 128=low, 255=high) — see TMC_FAN_SPEEDS
         TMS_SET_DAC_VALUE = 0xE8,  // SET DAC D TO VALUE	which enum dac, uint16 val	maybe just habe 3 settings?
         TMS_SET_VICOR_ENABLE = 0xE9,  //	SET VICOR X TO ON/OFF	which byte vicor (0-3), byte on/off
         TMS_SET_LCM_ENABLE = 0xEA,  //	SET LCM X TO ON/OFF	which byte lcm enum, byte on/off
         TMS_SET_TARGET_TEMP = 0xEB,  // Set Target Temp C  byte [10-40 deg C] — firmware clamps silently
         RES_EC = 0xEC,  // ⚠ RETIRED — was PMS_VICOR_ENABLE. Use PMS_POWER_ENABLE with VICOR_BUS, GIM_VICOR, or TMS_VICOR.
-        PMS_SET_CHARGER_LEVEL = 0xED,  // SET CHARGER CURRENT LEVEL	enum low=10, med=30, high=55
+        RES_ED = 0xED,  // ⚠ RETIRED v3.6.0 — PMS_SET_CHARGER_LEVEL merged into SET_CHARGER (0xAF). Returns STATUS_CMD_REJECTED pending FW-C8.
         RES_EE = 0xEE,  //
         RES_EF = 0xEF,  // 
 
@@ -410,7 +414,7 @@ namespace CROSSBOW
 
     // -----------------------------------------------------------------------
     // -----------------------------------------------------------------------
-    // MCC fire control vote bits — 0xAB SET_BCAST_FIRECONTROL_STATUS byte 1
+    // MCC fire control vote bits — 0xE0 SET_BCAST_FIRECONTROL_STATUS byte 1
     // Send via: aTRC.SetFireStatus(FireVote.SetMcc(...))
     //
     // NOTE: bit1 (NotAbort) is INVERTED — 0 = abort ACTIVE (safe-by-default).
@@ -436,7 +440,7 @@ namespace CROSSBOW
     }
 
     // -----------------------------------------------------------------------
-    // BDC geometry vote bits — 0xAB SET_BCAST_FIRECONTROL_STATUS byte 2
+    // BDC geometry vote bits — 0xE0 SET_BCAST_FIRECONTROL_STATUS byte 2
     // Send via: aTRC.SetFireStatus(mcc, FireVote.SetBdc(...))
     // -----------------------------------------------------------------------
     [Flags]

@@ -3,9 +3,14 @@
 **Project:** CROSSBOW  
 **Document:** `CROSSBOW_DOCUMENT_REGISTER.md`  
 **Doc #:** IPGD-0001  
-**Version:** 1.4.8  
-**Date:** 2026-04-08  
+**Version:** 1.4.9  
+**Date:** 2026-04-12  
 **Status:** Current  
+
+**v1.4.9 changes (2026-04-12):**
+- IPGD-0019 added — `CROSSBOW_CHANGELOG.md` (Changelog and Action Item Register)
+- Section 5 added — Retired Working Files (unregistered documents absorbed into IPGD-0019)
+- Self-referential entry corrected — version was inconsistent between header (1.4.8) and table entry (1.4.6); both now 1.4.9
 
 ---
 
@@ -41,7 +46,7 @@ This register is the canonical reference for all CROSSBOW project documents. It 
   <td><code>gen_eng_icd.js</code></td>
 </tr>
 <tr>
-  <td colspan="8"><em>Full internal engineering ICD covering all five controllers (MCC, BDC, TMC, FMC, TRC) — all INT_ENG and INT_OPS commands, full register layouts, ASCII command reference, and enumeration definitions. Classification: IPG Internal Use Only. Issued to IPG engineering staff only.</em></td>
+  <td colspan="8"><em>Full internal engineering ICD covering all five controllers (MCC, BDC, TMC, FMC, TRC) — all INT_ENG and INT_OPS commands, full register layouts, ASCII command reference, and enumeration definitions. Classification: IPG Internal Use Only. Issued to IPG engineering staff only. Note: source .md is at v3.5.2 (2026-04-11) — docx not yet regenerated from latest source.</em></td>
 </tr>
 
 <tr>
@@ -199,7 +204,21 @@ This register is the canonical reference for all CROSSBOW project documents. It 
   <td>—</td>
 </tr>
 <tr>
-  <td colspan="8"><em>System architecture reference. Covers subsystem relationships, interface topology, A1/A2/A3 port assignments, data flows, client access model, and MCC PTP/NTP time source architecture. v3.3.4: §9 MCC Internal Architecture updated for unified V1/V2 hardware abstraction. §9.6 Build Configuration added. §15 MCC version 3.3.0. §16 MCC HW_REV compatibility entry added.</em></td>
+  <td colspan="8"><em>System architecture reference. Covers subsystem relationships, interface topology, A1/A2/A3 port assignments, data flows, client access model, and MCC PTP/NTP time source architecture. Note: source .md is at v3.3.7 (2026-04-11) — register not yet updated to reflect BDC unification (v3.3.6) and FMC STM32F7 port (v3.3.7) entries.</em></td>
+</tr>
+
+<tr>
+  <td>—</td>
+  <td>CROSSBOW Changelog and Action Item Register</td>
+  <td>IPGD-0019</td>
+  <td>1.0.0</td>
+  <td>✅ Current</td>
+  <td>2026-04-12</td>
+  <td><code>CROSSBOW_CHANGELOG.md</code></td>
+  <td>—</td>
+</tr>
+<tr>
+  <td colspan="8"><em>Unified changelog and action item register. Part 1: session-by-session narrative log. Part 2: all open action items (priority-ordered, subsystem-grouped by FW controller and SW component). Part 3: full closure archive grouped by session. Supersedes unregistered working files <code>Embedded_Controllers_ACTION_ITEMS.md</code> and <code>Embedded_Controllers_CLOSED_ACTION_ITEMS.md</code> (both retired — see §5). Classification: IPG Internal Use Only.</em></td>
 </tr>
 
 <tr>
@@ -340,14 +359,51 @@ This register is the canonical reference for all CROSSBOW project documents. It 
   <td>—</td>
   <td>CROSSBOW Document Register</td>
   <td>IPGD-0001</td>
-  <td>1.4.6</td>
+  <td>1.4.9</td>
   <td>✅ Current</td>
-  <td>2026-04-06</td>
+  <td>2026-04-12</td>
   <td><code>CROSSBOW_DOCUMENT_REGISTER.md</code></td>
   <td>—</td>
 </tr>
 <tr>
   <td colspan="8"><em>This document. Canonical register of all CROSSBOW project documents. Lists filename, title, doc control number, version, status, and release date for all deliverables and source documents. Also serves as a reusable appendix in all controlled documents.</em></td>
+</tr>
+
+</tbody>
+</table>
+
+---
+
+## 5 — Retired Working Files
+
+Unregistered working files absorbed into registered documents and retired in place. These files should not be updated — all future changes go to the superseding document.
+
+<table>
+<thead>
+<tr>
+  <th>Filename</th>
+  <th>Former Purpose</th>
+  <th>Status</th>
+  <th>Retired Date</th>
+  <th>Superseded By</th>
+</tr>
+</thead>
+<tbody>
+
+<tr>
+  <td><code>Embedded_Controllers_ACTION_ITEMS.md</code></td>
+  <td>Open action item tracking — embedded firmware and ENG GUI</td>
+  <td>🚫 Retired</td>
+  <td>2026-04-12</td>
+  <td>IPGD-0019 Part 2 — <code>CROSSBOW_CHANGELOG.md</code></td>
+</tr>
+
+<tr>
+  <td><code>Embedded_Controllers_CLOSED_ACTION_ITEMS.md</code></td>
+  <td>Closed action item archive — embedded firmware and ENG GUI</td>
+  <td>🚫 Retired</td>
+  <td>2026-04-12</td>
+  <td>IPGD-0019 Part 3 — <code>CROSSBOW_CHANGELOG.md</code></td>
 </tr>
 
 </tbody>
@@ -364,7 +420,7 @@ This register is the canonical reference for all CROSSBOW project documents. It 
 | IPGD-0003 | CROSSBOW ICD — Internal Engineering | `CROSSBOW_ICD_INT_ENG.docx` | `CROSSBOW_ICD_INT_ENG.md` |
 | IPGD-0004 | CROSSBOW ICD — Internal Operations | `CROSSBOW_ICD_INT_OPS.docx` | `CROSSBOW_ICD_INT_OPS.md` |
 | IPGD-0005 | CROSSBOW ICD — External Operations | `CROSSBOW_ICD_EXT_OPS.docx` | `CROSSBOW_ICD_EXT_OPS.md` |
-| IPGD-0006 | CROSSBOW System Architecture v3.3.4 | — | `ARCHITECTURE.md` |
+| IPGD-0006 | CROSSBOW System Architecture | — | `ARCHITECTURE.md` |
 | IPGD-0007 | CROSSBOW Application Summary | — | `CROSS_APP_SUMMARY.md` |
 | IPGD-0008 | GStreamer Installation Guide | — | `GSTREAMER_INSTALL.md` |
 | IPGD-0009 | TRC Migration Guide | — | `TRC_MIGRATION.md` |
@@ -377,6 +433,7 @@ This register is the canonical reference for all CROSSBOW project documents. It 
 | IPGD-0016 | CROSSBOW Firmware Style and Patterns Reference | — | `CROSSBOW_FW_PATTERNS.md` |
 | IPGD-0017 | OpenCV CUDA DNN Build Procedure | — | `OPENCV_CUDA_BUILD.md` |
 | IPGD-0018 | CROSSBOW GNSS Receiver Configuration | — | `CROSSBOW_GNSS_CONFIG.md` |
+| IPGD-0019 | CROSSBOW Changelog and Action Item Register | — | `CROSSBOW_CHANGELOG.md` |
 
 <sup>†</sup> Placeholder — pending S21-39.
 

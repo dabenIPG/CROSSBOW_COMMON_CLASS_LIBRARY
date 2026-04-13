@@ -202,7 +202,7 @@ namespace CROSSBOW
                             HB_RX_ms = (DateTime.UtcNow - lastMsgRx).TotalMilliseconds;
                             lastMsgRx = DateTime.UtcNow;
 
-                            if (frame[3] == (byte)ICD.RES_A1)
+                            if (frame[3] == 0x00 || frame[3] == 0xA1)  // REG1 CMD_BYTE: 0x00 (v4.0.0) | 0xA1 (legacy pre-FW-C10)
                             {
                                 byte[] payload = new byte[PAYLOAD_LEN];
                                 Array.Copy(frame, PAYLOAD_OFFSET, payload, 0, PAYLOAD_LEN);
@@ -400,10 +400,10 @@ namespace CROSSBOW
             Send((byte)ICD.ORIN_CAM_SET_ACTIVE, new byte[] { (byte)id });
         }
 
-        // SET_BDC_REINIT
+        // 0xA9 SET_REINIT — unified controller reinitialise, INT_OPS (v4.0.0)
         public void ReInitDevice(BDC_DEVICES dev)
         {
-            Send((byte)ICD.SET_BDC_REINIT, new byte[] { Convert.ToByte(dev) });
+            Send((byte)ICD.SET_REINIT, new byte[] { Convert.ToByte(dev) });
         }
 
         // SET_GIM_SPD — jog gimbal
@@ -750,11 +750,10 @@ namespace CROSSBOW
             Send((byte)ICD.SET_BDC_RELAY_ENABLE, new byte[] { (byte)w, Convert.ToByte(en) });
         }
 
-        // 0xBE SET_BDC_DEVICES_ENABLE
+        // 0xAA SET_DEVICES_ENABLE — unified device enable, INT_OPS (v4.0.0)
         public void EnableDevice(BDC_DEVICES dev, bool en)
         {
-            if (!AssertIntEng("EnableDevice")) return;
-            Send((byte)ICD.SET_BDC_DEVICES_ENABLE, new byte[] { (byte)dev, (byte)(en ? 1 : 0) });
+            Send((byte)ICD.SET_DEVICES_ENABLE, new byte[] { (byte)dev, (byte)(en ? 1 : 0) });
         }
 
         // SET_BDC_VOTE_OVERRIDE
@@ -762,18 +761,6 @@ namespace CROSSBOW
         {
             if (!AssertIntEng("SetOverrideVote")) return;
             Send((byte)ICD.SET_BDC_VOTE_OVERRIDE, new byte[] { (byte)vote, Convert.ToByte(val) });
-        }
-
-
-
-        // SET_GIM_HOME
-        public void GimbalSetHome(Int32 x, Int32 y)
-        {
-            if (!AssertIntEng("GimbalSetHome")) return;
-            byte[] payload = new byte[8];
-            Buffer.BlockCopy(BitConverter.GetBytes(x), 0, payload, 0, 4);
-            Buffer.BlockCopy(BitConverter.GetBytes(y), 0, payload, 4, 4);
-            Send((byte)ICD.SET_GIM_HOME, payload);
         }
 
         // BDC_SET_FSM_SIGNS
@@ -805,14 +792,6 @@ namespace CROSSBOW
         {
             if (!AssertIntEng("STAGE_CALIBRATE")) return;
             Send((byte)ICD.FMC_STAGE_CALIB);
-        }
-
-        // PRINT_LCH_DATA
-        public void SEND_LCH_PRINT(LCH.FILETYPE fileType, bool printDetail)
-        {
-            if (!AssertIntEng("SEND_LCH_PRINT")) return;
-            Send((byte)ICD.PRINT_LCH_DATA,
-                new byte[] { (byte)fileType, Convert.ToByte(printDetail) });
         }
     }
 }
