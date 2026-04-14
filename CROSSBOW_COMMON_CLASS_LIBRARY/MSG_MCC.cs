@@ -198,10 +198,10 @@ namespace CROSSBOW
         // ── Heartbeat counters ────────────────────────────────────────────────
         // ICD v3.0.0 session 4: HB_RTC removed
         public double HB_NTP  { get; private set; } = 0;
-        public double HB_HEL  { get; private set; } = 0;
-        public double HB_BAT  { get; private set; } = 0;
-        public double HB_CRG  { get; private set; } = 0;
-        public double HB_GNSS { get; private set; } = 0;
+        public int HB_HEL_ms  { get; private set; } = 0;
+        public int HB_BAT_ms { get; private set; } = 0;
+        public int HB_CRG_ms { get; private set; } = 0;
+        public int HB_GNSS_ms { get; private set; } = 0;
 
         // MCU die temperature
         public double TEMP_MCU { get; private set; } = 0;
@@ -348,11 +348,11 @@ namespace CROSSBOW
         //   [34-44]   Battery block   (MSG_BATTERY — 11 bytes)
         //   [45-65]   Laser block     (MSG_IPG — 21 bytes)
         //   [66-129]  TMC REG1        64-byte block (MSG_TMC)
-        //   [130]     HB_NTP           uint8 (/10 = seconds)
-        //   [131]     HB_HEL           uint8
-        //   [132]     HB_BAT           uint8
-        //   [133]     HB_CRG           uint8
-        //   [134]     HB_GNSS          uint8
+        //   [130]     HB_NTP           uint8  x0.1s units — /10.0 = seconds (NTP ~10s interval)
+        //   [131]     HB_HEL_ms        uint8  raw ms      — laser TCP poll ~20ms
+        //   [132]     HB_BAT_ms        uint8  raw ms      — RS485 poll ~100ms
+        //   [133]     HB_CRG_ms        uint8  raw ms      — I2C poll ~100ms, V1 only (0 on V2)
+        //   [134]     HB_GNSS_ms       uint8  raw ms      — NovAtel UDP 1–12Hz
         //   [135-212] GNSS data        (MSG_GNSS — 78 bytes)
         //   [213-244] Charger data     (MSG_CMC — 32 bytes)
         //   [245-248] VERSION_WORD     uint32
@@ -395,10 +395,10 @@ namespace CROSSBOW
 
             // HB counters — HB_RTC removed in session 4
             HB_NTP  = (double)msg[ndx] / 10.0; ndx++;
-            HB_HEL  = (double)msg[ndx] / 10.0; ndx++;
-            HB_BAT  = (double)msg[ndx] / 10.0; ndx++;
-            HB_CRG  = (double)msg[ndx] / 10.0; ndx++;
-            HB_GNSS = (double)msg[ndx] / 10.0; ndx++;
+            HB_HEL_ms = (int)msg[ndx]; ndx++;  // raw ms
+            HB_BAT_ms  = (int)msg[ndx]; ndx++;  // raw ms
+            HB_CRG_ms  = (int)msg[ndx]; ndx++;  // raw ms
+            HB_GNSS_ms = (int)msg[ndx]; ndx++;  // raw ms
 
             ndx = GNSSMsg.ParseMsg(msg, ndx);
             ndx = CMCMsg.Parse(msg, ndx);       // embedded entry point — Parse() not ParseMsg()

@@ -1,12 +1,26 @@
 # CROSSBOW System Architecture
 
-**Document Version:** 3.3.8
+**Document Version:** 4.0.1
 **Date:** 2026-04-13
-**ICD Reference:** ICD v3.6.0
-**Status:** FW-C5 IP-define consolidation closed across fleet.
+**ICD Reference:** ICD v3.6.0 (targeting v4.0.0 — ICD-1 pending)
+**Status:** CB-20260413 fleet closures complete (FW-C5, FMC-TPH, HW-FMC-1, BDC-FSM-VOTE-LATCH, TRC-SOM-SN).
+
+**v4.0.1 changes (BDC HB subsystem wiring — 2026-04-13):**
+- §10 BDC: Eight HB counter bytes added to REG1 in reserved space [396–403]. Bytes [396]=HB_NTP (x0.1s), [397]=HB_FMC_ms, [398]=HB_TRC_ms, [399]=HB_MCC_ms, [400]=HB_GIM_ms, [401]=HB_FUJI_ms, [402]=HB_MWIR_ms, [403]=HB_INCL_ms (all raw ms). Defined count 396→404, reserved 116→108. ICD rows to be added under ICD-1 pass.
+- §10.9 Build config: `prev_HB_NTP`/`HB_NTP` added to BDC. NTP stamp added to A2 intercept block.
+
+**v4.0.0 changes (HW revision quick reference + doc version alignment — 2026-04-13):**
+- §3.1 (new): Hardware Revision Quick Reference — fleet-wide V1/V2 summary table for MCC, BDC, TMC, FMC. Captures HW_REV register byte location, platform labels, key V1→V2 differences, ICD breaking change version, C# IsV2 detection pattern, and cross-controller hw_rev.hpp build config matrix. Bring-up warnings for MCC V2 polarity and BDC Vicor POL_VICOR_OFF rule included.
+
+**v3.3.9 changes (additional CB-20260413 closures — 2026-04-13):**
+- §10 BDC — BDC-FSM-VOTE-LATCH closed. `isFSMNotLimited` (VOTE_BITS_BDC bit 7, `FSM_NOT_LTD` — inverted logic, set = OK) now computed from FMC FSM position readback (`fmc.fsm_posX_rb` / `fsm_posY_rb`) at the top of `BDC::PidUpdate()`, ahead of the `TICK_PID` rate gate. Conversion: `(fsm_posX_rb - FSM_X0) * iFOV_FSM_X_DEG_COUNT` gives target-space degrees, magnitude check vs `FSM_ANGLE_MAX_TARGET_SPACE_DEG = 2.0°`. The ATRACK/FTRACK case body still overwrites with the predictive (track-error-derived) value when actively driving the FSM (lead-by-one-tick advantage in track mode); in all other modes the readback value persists. Vote bit now reflects current physical FSM angular state in every mode rather than latching the last ATRACK predictive value. **Architectural note:** the rate gate `if ((millis() - prev_PID_Millis) < TICK_PID) return;` was deliberately moved BELOW the FSM readback block — the FSM limit check is an instantaneous physical state read, not a control-loop concept, so the readback updates at full UPDATE-loop rate while the predictive computation stays gated to PID rate. Both computations live inside `PidUpdate()` together by design (paired alongside FSM_X / FSM_Y / Set_FM_POS); do not hoist either out.
+- §8 TRC — TRC-SOM-SN closed. Jetson SOM serial number now read once at startup from `/proc/device-tree/serial-number` in `main.cpp` (parsed via `std::stoull` with try/catch fallback to 0), stored in `GlobalState.somSerial` (`uint64_t`), packed as `uint64 LE` into TelemetryPacket bytes [49-56] in `udp_listener.cpp::buildTelemetry()`. C# `MSG_TRC.cs` parses via `BitConverter.ToUInt64`. `som_serial` row added to ICD INT_ENG TRC REG1 table tagged v4.0.0 (TRC-SOM-SN); defined-bytes 49 → 57, reserved 15 → 7. SOM serial additionally rendered on TRC OSD video overlay (user addition beyond surgical change set).
+- HW-FMC-1 closed (hardware-only): FMC/BDC shared 5V on USB serial connector corrected in hardware. Merged FMC-HW-4, FMC-HW-5, FMC-HW-7. No firmware or ARCH body impact; recorded for action register completeness.
+- §17 Open items: BDC-FSM-VOTE-LATCH, TRC-SOM-SN, HW-FMC-1 closed. New low-priority item TRC-SOM-SN-ICD opened then closed in same session (deferred ICD edit applied).
+- Documentation hygiene: §10.5 mislabel in v3.3.7 / v3.3.8 changes blocks corrected — the bullets referenced "§10.5 IP defines" but the actual §10.5 in the body is "BDC Time Source Architecture". IP defines are not currently a body section in ARCH. Bullets updated to read "IP defines" without the incorrect section number. ARCH-1 should consider whether to create a canonical IP defines section.
 
 **v3.3.8 changes (FW-C5 + FMC-TPH closures — 2026-04-13):**
-- §10.5 IP defines: FW-C5 closed. `defines.hpp` gained `IP_HEL_BYTES` (.13) and `IP_NTP_FALLBACK_BYTES` (.208). All firmware peer-IP literals replaced with `IP_*_BYTES` references across MCC (4 edits), BDC (3 edits), TMC (3 edits, including `tmc.cpp` `_mcc[]` temp-array dance retired), FMC (1 edit). TRC controller code (Linux/Jetson) was already compliant via its own `Defaults::` namespace registry — zero firmware edits needed. C# side: new flat `IPS` static class added to `defines.cs` (12 string constants for all CROSSBOW node IPs, including C#-only THEIA/HYPERION). All five C# client classes (`mcc.cs`, `bdc.cs`, `tmc.cs`, `fmc.cs`, `trc.cs`) migrated to `IPS.<NODE>` references — 6 edits total (TRC had a duplicate literal at `trc.cs:106` bypassing the IP property, also fixed). Discipline: peer-driver classes take IP via `INIT(IPAddress)`, C# client IP properties use `private set` — both type-enforced. Surgical option (a) — SET_NTP_CONFIG last-octet handlers, parsed-octet serial commands, and log strings intentionally left in place.
+- IP defines: FW-C5 closed. `defines.hpp` gained `IP_HEL_BYTES` (.13) and `IP_NTP_FALLBACK_BYTES` (.208). All firmware peer-IP literals replaced with `IP_*_BYTES` references across MCC (4 edits), BDC (3 edits), TMC (3 edits, including `tmc.cpp` `_mcc[]` temp-array dance retired), FMC (1 edit). TRC controller code (Linux/Jetson) was already compliant via its own `Defaults::` namespace registry — zero firmware edits needed. C# side: new flat `IPS` static class added to `defines.cs` (12 string constants for all CROSSBOW node IPs, including C#-only THEIA/HYPERION). All five C# client classes (`mcc.cs`, `bdc.cs`, `tmc.cs`, `fmc.cs`, `trc.cs`) migrated to `IPS.<NODE>` references — 6 edits total (TRC had a duplicate literal at `trc.cs:106` bypassing the IP property, also fixed). Discipline: peer-driver classes take IP via `INIT(IPAddress)`, C# client IP properties use `private set` — both type-enforced. Surgical option (a) — SET_NTP_CONFIG last-octet handlers, parsed-octet serial commands, and log strings intentionally left in place.
 - §12 FMC: FMC-TPH closed. BME280 ambient T/P/H integration on V2 (STM32F7) hardware. REG1 bytes [47–58] populated with three floats (Temp °C / Pressure Pa / Humidity %), all gated `#if defined(HW_REV_V2)`; V1 leaves bytes 0x00 → decodes to 0.0f. C# `MSG_FMC.cs` parses the new fields; `frmFMC.cs` populates `lbl_FMC_tph` gated on `IsV2`. Bench-verified on V2 hardware: MCU 45.28°C, Ambient 30.79°C, Pressure 100131.88 Pa, Humidity 30.47%.
 - §17 Open items: FW-C5 closed. Three new low-priority items opened: ARCH-FMC-HW (FMC §12.1 V1/V2 table refactor), FW-C5-FRAME-CLEANUP (retire dead `A1_DEST_*_IP` defines from `frame.hpp`), TRC-CS-DEAD-IPENDPOINT (retire dead `ipEndPoint` field in `trc.cs`).
 
@@ -64,7 +78,7 @@
 - §6.6 BDC A1 ARP backoff added — `a1FailCount`/`a1BackoffCount`/`A1_FAIL_MAX=3`/`A1_BACKOFF_TICKS=5`. Note: backoff detection not working (FW-C4 open) — use `A1 OFF` as workaround when TRC offline.
 - §6.5 TIME command: `lastSync ms` → `ms ago` (`millis() - lastSyncMs`) on all controllers. `PrintTime()` calls gated on `isSynched` — prints `[not synced]` when not synced (STM32 controllers) or `[not synced]`/`[see PTPDEBUG]` (FMC). `NTP enabled`, `NTP offset_us`, `NTP lastSync ms ago` fields added to TMC TIME command (were missing). NTP fallback prints gated on `DEBUG_LEVEL >= MIN` fleet-wide.
 - §6.5 PTPDIAG command added to all four controllers — toggles `ptp.suppressDelayReq` for FW-B3 testing.
-- §10.5 IP defines: `IP_BDC_BYTES`, `IP_TMC_BYTES`, `IP_MCC_BYTES` added to `defines.hpp`. `IP_TRC_BYTES` confirmed existing. Hardcoded IPs replaced in `SEND_FIRE_STATUS()` (MCC) and `SEND_FIRE_STATUS_TO_TRC()` (BDC). Audit pending (FW-C5).
+- IP defines: `IP_BDC_BYTES`, `IP_TMC_BYTES`, `IP_MCC_BYTES` added to `defines.hpp`. `IP_TRC_BYTES` confirmed existing. Hardcoded IPs replaced in `SEND_FIRE_STATUS()` (MCC) and `SEND_FIRE_STATUS_TO_TRC()` (BDC). Audit pending (FW-C5).
 - §6.9 (new): Serial debug standards — serial buffer pattern, HELP box structure, COMMON/SPECIFIC command split, TIME command output format, A1 TX control, FMC SerialUSB constraint. Authoritative reference for adding new serial commands to any controller.
 - §17 Open items: FW-C3, FW-C4, FW-C5, DOC-3 added. SAMD-NTP closed.
 
@@ -369,6 +383,61 @@ For full TRC/Jetson setup procedure (OS install, static IP, software deployment)
 | **CUE SIM** | Windows PC | C# / .NET 8 / WinForms | EXT_OPS test and simulation tool — simulated track injection into HYPERION (UDP:15001) or direct to THEIA (UDP:15009). HyperionSniffer for CUE output verification. |
 | **TRC_ENG_GUI_PRESERVE** | Windows PC | C# / .NET 8 / WinForms | Engineering GUI — all 5 controllers via A2 |
 | **CROSSBOW lib** | Shared | C# / .NET 8 | Shared class library — namespace CROSSBOW. MSG_MCC, MSG_BDC and all sub-message parsers. Used by both THEIA and TRC_ENG_GUI_PRESERVE. |
+
+
+### 3.1 Hardware Revision Quick Reference
+
+All four embedded controllers (MCC, BDC, TMC, FMC) share a unified V1/V2 hardware abstraction
+pattern via `hw_rev.hpp`. The active revision is compile-time selected and self-reported in REG1
+at boot. Read the `HW_REV` register byte before interpreting `HEALTH_BITS` and `POWER_BITS`.
+
+| Controller | HW_REV Byte | V1 Platform | V2 Platform | Key V1 → V2 Differences | ICD Breaking Change |
+|-----------|------------|-------------|-------------|--------------------------|---------------------|
+| **MCC** | REG1 [254] | STM32F7 | STM32F7 | Solenoids (SOL_HEL, SOL_BDA) retired; single relay-bus Vicor replaced by dual independent Vicors (GIM_VICOR LOW=ON, TMS_VICOR HIGH=ON); GPS relay removed (GNSS always powered); charger changed from I2C (DBU3200 CC/CV) to GPIO-only; charger enable pin moved (6→82) | `HEALTH_BITS`/`POWER_BITS` rename — ICD v3.4.0 |
+| **BDC** | REG1 [392] | STM32F7 | STM32F7 | Vicor PSU polarity inverted (NC opto LOW=ON → non-inverted HIGH=ON); Vicor thermistor pin moved (GPIO 0→20); three new NTC thermistors added (RELAY GPIO 19, BAT GPIO 18, USB GPIO 16); IP175 5-port Ethernet switch added (RESET GPIO 52, DISABLE GPIO 64); unused DIG2 (GPIO 42) removed | `HEALTH_BITS`/`POWER_BITS` rename; `isSwitchEnabled` HEALTH_BITS bit 1 (V2 only) — ICD v3.5.1 |
+| **TMC** | REG1 [62] | STM32F7 | STM32F7 | Single Vicor pump (DAC speed control) replaced by two independent TRACO DC-DCs (on/off only, per-pump); heater subsystem (Vicor + DAC) removed; two ADS1015 external ADCs (8 aux temp channels) removed — replaced by direct MCU analog inputs; total Vicors reduced 4→2 (LCM only); PSU inhibit opto polarity flipped (NO CTRL_ON=LOW → NC CTRL_ON=HIGH); `tv3`/`tv4` temp channels V1-only (0x00 on V2) | None breaking — unified in session 30 |
+| **FMC** | REG1 [45] | SAMD21 (MKR) | STM32F7 (OpenCR) | **Platform change** — SAMD21 → STM32F7; serial abstracted (`SerialUSB`→`Serial` via `FMC_SERIAL`); SPI bus abstracted (`SPI`→`SPI_IMU` via `FMC_SPI`); BME280 ambient TPH (Temp/Pressure/Humidity) live on V2 (REG1 [47–58]); V1 TPH bytes always 0x00; NTP unconditional on V2 (SAMD21 `SerialUSB` blocking bug not applicable on STM32) | `HEALTH_BITS` [7] / `POWER_BITS` [46] promoted from RESERVED; `isFSM_Powered`/`isStageEnabled` moved from HEALTH_BITS to POWER_BITS — ICD v3.5.2 |
+
+#### Revision Detection — C# Pattern
+
+```csharp
+// All controllers: read HW_REV byte first; gate V2-only field reads on IsV2
+bool IsV1  = (HW_REV == 0x01);
+bool IsV2  = (HW_REV == 0x02);
+
+// MCC — byte [254]
+bool mccIsV2 = msgMcc.IsV2;   // gates: HEALTH_BITS[9], POWER_BITS[10], TMS_VICOR fields
+
+// BDC — byte [392]
+bool bdcIsV2 = msgBdc.IsV2;   // gates: isSwitchEnabled (HEALTH_BITS bit 1), TEMP_RELAY/BAT/USB [393-395]
+
+// TMC — byte [62]
+bool tmcIsV2 = msgTmc.IsV2;   // gates: tv3/tv4 channels (always 0x00 on V2)
+
+// FMC — byte [45]
+bool fmcIsV2 = msgFmc.IsV2;   // gates: POWER_BITS [46], TPH fields [47-58]
+```
+
+#### `hw_rev.hpp` Build Config — Per-Controller Defines
+
+| Define | MCC | BDC | TMC | FMC |
+|--------|-----|-----|-----|-----|
+| `HW_REV_V1` | V1 — solenoids, relay-bus Vicor, I2C charger | V1 — Vicor NC opto LOW=ON, GPIO 0 thermistor | V1 — Vicor pump, ADS1015, heater | V1 — SAMD21/MKR layout |
+| `HW_REV_V2` | V2 — dual Vicor (GIM+TMS), no solenoids, GPIO charger | V2 — Vicor HIGH=ON, GPIO 20 thermistor, 3 new NTCs, IP175 | V2 — TRACO pumps, direct MCU analog, no heater | V2 — STM32F7/OpenCR layout |
+| HW_REV byte | `MCC_HW_REV_BYTE` → REG1 [254] | `BDC_HW_REV_BYTE` → REG1 [392] | `TMC_HW_REV_BYTE` → REG1 [62] | `FMC_HW_REV_BYTE` → REG1 [45] |
+| Polarity macro | `POL_PWR_GIM_ON=LOW` / `POL_PWR_TMS_ON=HIGH` (V2) | `POL_VICOR_ON/OFF` | `CTRL_ON/CTRL_OFF` | `FSM_POW_ON/OFF` |
+| Serial | — | — | — | `FMC_SERIAL` (`SerialUSB`↔`Serial`) |
+| SPI | — | — | — | `FMC_SPI` (`SPI`↔`SPI_IMU`) |
+
+> ⚠️ **Bring-up note (MCC V2):** `POL_PWR_GIM_ON = LOW` and `POL_PWR_TMS_ON = HIGH` are
+> analytically derived — verify with a meter on first V2 MCC hardware bring-up before enabling
+> relay sequences.
+
+> ⚠️ **BDC Vicor polarity:** V1 NC opto (LOW=ON, safe-off=HIGH). V2 non-inverted (HIGH=ON,
+> safe-off=LOW). Boot-safe state uses `POL_VICOR_OFF` — never write literal `HIGH`/`LOW` to
+> `PIN_VICOR1_ENABLE` in `BDC.ino`.
+
+---
 
 ---
 
@@ -1477,6 +1546,21 @@ TRC tx, ty
 | `BDC_HW_REV_BYTE` | Auto-set — `0x01` (V1) or `0x02` (V2); written to REG1 byte [392] |
 | `POL_VICOR_ON` / `POL_VICOR_OFF` | Per-revision Vicor drive polarity — consumed by `EnableVicor()` and `BDC.ino` setup() |
 
+**REG1 HB counter bytes (reserved space [396–403]):**
+
+| Byte | Field | Units | Source |
+|------|-------|-------|--------|
+| [396] | `HB_NTP` | x0.1s (÷100) | NTP intercept — same pattern as MCC |
+| [397] | `HB_FMC_ms` | raw ms | `a1_fmc_last_ms` — FMC A1 stream RX |
+| [398] | `HB_TRC_ms` | raw ms | `a1_trc_last_ms` — TRC A1 stream RX |
+| [399] | `HB_MCC_ms` | raw ms | `a1_mcc_last_ms` — MCC 0xAB broadcast RX |
+| [400] | `HB_GIM_ms` | raw ms | `gimbal.lastRecordTime` — Galil data record RX |
+| [401] | `HB_FUJI_ms` | raw ms | `fuji.lastRspTime` — C10 serial response RX |
+| [402] | `HB_MWIR_ms` | raw ms | `mwir.lastRspTime` — serial response RX |
+| [403] | `HB_INCL_ms` | raw ms | `incl.lastRspTime` — UART frame RX |
+
+Defined: 404 bytes. Reserved: 108 bytes. Fixed block: 512 bytes.
+
 `EnableVicor(bool en)` is the sole function that calls `digitalWrite` on `PIN_VICOR1_ENABLE`. All relay `digitalWrite` calls go through `EnableRelay(uint8_t r, bool en)`. Both revisions use HIGH=ON for all four relays — no relay polarity macros needed.
 
 > ⚠️ **Vicor polarity note:** V1 uses a NC opto-isolator (LOW=ON, safe-off=HIGH). V2 is non-inverted (HIGH=ON, safe-off=LOW). `BDC.ino` setup() uses `POL_VICOR_OFF` for the boot-safe state — do not write literal `HIGH`/`LOW` for `PIN_VICOR1_ENABLE`.
@@ -1772,6 +1856,7 @@ UInt32 patch =  VERSION_WORD        & 0xFFF;
 | TMC V1/V2 hardware abstraction | ✅ Session 30 — `hw_rev.hpp`, unified codebase FW v3.3.0, HW_REV byte [62] self-detecting |
 | TMC `SINGLE_LOOP` topology flag | ✅ Session 30 — STATUS_BITS1 bit 6, both revisions |
 | MCC V1/V2 hardware abstraction | ✅ MCC unification — `hw_rev.hpp`, unified codebase FW v3.3.0, HW_REV byte [254] self-detecting. HEALTH_BITS/POWER_BITS breaking change — ICD v3.4.0 required. |
+| BDC HB counters REG1 [396–403] | ✅ CB-20260413d — 8 bytes, defined count 396→404 |
 | BDC V1/V2 hardware abstraction | ✅ BDC unification — `hw_rev.hpp`, unified codebase FW v3.3.0, HW_REV byte [392] self-detecting. HEALTH_BITS/POWER_BITS rename (ICD v3.5.1). Vicor polarity flip V1→V2. Three new thermistors + IP175 switch control on V2. |
 | FMC STM32F7 port + V1/V2 hardware abstraction | ✅ FMC STM32F7 port — `hw_rev.hpp`, unified codebase FW v3.3.0, HW_REV byte [45] self-detecting. HEALTH_BITS byte [7] / POWER_BITS byte [46] (ICD v3.5.2). ptp.INIT() gated FW-B3. FMC_SERIAL/FMC_SPI platform abstraction. |
 
@@ -1787,7 +1872,7 @@ Quick reference — high priority items as of session 29:
 
 | ID | Item | Priority |
 |----|------|----------|
-| TRC-SOM-SN | TRC SOM serial — read `/proc/device-tree/serial-number` at startup into `GlobalState` as `uint64`; pack LE into `TelemetryPacket` bytes [49–56]. See ICD TRC REG1 update. `MSG_TRC.cs`: add `SomSerial` property. | 🟡 Medium |
+| ~~TRC-SOM-SN~~ | ~~TRC SOM serial — read `/proc/device-tree/serial-number` at startup into `GlobalState` as `uint64`; pack LE into `TelemetryPacket` bytes [49–56]. See ICD TRC REG1 update. `MSG_TRC.cs`: add `SomSerial` property.~~ | ✅ **Closed CB-20260413** (firmware + C# + ICD INT_ENG row applied; SOM also wired to TRC OSD) |
 | THEIA-SHUTDOWN | Graceful STANDBY→OFF sequence — laser safe, relays off, HMI disconnect | 🔴 High |
 | HMI-A3-18 | LCH/KIZ/HORIZ — architecture analyzed; C# emplacement GUI work pending | 🔴 High |
 | ~~FMC-NTP~~ | ~~FMC dt elevated — suspected NTP/USB CDC main loop blocking~~ ✅ Closed — SAMD21 NTP bug not applicable on STM32F7. isNTP_Enabled default true, NTP init unconditional. | ~~🔴 High~~ |
@@ -1795,11 +1880,12 @@ Quick reference — high priority items as of session 29:
 | FW-B3 | PTP DELAY_REQ W5500 contention — `isPTP_Enabled=false` fleet-wide workaround | 🔴 High |
 | FW-B4 | Fleet `ptp.INIT()` gate audit — BDC and TMC `ptp.INIT()` unconditional needs gate (FW-B3 multicast contention fleet-wide). MCC and FMC already gated. Fix BDC boot state machine PTP_INIT step and TMC INIT(). | 🔴 High |
 | FW-B5 | BDC FSM position offsets wrong in `handleA1Frame()` — `fsm_posX_rb` reads offset 24 (should be 20), `fsm_posY_rb` reads offset 28 (should be 24). Wrong values, no crash. Fix in next BDC session. | 🟡 Medium |
-| HW-FMC-1 | FMC/BDC shared power via serial connection — brownout risk on USB power in test. Use dedicated supply for FMC. Verify power rail isolation in production harness. | 🔴 High |
+| ~~HW-FMC-1~~ | ~~FMC/BDC shared power via serial connection — brownout risk on USB power in test. Use dedicated supply for FMC. Verify power rail isolation in production harness.~~ | ✅ **Closed CB-20260413** (HW fix bench-verified by user) |
 | GUI-8 | TRC C# client model — apply standardized pattern from session 29 | 🟡 Medium |
 | FW-C3 | BDC Fuji boot status — `fuji.SETUP()` deferred post-boot, FUJI_WAIT always times out | 🟡 Medium |
 | FW-C4 | BDC A1 ARP backoff not working — `A1 OFF` workaround when TRC offline | 🟡 Medium |
 | ~~FW-C5~~ | ~~Audit/consolidate IP defines in `defines.hpp` — remove remaining hardcoded IPs~~ | ✅ **Closed CB-20260413** |
+| ~~BDC-FSM-VOTE-LATCH~~ | ~~`isFSMNotLimited` only updated inside ATRACK/FTRACK case body — vote bit latched stale on track exit until next track entry~~ | ✅ **Closed CB-20260413** (readback-based fix at top of `BDC::PidUpdate()` ahead of TICK_PID gate; ATRACK/FTRACK still overwrites with predictive value) |
 | FW-14 | GNSS socket bug — MCC `RUNONCE` case 6 and `EXEC_UDP` use wrong socket | 🟡 Medium |
 | NEW-38d | TRC PTP integration — TIME_BITS, MSG_TRC.cs, `ptp4l` | 🟡 Medium |
 | DOC-1 | Add TRC NTP setup reference to ARCHITECTURE.md §2.5 | 🟡 Medium |

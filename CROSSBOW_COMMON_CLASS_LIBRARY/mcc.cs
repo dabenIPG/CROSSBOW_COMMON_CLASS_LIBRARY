@@ -476,14 +476,14 @@ namespace CROSSBOW
         public bool TMC_STATUS { get { return LatestMSG.isTMC_DeviceReady; } }
         public bool GPS_STATUS { get { return LatestMSG.isGNSS_DeviceReady && LatestMSG.GNSSMsg.SIV >= 4; } }
 
-        private const double HEL_HB_STALE_S = 2.0;   // laser silent > 2s = stale
+        private const int HEL_HB_STALE_ms = 200;   // laser silent > 200ms = stale
 
         public READY_STATUS HEL_STATUS
         {
             get
             {
                 if (!LatestMSG.isHEL_Sensed) return READY_STATUS.ERROR;
-                if (LatestMSG.HB_HEL > HEL_HB_STALE_S) return READY_STATUS.ERROR;
+                if (LatestMSG.HB_HEL_ms > HEL_HB_STALE_ms) return READY_STATUS.ERROR;
 
                 if (LatestMSG.LaserModel == LASER_MODEL.YLM_6K)
                 {

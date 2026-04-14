@@ -1,6 +1,6 @@
 # JETSON_SETUP.md — TRC Jetson Orin NX Setup Procedure
 **Document:** JETSON_SETUP.md (DOC-2)  
-**Version:** 2.2.3  
+**Version:** 2.2.4  
 **Date:** 2026-04-13  
 **Confirmed on:** Unit 1 (2026-04-09), Unit 2 (2026-04-09), Unit 3 (2026-04-10) — all 54 PASS, 0 FAIL  
 **Platform:** Seeed Studio reComputer J4012 **(non-Super, J401 carrier)** — see hardware note below  
@@ -54,7 +54,7 @@ The resulting image can then be used for Path C replication.
 
 **Use when:**
 - Deploying a new non-Super J4012 unit from a validated image produced by Path A.
-- **Upgrading an existing non-Super J4012 unit** — wipe and restore from the current gold image. This is the only supported upgrade path. In-place upgrades (former Path C) are retired.
+- **Replacing an existing unit** with a clean gold image when Path C (apt upgrade) is not applicable or the unit is too far out of state.
 
 ```bash
 # Boot target unit from USB recovery drive, then:
@@ -82,12 +82,119 @@ a non-Super image to a Super J4012 or vice versa — mechanically incompatible.
 
 ---
 
-### Deployment Path C — NOT USED
+### Deployment Path C — In-place apt upgrade (6.2.1 → 6.2.2)
 
-> ⛔ **Path C (in-place upgrade) is retired for this fleet.**
-> All upgrades to existing non-Super units use **Path B** — wipe and restore from the
-> current gold image. In-place upgrades introduce drift risk and are not supported.
-> If a unit is too far out of state to restore from image, use Path A to rebuild it.
+**Use when:** Unit is running JetPack 6.2.1 (L4T 36.4.x) and needs upgrading to 6.2.2
+(L4T 36.5) without a full reflash. Preserves existing data, applications, and
+configurations. Validated 2026-04-13.
+
+> **What this upgrades:** CUDA compute stack + L4T kernel. Does not change the
+> bootloader. Unit stays fully operational throughout.
+>
+> **What still needs manual push after:** VimbaX 2026-1, OpenCV 4.13.0 (rebuild),
+> TRC binary, hostname, NTP, crontab — follow relevant phases below.
+
+**Prerequisites:**
+- Internet access on the Jetson (Windows ICS or direct)
+- Gateway must be set correctly and survive reboot — fix permanently via nmtui before starting
+- L4T packages must be held before touching apt
+
+**Step 1 — Set gateway permanently (survives reboot):**
+```bash
+sudo nmtui
+# Edit connection → enP8p1s0 → Gateway: 192.168.1.208 (or your internet gateway)
+# Save → deactivate/reactivate
+```
+
+**Step 2 — Hold L4T packages:**
+```bash
+sudo apt-mark hold \
+    nvidia-l4t-bootloader \
+    nvidia-l4t-kernel \
+    nvidia-l4t-kernel-dtbs \
+    nvidia-l4t-kernel-headers \
+    nvidia-l4t-core \
+    nvidia-l4t-init
+
+apt-mark showhold | grep nvidia-l4t
+# Must show all 6
+```
+
+**Step 3 — Update apt sources to r36.5:**
+```bash
+# Verify current source
+cat /etc/apt/sources.list.d/nvidia-l4t-apt-source.list
+# Expect: r36.4
+
+sudo sed -i 's/r36\.4/r36.5/g' /etc/apt/sources.list.d/nvidia-l4t-apt-source.list
+
+# Verify
+cat /etc/apt/sources.list.d/nvidia-l4t-apt-source.list
+# Expect: r36.5 on all three lines
+```
+
+**Step 4 — Upgrade CUDA compute stack:**
+```bash
+sudo apt-get update
+sudo apt-get dist-upgrade -y
+sudo apt install --fix-broken -o Dpkg::Options::="--force-overwrite"
+```
+
+> If prompted about config files — answer **N** (keep current version).
+
+**Step 5 — Upgrade L4T kernel:**
+```bash
+# Unhold
+sudo apt-mark unhold \
+    nvidia-l4t-bootloader \
+    nvidia-l4t-kernel \
+    nvidia-l4t-kernel-dtbs \
+    nvidia-l4t-kernel-headers \
+    nvidia-l4t-core \
+    nvidia-l4t-init
+
+# Install new kernel packages (bootloader left on hold — lower risk)
+sudo apt-get install -y \
+    nvidia-l4t-core \
+    nvidia-l4t-kernel \
+    nvidia-l4t-kernel-dtbs \
+    nvidia-l4t-kernel-headers \
+    nvidia-l4t-init
+
+# Rehold immediately
+sudo apt-mark hold \
+    nvidia-l4t-bootloader \
+    nvidia-l4t-kernel \
+    nvidia-l4t-kernel-dtbs \
+    nvidia-l4t-kernel-headers \
+    nvidia-l4t-core \
+    nvidia-l4t-init
+
+apt-mark showhold | grep nvidia-l4t
+# Must show all 6
+```
+
+**Step 6 — Reboot and verify:**
+```bash
+sudo reboot
+```
+
+After reboot — fix gateway if needed, then verify:
+```bash
+cat /etc/nv_tegra_release
+# Expect: REVISION: 5.0
+
+nvcc --version | grep release
+# Expect: release 12.6
+```
+
+**Then continue with the relevant phases:**
+- VimbaX upgrade → Phase 4 (remove old version first: `sudo rm -rf /opt/VimbaX_2025-1`)
+- OpenCV rebuild → Phase 5 (purge old build first per script prompts)
+- TRC binary push → Phase 6 (make clean && make mandatory — soname changed)
+- All other phases as normal → Phase 7, 8
+
+**Gate:** `cat /etc/nv_tegra_release` must show `REVISION: 5.0` before proceeding.
 
 ---
 
@@ -1229,6 +1336,9 @@ rm -f  ~/CV/SETUP/opencv_build_*.log
 rm -rf ~/CV/SETUP/opencv_build_workspace/
 rm -rf ~/CV/SETUP/deploy/
 rm -rf ~/CV/SETUP/gst-vmbsrc/
+# Remove stray start scripts — these belong in ~/CV/TRC/ not SETUP/
+rm -f  ~/CV/SETUP/trc_start.sh
+rm -f  ~/CV/SETUP/trc_start_bench.sh
 
 # ~/CV/TRC/ — build artifacts, source, docs (binary-only production image)
 rm -f ~/CV/TRC/*.o
@@ -1443,7 +1553,8 @@ cd ~/CV/SETUP/
 
 | Version | Date | Notes |
 |---------|------|-------|
-| 2.2.3 | 2026-04-13 | Phase 0.3: two-boot sequence documented explicitly — Boot 1 (EULA + full OEM setup), Boot 2 (stable desktop), then recovery mode. SDK Manager confirmed as only validated flash path. Phase 7.1: Windows line endings fix (`sed -i 's/\r//'`) added for all `.sh` files after SCP transfer — prevents `/bin/bash^M: bad interpreter` error. |
+| 2.2.4 | 2026-04-13 | Path C reinstated — validated in-place apt upgrade from JetPack 6.2.1 → 6.2.2 (L4T 36.4 → 36.5). Full procedure documented: hold L4T packages, update sources to r36.5, dist-upgrade compute stack, unhold/upgrade L4T kernel/rehold, reboot. Bootloader left on hold (lower risk). Gateway must be set permanently via nmtui before starting — lost after reboot during upgrade. Path B updated — removed reference to retired Path C. Phase 8.2 cleanup script: `trc_start.sh`/`trc_start_bench.sh` removal from `~/CV/SETUP/` added (stray files from old units). |
+| 2.2.3 | 2026-04-13 | Phase 0.3: two-boot sequence documented. Phase 7.1: Windows line endings fix added. |
 | 2.2.2 | 2026-04-13 | Phase 4.6: `libVmbCPP.so: file too short` fix documented. Phase 8.2: `test1.py` kept as survivor. Phase 9.2/9.3: rewritten — dd/l4t_backup_restore NOT supported for cloning. Known issues: two new entries. |
 | 2.2.1 | 2026-04-10 | Phase 7.1: `04_verify_all.sh` and `cleanup_pre_image.sh` added to file push step. Phase 7.3: marked POST-DEPLOYMENT ONLY. Checkpoint 7: corrected log reference and tcpdump target. Phase 8.2: `gst-vmbsrc/` directory added to cleanup script. Pass criteria table: Makefile row annotated with Gate A/B caveat. |
 | 2.2.0 | 2026-04-10 | Path C retired — upgrade path is Path B (image restore). Path B updated to cover upgrades. Path D: Super units share same TRC role IP. IP 192.168.1.22 documented as TRC role address shared by all units. Hostname scheme: `trc-<SOM serial>` from `/proc/device-tree/serial-number` — Phase 1.1a added. Phase 8 restructured: 8.1 desktop removal, 8.2 cleanup script (`cleanup_pre_image.sh`), 8.3 two-gate verify (54 PASS pre-cleanup / 53 PASS + 1 expected FAIL post-cleanup). Bench crontab documented as gold standard for image. |

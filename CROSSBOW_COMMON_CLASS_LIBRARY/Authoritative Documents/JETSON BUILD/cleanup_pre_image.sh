@@ -16,6 +16,9 @@ rm -f  ~/CV/SETUP/opencv_build_*.log
 rm -rf ~/CV/SETUP/opencv_build_workspace/
 rm -rf ~/CV/SETUP/deploy/
 rm -rf ~/CV/SETUP/gst-vmbsrc/
+# Remove stray start scripts — these belong in ~/CV/TRC/ not SETUP/
+rm -f  ~/CV/SETUP/trc_start.sh
+rm -f  ~/CV/SETUP/trc_start_bench.sh
 
 # ~/CV/TRC/ — build artifacts, source, docs (binary-only production image)
 rm -f ~/CV/TRC/*.o

@@ -3,9 +3,17 @@
 **Project:** CROSSBOW  
 **Document:** `CROSSBOW_DOCUMENT_REGISTER.md`  
 **Doc #:** IPGD-0001  
-**Version:** 1.5.0  
+**Version:** 1.5.2  
 **Date:** 2026-04-13  
 **Status:** Current  
+
+**v1.5.2 changes (2026-04-13):**
+- IPGD-0019 (changelog) → 1.3.2 — TRC-SOM-SN-ICD closed in cleanup pass
+- IPGD-0006 (ARCH) → 3.3.9 — BDC-FSM-VOTE-LATCH + TRC-SOM-SN + HW-FMC-1 closure narratives, §10.5 mislabel fixed
+- IPGD-0003 (ICD INT_ENG) — content edit (TRC REG1 som_serial row added); header version held at 3.6.0
+
+**v1.5.1 changes (2026-04-13):**
+- IPGD-0019 (changelog) → 1.3.1 — CB-20260413 expanded with HW-FMC-1, BDC-FSM-VOTE-LATCH, TRC-SOM-SN closures
 
 **v1.5.0 changes (2026-04-13):**
 - IPGD-0019 (changelog) → 1.3.0 — CB-20260413 closures (FW-C5, DEF-1, MSG-CMC-1, FMC-TPH)
@@ -51,7 +59,7 @@ This register is the canonical reference for all CROSSBOW project documents. It 
   <td><code>gen_eng_icd.js</code></td>
 </tr>
 <tr>
-  <td colspan="8"><em>Full internal engineering ICD covering all five controllers (MCC, BDC, TMC, FMC, TRC) — all INT_ENG and INT_OPS commands, full register layouts, ASCII command reference, and enumeration definitions. Classification: IPG Internal Use Only. Issued to IPG engineering staff only. v3.6.0 (2026-04-13): CB-20260412 command space restructuring, FW v4.0.0 fleet-wide, FW-C10 REG1 CMD_BYTE 0xA1→0x00. CB-20260413 content edit: FMC REG1 [47–58] BME280 TPH rows added (FMC-TPH closure) — header version held at 3.6.0 pending ICD-1 v4.0.0 rename.</em></td>
+  <td colspan="8"><em>Full internal engineering ICD covering all five controllers (MCC, BDC, TMC, FMC, TRC) — all INT_ENG and INT_OPS commands, full register layouts, ASCII command reference, and enumeration definitions. Classification: IPG Internal Use Only. Issued to IPG engineering staff only. v3.6.0 (2026-04-13): CB-20260412 command space restructuring, FW v4.0.0 fleet-wide, FW-C10 REG1 CMD_BYTE 0xA1→0x00. CB-20260413 content edits: FMC REG1 [47–58] BME280 TPH rows added (FMC-TPH closure); TRC REG1 [49-56] som_serial uint64 LE row added (TRC-SOM-SN-ICD closure). Header version held at 3.6.0 pending ICD-1 v4.0.0 rename pass.</em></td>
 </tr>
 
 <tr>
@@ -202,28 +210,28 @@ This register is the canonical reference for all CROSSBOW project documents. It 
   <td>—</td>
   <td>CROSSBOW System Architecture</td>
   <td>IPGD-0006</td>
-  <td>3.3.8</td>
+  <td>3.3.9</td>
   <td>⚠️ Pending ARCH-1 update pass</td>
   <td>2026-04-13</td>
   <td><code>ARCHITECTURE.md</code></td>
   <td>—</td>
 </tr>
 <tr>
-  <td colspan="8"><em>System architecture reference. Covers subsystem relationships, interface topology, A1/A2/A3 port assignments, data flows, client access model, and MCC PTP/NTP time source architecture. v3.3.8 (2026-04-13): FW-C5 closure (IP define consolidation across firmware + C#), FMC-TPH closure (BME280 V2 integration), §17 open items updated with three new low-priority cleanup items. v3.3.7 (2026-04-11): FMC STM32F7 migration, BDC V1/V2 unification. Pending ARCH-1: CB-20260412 command space, FW v4.0.0, V1/V2 subsections for all controllers, FW_PATTERNS appendix updates, ICD ref bump to v3.6.0.</em></td>
+  <td colspan="8"><em>System architecture reference. Covers subsystem relationships, interface topology, A1/A2/A3 port assignments, data flows, client access model, and MCC PTP/NTP time source architecture. v3.3.9 (2026-04-13): BDC-FSM-VOTE-LATCH closure narrative (§10), TRC-SOM-SN closure narrative (§8), HW-FMC-1 closure note, §17 rows marked, long-standing §10.5 mislabel in v3.3.7/v3.3.8 changes blocks corrected (bullets referenced "§10.5 IP defines" but actual §10.5 is "BDC Time Source Architecture"; IP defines are not currently a body section). v3.3.8 (2026-04-13): FW-C5 closure (IP define consolidation across firmware + C#), FMC-TPH closure (BME280 V2 integration), §17 open items updated with three new low-priority cleanup items. v3.3.7 (2026-04-11): FMC STM32F7 migration, BDC V1/V2 unification. Pending ARCH-1: CB-20260412 command space, FW v4.0.0, V1/V2 subsections for all controllers, FW_PATTERNS appendix updates, ICD ref bump to v3.6.0, canonical IP defines section.</em></td>
 </tr>
 
 <tr>
   <td>—</td>
   <td>CROSSBOW Changelog and Action Item Register</td>
   <td>IPGD-0019</td>
-  <td>1.3.0</td>
+  <td>1.3.2</td>
   <td>✅ Current</td>
   <td>2026-04-13</td>
   <td><code>CROSSBOW_CHANGELOG.md</code></td>
   <td>—</td>
 </tr>
 <tr>
-  <td colspan="8"><em>Unified changelog and action item register. Part 1: session-by-session narrative log. Part 2: all open action items (priority-ordered, subsystem-grouped by FW controller and SW component). Part 3: full closure archive grouped by session. v1.3.0 (2026-04-13): CB-20260413 closures — FW-C5 (full firmware + C# IP-define consolidation across all five controllers), DEF-1 (defines.hpp/defines.cs enum verification), MSG-CMC-1 (parser stale reference), FMC-TPH (BME280 V2 integration bench-verified). Three new low-priority items opened (ARCH-FMC-HW, FW-C5-FRAME-CLEANUP, TRC-CS-DEAD-IPENDPOINT). Supersedes unregistered working files <code>Embedded_Controllers_ACTION_ITEMS.md</code> and <code>Embedded_Controllers_CLOSED_ACTION_ITEMS.md</code> (both retired). Classification: IPG Internal Use Only.</em></td>
+  <td colspan="8"><em>Unified changelog and action item register. Part 1: session-by-session narrative log. Part 2: all open action items (priority-ordered, subsystem-grouped by FW controller and SW component). Part 3: full closure archive grouped by session. v1.3.2 (2026-04-13): TRC-SOM-SN-ICD closed (deferred ICD edit applied in cleanup pass), CB-20260413 trailer updated, ARCH bumped to v3.3.9. v1.3.1 (2026-04-13): CB-20260413 expanded with three additional closures — HW-FMC-1, BDC-FSM-VOTE-LATCH, TRC-SOM-SN. v1.3.0 (2026-04-13): CB-20260413 closures — FW-C5, DEF-1, MSG-CMC-1, FMC-TPH. Three new low-priority items opened (ARCH-FMC-HW, FW-C5-FRAME-CLEANUP, TRC-CS-DEAD-IPENDPOINT). Supersedes unregistered working files <code>Embedded_Controllers_ACTION_ITEMS.md</code> and <code>Embedded_Controllers_CLOSED_ACTION_ITEMS.md</code> (both retired). Classification: IPG Internal Use Only.</em></td>
 </tr>
 
 <tr>

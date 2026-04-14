@@ -2,7 +2,7 @@
 
 **Document:** `CROSSBOW_CHANGELOG.md`
 **Doc #:** IPGD-0019
-**Version:** 1.3.0
+**Version:** 4.0.3
 **Date:** 2026-04-13
 **Status:** Current
 **Supersedes:** `Embedded_Controllers_ACTION_ITEMS.md` (unregistered, retired), `Embedded_Controllers_CLOSED_ACTION_ITEMS.md` (unregistered, retired)
@@ -21,6 +21,153 @@ Session numbers marked `~` are approximate where the exact session number is unc
 ---
 
 # PART 1 — SESSION LOG
+
+---
+
+## CB-20260413e — HB live HW observations + TRC SOM SN on frmBDC
+**ARCH:** v4.0.1 (no change) | **Files:** `frmBDC.cs` (one line)
+
+**TRC SOM SN on frmBDC:** `tss_trc_version` label updated to append SOM serial number — `frmBDC.cs` line 374. No designer change. Temporary pending a proper `tss_trc_sn` ToolStripStatusLabel when confirmed working on HW.
+
+**Live HW validation — MCC HB counters:**
+
+| HB | Observed | Assessment |
+|---|---|---|
+| BAT [132] | ~100ms | ✅ Expected — RS485 poll TICK = 100ms |
+| CRG [133] | 255ms saturated | ✅ Expected — charger off, no I2C responses, correctly saturates |
+| HEL [131] | 0ms | ❌ Still wrong — `ipg.HB_ms()` not updating. Check `ipg.isConnected` / `ipg.isInit` via serial STATUS to confirm TCP state. Root cause: `lastMsgRx_ms` may not be stamped if laser TCP not connected or `parseLine()` not being called. See IPG-HB-HEL-2. |
+| NTP [130] | ~10s | ✅ Real — `NTP_TICK_MS = 10000`, 10s sync interval confirmed |
+| GNSS [134] | 0–255ms | ✅ Expected — NovAtel streams 1–12Hz, faster messages show low values, slower saturate at 255ms |
+| BDC | 0 | ✅ Correct — MCC does not receive A1 from BDC |
+
+**Live HW validation — BDC HB counters:**
+
+| HB | Observed | Assessment |
+|---|---|---|
+| GIM [400] | ~10ms | ✅ Expected — Galil data records ~125Hz |
+| TRC [398] | ~10ms | ✅ Expected — TRC A1 at 100Hz |
+| VIS/FUJI [401] | ~20ms | ✅ Expected — Fuji fast poll tier 30ms |
+| MWIR [402] | 10–100ms | ✅ Expected — fast tier 50ms / slow tier 500ms |
+| NTP [396] | ~10s | ✅ Real — same NTP_TICK_MS = 10000 |
+| FMC [397] | 1–20ms | ✅ Expected — FMC A1 at 50Hz |
+| INCL [403] | up to 255ms | ✅ Correct but saturates — INCL polls at ~1001ms, always saturates uint8. Consider x0.1s scale (÷100 at pack) to give useful 0–25.5s range. See INCL-HB-SCALE. |
+| MCC [399] | — | Not validated this session |
+
+**Items opened:** IPG-HB-HEL-2, INCL-HB-SCALE, TRC-SN-LABEL
+**Items closed:** none
+
+---
+
+## CB-20260413d — BDC HB subsystem wiring
+**ARCH:** v4.0.1 | **ICD:** BDC REG1 [396–403] new rows — folded into ICD-1 scope | **Files:** `gimbal.hpp`, `fuji.hpp`, `mwir.hpp`, `incl.hpp`, `bdc.hpp`, `bdc.cpp`, `MSG_BDC.cs`, `frmBDC.cs`, `frmBDC_Designer.cs`
+
+**Pattern:** Same compute-in-getter uint8 raw ms pattern established in CB-20260413c for MCC, now applied to BDC. All seven BDC subsystems wired. NTP follows same x0.1s exception as MCC.
+
+**Timestamp verification — all confirmed correct last-heard-from:**
+
+| Subsystem | Source timestamp | Stamped in | Rate |
+|---|---|---|---|
+| FMC | `a1_fmc_last_ms` (`bdc.hpp`) | `bdc.cpp` handleA1Frame on FMC A1 RX | 50 Hz |
+| TRC | `a1_trc_last_ms` (`bdc.hpp`) | `bdc.cpp` handleA1Frame on TRC A1 RX | 100 Hz |
+| MCC | `a1_mcc_last_ms` (`bdc.hpp`) | `bdc.cpp` on MCC 0xAB fire control broadcast RX | 100 Hz |
+| Gimbal | `lastRecordTime` (`gimbal.hpp` — already public) | `gimbal.cpp` ParseRecord() on every 154-byte data record | ~125 Hz |
+| Fuji | `lastRspTime` (`fuji.hpp` — private) | `fuji.cpp` on every valid C10 response | ~16–33 Hz |
+| MWIR | `lastRspTime` (`mwir.hpp` — private) | `mwir.cpp` on every valid serial response | ~20 Hz |
+| INCL | `lastRspTime` (`incl.hpp` — private) | `incl.cpp` processFrame() on every accepted frame | ~1 Hz |
+
+**NTP stamp added to BDC** — `prev_HB_NTP` / `HB_NTP` added to `bdc.hpp`. Stamp added to NTP intercept block in `bdc.cpp` — identical pattern to MCC. `HB_NTP` packed x0.1s units (÷100); C# reads `/10.0` → seconds. All other HBs raw ms.
+
+**Unit summary:**
+
+| Byte | Field | Firmware pack | C# parse | C# type | Display |
+|------|-------|--------------|----------|---------|---------|
+| [396] | HB_NTP | `/ 100` → x0.1s | `/ 10.0` → seconds | `double` | `"00.00s"` |
+| [397] | HB_FMC_ms | raw ms | no divisor | `int` | `"000ms"` |
+| [398] | HB_TRC_ms | raw ms | no divisor | `int` | `"000ms"` |
+| [399] | HB_MCC_ms | raw ms | no divisor | `int` | `"000ms"` |
+| [400] | HB_GIM_ms | raw ms | no divisor | `int` | `"000ms"` |
+| [401] | HB_FUJI_ms | raw ms | no divisor | `int` | `"000ms"` |
+| [402] | HB_MWIR_ms | raw ms | no divisor | `int` | `"000ms"` |
+| [403] | HB_INCL_ms | raw ms | no divisor | `int` | `"000ms"` |
+
+**Changes per file:**
+
+`gimbal.hpp` — `uint8_t HB_ms()` getter added to public section after `lastRecordTime` (line 70). `lastRecordTime` was already public — no visibility change needed.
+
+`fuji.hpp` — `uint8_t HB_ms()` getter added to public section after `hasPotVrefError` (line 111). `lastRspTime` stays private.
+
+`mwir.hpp` — `uint8_t HB_ms()` getter added to public section after `isConnected` (line 103). `lastRspTime` stays private.
+
+`incl.hpp` — `uint8_t HB_ms()` getter added to public section after `isConnected` (line 30). `lastRspTime` stays private.
+
+`bdc.hpp` — `prev_HB_NTP` / `HB_NTP` added after `prev_HB`/`HB_ms` (line 351). Eight HB getters added after `isINCL_Ready()` (line 456): `HB_NTP_val()`, `HB_FMC()`, `HB_TRC()`, `HB_MCC()`, `HB_GIM()`, `HB_FUJI()`, `HB_MWIR()`, `HB_INCL()`.
+
+`bdc.cpp` NTP intercept (line 353) — NTP stamp added: `delta = (millis() - prev_HB_NTP) / 100; HB_NTP = constrain(delta, 0, 255); prev_HB_NTP = millis();` — identical pattern to MCC.
+
+`bdc.cpp` `buildReg01()` — bytes [396–403] packed after [395] V2 temps block: `buf[396]=HB_NTP; buf[397]=HB_FMC(); buf[398]=HB_TRC(); buf[399]=HB_MCC(); buf[400]=HB_GIM(); buf[401]=HB_FUJI(); buf[402]=HB_MWIR(); buf[403]=HB_INCL();`
+
+`MSG_BDC.cs` — eight properties added after `TEMP_USB` (line 199). Comment block updated (line 401) — `[392-511] RESERVED` replaced with per-byte breakdown. Parse lines added at end of `ParseMSG01()` after `TEMP_USB` (line 557).
+
+`frmBDC.cs` — lines 208–216 replaced. All eight labels now wired from `LatestMSG` HB properties. Previously `lbl_trc_hb` and `lbl_fmc_hb` were wired to stale embedded sub-MSG HB values (`trcMSG.HB_TX_ms`, `fmcMSG.HB_ms`) — now sourced from BDC firmware HB counters. `lbl_gimbal_hb` was commented out — now active. `lbl_visCam_hb`, `lbl_irCam_hb`, `lbl_incl_hb`, `lbl_ntp_hb` were unwired — now wired.
+
+`frmBDC_Designer.cs` — `lbl_rtc_hb` renamed to `lbl_mcc_hb` throughout (4 occurrences: line 103, 828, 1134–1142, 2728). RTC is retired; label repurposed for MCC A1 stream HB. `.Name` property updated to `"lbl_mcc_hb"`.
+
+**ICD impact:** BDC REG1 bytes [396–403] promoted from RESERVED. Defined count 396→404, reserved 116→108. Eight new rows to add to BDC REG1 table tagged `v4.0.0 (BDC-HB)`. Folded into ICD-1 scope.
+
+**Items opened:** none
+**Items closed:** none (BDC-HB wiring complete; ICD row additions tracked under ICD-1)
+**ARCH:** v4.0.0 → v4.0.1 (§10 BDC — HB bytes [396–403] noted)
+
+---
+
+## CB-20260413c — MCC HB subsystem wiring + IPG HB fix
+**ARCH:** v4.0.0 (no change) | **Files:** `ipg.hpp`, `ipg.cpp`, `battery.hpp`, `gnss.hpp`, `dbu3200.hpp`, `mcc.hpp`, `mcc.cpp`, `MSG_MCC.cs`, `frmMCC.cs`
+
+**Root cause — IPG-HB-HEL:** `HB_HEL` (REG1 byte [131]) was always 0 in the GUI. Full chain traced: firmware pack correct, `MSG_MCC.cs` parse correct, `frmMCC.cs` label wired. Bug was at the pack site — `ipg.HB_RX_ms / 100` performed integer division on a ~20ms interval, always truncating to 0 before `constrain`. Fix: removed stored `HB_RX_ms` from `ipg.hpp/cpp`, replaced with `HB_ms()` getter computing `millis() - lastMsgRx_ms` at call time.
+
+**Fleet HB pattern established — compute-in-getter, uint8 raw ms out:** All subsystem HB values (HEL, BAT, CRG, GNSS) follow a single pattern — each class owns a `uint8_t HB_ms()` getter that computes elapsed ms since last receive and constrains to uint8 (saturates at 255ms). No `/100` scale — raw ms end-to-end. `mcc.hpp` wrappers call the class getter and return `uint8_t` directly. Pack site in `mcc.cpp SEND_REG_01()` is clean direct assignment. `MSG_MCC.cs` reads raw ms with no divisor; properties typed as `int` with `_ms` suffix. Display format `"000ms"` on all four labels.
+
+**HB_NTP is the deliberate exception** — NTP syncs every ~10s so raw ms overflows uint8 immediately. Firmware packs as x0.1s units (`millis() / 100`); `MSG_MCC.cs` reads with `/ 10.0` → seconds, typed as `double`. Range 0–25.5s fits uint8 correctly for NTP cadence.
+
+**Unit summary:**
+
+| Byte | Field | Firmware pack | C# parse | C# type | Display |
+|------|-------|--------------|----------|---------|---------|
+| [130] | HB_NTP | `/ 100` → x0.1s | `/ 10.0` → seconds | `double` | `"00.00s"` |
+| [131] | HB_HEL_ms | raw ms | no divisor | `int` | `"000ms"` |
+| [132] | HB_BAT_ms | raw ms | no divisor | `int` | `"000ms"` |
+| [133] | HB_CRG_ms | raw ms, 0 on V2 | no divisor | `int` | `"000ms"` |
+| [134] | HB_GNSS_ms | raw ms | no divisor | `int` | `"000ms"` |
+
+**Changes per file:**
+
+`ipg.hpp` — `uint16_t HB_RX_ms` replaced by `uint8_t HB_ms()` getter: `(uint8_t)constrain(millis() - lastMsgRx_ms, 0, 255)`. Raw ms, no scale. `lastMsgRx_ms` stays private.
+
+`ipg.cpp` — `HB_RX_ms` stamp line removed from `parseLine()`. `lastMsgRx_ms = millis()` stamp retained.
+
+`battery.hpp` — `uint8_t HB_ms()` getter added: `(uint8_t)constrain(millis() - lastGoodRxTime, 0, 255)`. Raw ms. `lastGoodRxTime` stamped in `processFrame()` on every valid CRC-checked RS485 frame.
+
+`gnss.hpp` — `uint8_t HB_ms()` getter added: `(uint8_t)constrain(millis() - lastRxMs, 0, 255)`. Raw ms. `lastRxMs` stamped in `UPDATE()` on every received UDP packet from NovAtel.
+
+`dbu3200.hpp` — `uint8_t HB_ms()` getter added: `(uint8_t)constrain(millis() - lastCommSuccessTime, 0, 255)`. Raw ms. V1 only — DBU not present on V2. `lastCommSuccessTime` stamped in `onCommSuccess()`.
+
+`mcc.hpp` — `HB_HEL()` returns `uint8_t`, calls `ipg.HB_ms()`. `HB_BAT()`, `HB_GNSS()` added as `uint8_t` getters. `HB_CRG()` added with V1/V2 guard — `dbu.HB_ms()` on V1, `0` on V2. `HB_BAT`/`HB_CRG`/`HB_GNSS` member variables retired. `lastTick_BAT`/`lastTick_CRG`/`lastTick_GNSS` stubs retired.
+
+`mcc.cpp SEND_REG_01()` — `buf[130]=HB_NTP; buf[131]=HB_HEL(); buf[132]=HB_BAT(); buf[133]=HB_CRG(); buf[134]=HB_GNSS();`. Comments updated to reflect units.
+
+`mcc.cpp PRINT_REG()` — HB section retitled `-- HB Counters --`, all five bytes [130]–[134] now printed. GNSS split into separate `-- GNSS --` section. Previously [131]–[133] were missing entirely.
+
+`mcc.cpp SERIAL_CMD()` — `ipg.HB_RX_ms` reference updated to `ipg.HB_ms()`.
+
+`MSG_MCC.cs` — `HB_HEL`→`int HB_HEL_ms`, `HB_BAT`→`int HB_BAT_ms`, `HB_CRG`→`int HB_CRG_ms`, `HB_GNSS`→`int HB_GNSS_ms`. All four parse as `(int)msg[ndx]` with no divisor. Comment block updated with units. `HB_NTP` unchanged — `double`, `/ 10.0`.
+
+`frmMCC.cs` — all four HB labels updated to `"000ms"` format and `_ms` property names.
+
+**HB_NTP [130]** — working correctly. Stamps in `mcc.cpp` A2 intercept block on each NTP packet received. IP check confirmed correct — `ntp.timeServerIP` is always the active server (primary or fallback) since `ntp.INIT()` overwrites it on fallback switch. No changes needed. Getter refactor deferred (IPG-HB-4).
+
+**Items closed:** IPG-HB-HEL, IPG-HB-1, IPG-HB-2, IPG-HB-3, IPG-STUBS
+**Items opened:** none
+**Items deferred:** IPG-HB-4 (HB_NTP getter refactor — low disruption but touches MSG_MCC.cs and ICD byte [130] label)
 
 ---
 
@@ -82,8 +229,39 @@ Four closures landed this session — three small, one large.
 2. **Property discipline (C#):** every controller client class has `public string IP { get; private set; } = IPS.<NODE>;`. The `private set` is type-enforced — no form code can override it, no parser ever constructs an endpoint. Single point of edit per controller.
 3. **Total surface area for the entire fleet:** 11 firmware edits + 6 C# edits + 2 new firmware defines + 1 new C# class. Roughly 20 line-level changes for the whole 5-controller cleanup.
 
-**Items closed:** DEF-1, MSG-CMC-1, FMC-TPH, FW-C5
-**Items opened:** ARCH-FMC-HW (low — FMC §12.1 V1/V2 hardware table refactor), FW-C5-FRAME-CLEANUP (low — retire dead `A1_DEST_*_IP` defines from `frame.hpp`), TRC-CS-DEAD-IPENDPOINT (low — retire dead `ipEndPoint` field in `trc.cs`)
+---
+
+**HW-FMC-1 closed — bench-verified.** Shared 5V line on USB serial connector between FMC and BDC corrected in hardware (merged FMC-HW-4, FMC-HW-5, FMC-HW-7). User confirmed brownout no longer observed with both controllers active. Production harness isolation verified on user's bench.
+
+---
+
+**BDC-FSM-VOTE-LATCH — opened and closed same session.** User-reported bug: "FMC fsm limit vote not clearing on the BDC until system goes into track." Root cause: `isFSMNotLimited` (VOTE_BITS_BDC bit 7, `FSM_NOT_LTD` — inverted logic, bit set = OK) was only updated inside the ATRACK/FTRACK case body of `BDC::PidUpdate()`, but the variable is read every telemetry tick at `bdc.hpp:224` to build the broadcast vote bitmask. On exit from track mode with the bit cleared (track point off-center had pushed the predictive computation past `FSM_ANGLE_MAX_TARGET_SPACE_DEG = 2.0°`), the value stuck at `false` and the broadcast vote kept reporting NO-FIRE until the next track entry recomputed it.
+
+Initial Claude proposal (default `isFSMNotLimited = true` at top of `PidUpdate()`) was correctly rejected by user — defaulting to `true` would lie about the physical state when the FSM is parked at a non-zero position. Correct fix: compute `isFSMNotLimited` from the FMC FSM position readback at the top of `PidUpdate()`. The data is already available — `fmc.fsm_posX_rb` and `fmc.fsm_posY_rb` are extracted at `bdc.cpp:435-436` from FMC REG1 bytes [20-23]/[24-27] (FW-B5 offset fix) on every A1 frame. Conversion `(fsm_posX_rb - FSM_X0) * iFOV_FSM_X_DEG_COUNT` gives target-space degrees (matching the existing constant's units), and the magnitude check `sqrt(ax_rb² + ay_rb²) <= FSM_ANGLE_MAX_TARGET_SPACE_DEG` produces the correct limit state. SIGN omitted (magnitude only); gimbal NED offset omitted (we want local FSM angle, not world frame). The ATRACK/FTRACK case body still overwrites with the predictive (track-error-derived) value when actively driving the FSM — predictive leads the readback by one tick, which is the correct behaviour in track mode. In all other modes the readback value persists.
+
+**Architectural placement decision (preserve in future maintenance):** user moved the `if ((millis() - prev_PID_Millis) < TICK_PID) return;` rate gate from above the readback block to BELOW it. The FSM limit check is an instantaneous physical state read, not a control-loop concept, and gating it at PID rate would mean some A1 frames carry a vote bit up to one PID period stale. With the gate moved below, the readback updates at full UPDATE-loop rate while the predictive computation remains gated to PID rate. Both computations live inside `PidUpdate()` together by design — they are two halves of the same FSM-limit decision, paired alongside the existing FSM_X/FSM_Y/Set_FM_POS code; hoisting either out of `PidUpdate()` would split a cohesive design. Do not move the rate gate back above the FSM block. Do not move either computation out of `PidUpdate()`.
+
+ARCH was consulted during diagnosis (ARCH §10 BDC subsection has only one passing mention of "fire control votes" — no semantic definition of `FSM_NOT_LTD`). The bit's name (`FSM_NOT_LTD`) implies physical state, not predicted-command state — the readback-based interpretation is the natural one. Bench verification pending on user's end at time of rollup.
+
+---
+
+**TRC-SOM-SN closed — bench-verified.** Format: `uint64 LE` at TelemetryPacket bytes [49-56], user-specified (Claude initially proposed ASCII, was corrected). Bytes [57-63] remain RESERVED (7 bytes). 8 surgical edits applied across 5 files:
+
+- `telemetry.h` — `som_serial` `uint64_t` field replaces 8 bytes of `RESERVED[15]`; `RESERVED[7]` retained for future use; two new `static_assert`s for offsets 49 and 57
+- `types.h` — `uint64_t somSerial{0}` added to `GlobalState` after `version_word` (set-once-at-startup semantics, no atomic needed)
+- `main.cpp` — boot-time read of `/proc/device-tree/serial-number` immediately after `version_word` print, parsed via `std::stoull` with try/catch fallback to 0 on parse failure or missing file. Logs `"SOM Serial: <n> (raw: \"...\")"` to stderr for boot visibility
+- `udp_listener.cpp` — `telemetry.som_serial = state_.somSerial` packed in `buildTelemetry()` immediately after the Jetson stats block
+- `MSG_TRC.cs` — `SomSerial` `UInt64` property added near Jetson health properties; `ParseMsg()` reads 8 bytes via `BitConverter.ToUInt64(rxBuff, ndx); ndx += sizeof(UInt64);` then skips remaining 7 RESERVED bytes (was `ndx += 15`); layout doc comment at top of file updated to show `[49-56] somSerial uint64` + `[57-63] RESERVED 7 bytes`
+
+**Bonus:** user additionally wired `SomSerial` to the TRC on-screen display (OSD overlay) so the SN renders on the live video stream — beyond the surgical change set scope.
+
+**ICD INT_ENG TRC REG1 update held per user request** — tracked as new low-priority item TRC-SOM-SN-ICD. Edit drafted (split `[49-63] RESERVED 15 bytes` row into `[49-56] som_serial uint64 LE` tagged `v4.0.0 (TRC-SOM-SN)` + `[57-63] RESERVED 7 bytes`; defined / reserved totals 49 / 15 → 57 / 7), to be applied at next ICD touch or folded into ICD-1.
+
+---
+
+**Items closed:** DEF-1, MSG-CMC-1, FMC-TPH, FW-C5, HW-FMC-1, BDC-FSM-VOTE-LATCH, TRC-SOM-SN, TRC-SOM-SN-ICD
+**Items opened:** ARCH-FMC-HW (low — FMC §12.1 V1/V2 hardware table refactor), FW-C5-FRAME-CLEANUP (low — retire dead `A1_DEST_*_IP` defines from `frame.hpp`), TRC-CS-DEAD-IPENDPOINT (low — retire dead `ipEndPoint` field in `trc.cs`), BDC-FSM-VOTE-LATCH (opened+closed same session), TRC-SOM-SN-ICD (opened+closed same session — ICD edit was deferred earlier in session, applied in cleanup pass)
+**ARCH:** v3.3.7 → v3.3.8 → v3.3.9 across the day. v3.3.8 captured FW-C5 + FMC-TPH closures; v3.3.9 added BDC-FSM-VOTE-LATCH + TRC-SOM-SN + HW-FMC-1 closure notes, marked the §17 rows, fixed the long-standing §10.5 mislabel in the v3.3.7 / v3.3.8 changes blocks (the bullets referenced "§10.5 IP defines" but actual §10.5 is "BDC Time Source Architecture" — IP defines are not currently a body section in ARCH).
 
 ---
 
@@ -385,7 +563,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | HMI-A3-18 | LCH/KIZ/HORIZ bulk upload bench test | ⏳ Bench verify | Whitelist confirmed clean in firmware. Full end-to-end bench verification needed: upload from THEIA via A3, confirm receipt and correct parse in BDC, verify all fields land correctly in REG1. | None — test only |
 | GUI-2 | HMI robust testing — live HW | ⏳ In progress | MCC/BDC/TMC/FMC ENG GUI stable S29. BDC A3 (THEIA) stable. Full engagement sequence, mode transitions, fire control chain end-to-end still pending. | HW — no code changes |
 | FW-B3 | PTP DELAY_REQ W5500 contention — fleet-wide workaround active | 🟢 Low | When two or more controllers have PTP active simultaneously, W5500 blocks ~40ms per DELAY_REQ on ARP resolution, saturating main loop. **Workaround: `isPTP_Enabled=false` fleet-wide — NTP only in production. NTP server (.33) provides adequate time accuracy for current operations.** Proposed fixes when PTP is needed: (1) `suppressDelayReq` flag per-controller; (2) staggered DELAY_REQ timing — FMC +50ms offset after FOLLOW_UP. Unblocks FW-B4. | `ptpClient.cpp/hpp` — DELAY_REQ transmission logic |
-| HW-FMC-1 | FMC/BDC shared power rail — HW fix applied, bench verify pending | 🟡 Verify | Shared 5V line on USB serial connector between FMC and BDC corrected in hardware. Merges FMC-HW-4, FMC-HW-5, FMC-HW-7. Verify on bench: (1) no brownout when both controllers active; (2) production harness isolation confirmed. | Hardware — bench + production harness |
+| ~~HW-FMC-1~~ | ~~FMC/BDC shared power rail — HW fix applied, bench verify pending~~ | ✅ **CLOSED** | **Bench-verified CB-20260413.** Shared 5V line on USB serial connector between FMC and BDC corrected in hardware. Merged FMC-HW-4, FMC-HW-5, FMC-HW-7. Brownout no longer observed with both controllers active. Production harness isolation confirmed on user's bench. | Hardware — bench + production harness ✅ |
 | HMI-AWB | VIS camera AWB passthrough — ENG GUI then HMI | ⏳ Pending | Priority HIGH. Two sub-steps: **(1) AWB-ENG:** assign `0xC4` (reserved slot — was white balance auto), add to `EXT_CMDS_BDC[]`, BDC→TRC dispatch, TRC binary handler (`needs impl`), wire to `frmBDC.cs`. **(2) AWB-HMI:** expose on THEIA HMI — AWB maps to Xbox controller input, binding TBD. Depends on AWB-ENG. | `frmBDC.cs`, `bdc.hpp`, TRC `udp_listener.cpp`, THEIA HMI `.cs` |
 | HMI-TRACKER | Tracker controls (COCO + optical flow) — ENG GUI then HMI | ⏳ Pending | Two sub-steps: **(1) TRACKER-ENG:** COCO class filter (`0xD9`) in ICD and firmware whitelist — C# wiring to `frmBDC.cs` only. COCO enable is now `0xD1` (moved from `0xDF` — update C# reference). **(2) TRACKER-HMI:** expose on THEIA HMI — Xbox controller binding TBD. Optical flow deferred to TRC session. | `frmBDC.cs`, THEIA HMI `.cs`, `defines.cs` (`ORIN_ACAM_COCO_ENABLE` enum value → `0xD1`) |
 
@@ -407,7 +585,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | ~~FW-C11~~ | ~~Implement `SET_REINIT` at `0xA9` — MCC and BDC~~ | ✅ **CLOSED** | Confirmed in current source: MCC `mcc.cpp` line 610 ✅, BDC `bdc.cpp` line 1188 ✅. |
 | ~~FW-C12~~ | ~~Implement `SET_DEVICES_ENABLE` at `0xAA` — MCC and BDC~~ | ✅ **CLOSED** | Confirmed in current source: MCC `mcc.cpp` line 622 ✅, BDC `bdc.cpp` line 1200 ✅. |
 | ~~FW-C13~~ | ~~Implement `SET_CHARGER` at `0xAF` — MCC~~ | ✅ **CLOSED** | Confirmed in current source: MCC `mcc.cpp` line 712 ✅. |
-| ICD-1 | ICD INT_ENG update pass — CB-20260412 changes | ⏳ Pending | Bump ICD to v3.6.0. Full list of changes: **(New)** `0xA1` SET_HEL_TRAINING_MODE, `0xA3` SET_TIMESRC, `0xA9` SET_REINIT, `0xAA` SET_DEVICES_ENABLE, `0xAB` SET_FIRE_VOTE, `0xAF` SET_CHARGER, `0xD1` ORIN_COCO_ENABLE, `0xE0` SET_BCAST_FIRECONTROL_STATUS, `0xB1` SET_BDC_VOTE_OVERRIDE. **(Retired)** `0xA9`, `0xB0`, `0xB1` (old), `0xBE`, `0xD1` (old), `0xD2`, `0xD8`, `0xDF`, `0xE0` (old), `0xE1`, `0xE3`, `0xE6`, `0xED`. **(Scope to INT_OPS)** `0xA2`, `0xA3`, `0xA1`, `0xAB`. **(INT_ENG)** `0xE0` BCAST_FC, `0xB1` VOTE_OVR. Update version history section. Bump ICD document register entry. | `CROSSBOW_ICD_INT_ENG.md`, IPGD-0003 register entry |
+| ICD-1 | ICD INT_ENG update pass — CB-20260412 + BDC HB bytes | ⏳ Pending | Bump ICD to v3.6.0. Full list of changes: **(New)** `0xA1` SET_HEL_TRAINING_MODE, `0xA3` SET_TIMESRC, `0xA9` SET_REINIT, `0xAA` SET_DEVICES_ENABLE, `0xAB` SET_FIRE_VOTE, `0xAF` SET_CHARGER, `0xD1` ORIN_COCO_ENABLE, `0xE0` SET_BCAST_FIRECONTROL_STATUS, `0xB1` SET_BDC_VOTE_OVERRIDE. **(Retired)** `0xA9`, `0xB0`, `0xB1` (old), `0xBE`, `0xD1` (old), `0xD2`, `0xD8`, `0xDF`, `0xE0` (old), `0xE1`, `0xE3`, `0xE6`, `0xED`. **(Scope to INT_OPS)** `0xA2`, `0xA3`, `0xA1`, `0xAB`. **(INT_ENG)** `0xE0` BCAST_FC, `0xB1` VOTE_OVR. Update version history section. Bump ICD document register entry. | `CROSSBOW_ICD_INT_ENG.md`, IPGD-0003 register entry |
 | ~~DEF-1~~ | ~~defines.hpp / defines.cs update pass — CB-20260412 enum changes~~ | ✅ **CLOSED** | **Verified CB-20260413.** Both files contain all CB-20260412 enum changes — `SET_TIMESRC=0xA3`, `SET_REINIT=0xA9`, `SET_DEVICES_ENABLE=0xAA`, `SET_CHARGER=0xAF` all added; `SET_HEL_TRAINING_MODE=0xA1`, `ORIN_ACAM_COCO_ENABLE=0xD1`, `SET_BCAST_FIRECONTROL_STATUS=0xE0`, `SET_BDC_VOTE_OVERRIDE=0xB1` all reassigned; all retired names removed (replaced by `RES_xx` rejection markers, both files in lockstep). **Naming note:** slot `0xAB` retains the legacy name `SET_FIRE_REQUESTED_VOTE` from its `0xE6` origin — slot-only move, name preserved to avoid C# call-site churn. ICD-1 to use canonical name `SET_FIRE_REQUESTED_VOTE` in v4.0.0 entries (not the `SET_FIRE_VOTE` shorthand used in the original CB-20260412 spec). | `defines.hpp` ✅ `defines.cs` ✅ |
 | ARCH-1 | ARCHITECTURE.md update pass — CB-20260412 | ⏳ Pending | Update: §5 Port reference — note `0xA9`/`0xAA` as new unified fleet commands. §17 Open items — add ICD-1, DEF-1, FW-C8 through FW-C13, FW-C10. Note 0xA1 REG1 CMD_BYTE legacy status. ICD reference bump to v3.6.0 in ARCH header. All controller FW versions → 4.0.0. IsV4 gate documented. **Hardware revision sections:** Each controller section (MCC §9, BDC §10, TMC §?, FMC §12) needs V1/V2 subsections noting platform differences — MCC HW rev (laser/no-laser), BDC V1/V2 (Vicor/TRACO, IP175, new thermistors), TMC V1/V2 (single Vicor/two TRACOs, heater removed, ADS1015 removed), FMC V1/V2 (SAMD21/STM32F7). **CROSSBOW_FW_PATTERNS.md updates to incorporate into ARCH patterns appendix:** (1) platform table FMC row → V1 SAMD21 / V2 STM32F7; (2) line 19 warning update — FMC V2 follows OpenCR pattern; (3) `buildReg01()` example `ICD::GET_REGISTER1` → `0x00`; (4) HPP template `isUnSolicitedEnabled` → retired, replaced by per-client `wantsUnsolicited`. | `ARCHITECTURE.md` |
 | UG-1 | CROSSBOW_UG_ENG_GUI_draft.md update pass | ⏳ Pending | Update following all unification sessions: ICD/ARCH version refs; MCC section (LASER_MODEL, HEL training mode, IsV4 gate, charger UI); BDC section (V1/V2 hardware table, IP175, HEALTH_BITS/POWER_BITS rename, new temps, IsV2 layout switching); TMC section (V1/V2 hardware table, PUMP/PIDGAIN serial commands, isSingleLoop); FMC section (V1 SAMD21 / V2 STM32F7 platform note); TRC section (frame port 10019/10018 vs legacy 5010, retired stream controls). Add IsV4 gating strategy note. Bump document version and revision history. | `CROSSBOW_UG_ENG_GUI_draft.md` |
@@ -425,12 +603,15 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | ~~CRG-1~~ | ~~Charger pin D42 polarity — rename and invert logic~~ | ✅ **CLOSED** | `PIN_CRG_ALARM` → `PIN_CRG_OK` in `pin_defs_mcc.hpp`; logic inverted (`== LOW` = alarm) in `mcc.cpp`; serial STATUS and `MCC.ino` updated. Closed CB-20260412 MCC pass. | ✅ |
 | CRG-2 | `PIN_CRG_OK` → `isCRG_Ready` on V2 | ⏳ Pending CRG-1 | Map `PIN_CRG_OK` read → `isCRG_Ready()` on V2 so device status panel matches V1. | `mcc.hpp` — `isCRG_Ready()` V2 case |
 | CRG-3 | `frmMCC.cs` + designer — `mb_CrgAlarm_rb` control wiring | ⏳ Pending CRG-1 | `frmMCC.cs` + designer: add `mb_CrgAlarm_rb` StatusLabel to `groupBox12`; wire readback to corrected `isCrgAlarm` logic after CRG-1. | `frmMCC.cs`, `frmMCC_Designer.cs` |
-| IPG-HB-1 | `HB_BAT` always 0 — not wired | ⏳ Pending | `HB_BAT` (REG1 byte [132]) always packs 0. Wire: add `lastMsgRx_ms` to `bat` class, stamp on each received packet, compute delta at `SEND_REG_01()` pack time — same pattern as `ipg.HB_RX_ms`. | `battery.hpp`, `mcc.cpp` `SEND_REG_01()` |
-| IPG-HB-HEL | `HB_HEL` (REG1 byte [131]) — verify updating correctly on HW | 🟡 Verify | `HB_HEL` reads `ipg.HB_RX_ms` which is stamped in `parseLine()` — only updates when a TCP line is received and parsed from laser. If laser connected but not actively sending lines, `lastMsgRx_ms` may not be re-stamped and HB grows unbounded. Verify on HW that byte [131] reflects live laser TCP interval. If not updating: stamp `lastMsgRx_ms` at TCP receive level rather than inside `parseLine()`. | `ipg.cpp` — `parseLine()`, `UPDATE()`; `mcc.cpp` — `SEND_REG_01()` byte [131] |
-| IPG-HB-2 | `HB_GNSS` always 0 — not wired | ⏳ Pending | `HB_GNSS` (REG1 byte [134]) always packs 0. Wire: add `lastMsgRx_ms` to `gnss` class, stamp on each received position fix, compute delta at `SEND_REG_01()` pack time. | `gnss.hpp`, `mcc.cpp` `SEND_REG_01()` |
-| IPG-HB-3 | `HB_CRG` always 0 — not wired (V1 only) | ⏳ Pending | `HB_CRG` (REG1 byte [133]) always packs 0. V1 only — CRG has no I2C on V2. Implement if CRG polling exists; gate behind `#if defined(HW_REV_V1)`. | `mcc.cpp` `SEND_REG_01()` |
+| ~~IPG-HB-1~~ | ~~`HB_BAT` always 0 — not wired~~ | ✅ **CLOSED** | `HB_BAT` (REG1 byte [132]) always packs 0. Wire: add `lastMsgRx_ms` to `bat` class, stamp on each received packet, compute delta at `SEND_REG_01()` pack time — same pattern as `ipg.HB_RX_ms`. | `battery.hpp`, `mcc.cpp` `SEND_REG_01()` |
+| ~~IPG-HB-HEL~~ | ~~`HB_HEL` (REG1 byte [131]) — verify updating correctly on HW~~ | ✅ **CLOSED** | `HB_HEL` reads `ipg.HB_RX_ms` which is stamped in `parseLine()` — only updates when a TCP line is received and parsed from laser. If laser connected but not actively sending lines, `lastMsgRx_ms` may not be re-stamped and HB grows unbounded. Verify on HW that byte [131] reflects live laser TCP interval. If not updating: stamp `lastMsgRx_ms` at TCP receive level rather than inside `parseLine()`. | `ipg.cpp` — `parseLine()`, `UPDATE()`; `mcc.cpp` — `SEND_REG_01()` byte [131] |
+| ~~IPG-HB-2~~ | ~~`HB_GNSS` always 0 — not wired~~ | ✅ **CLOSED** | `HB_GNSS` (REG1 byte [134]) always packs 0. Wire: add `lastMsgRx_ms` to `gnss` class, stamp on each received position fix, compute delta at `SEND_REG_01()` pack time. | `gnss.hpp`, `mcc.cpp` `SEND_REG_01()` |
+| ~~IPG-HB-3~~ | ~~`HB_CRG` always 0 — not wired (V1 only)~~ | ✅ **CLOSED** | `HB_CRG` (REG1 byte [133]) always packs 0. V1 only — CRG has no I2C on V2. Implement if CRG polling exists; gate behind `#if defined(HW_REV_V1)`. | `mcc.cpp` `SEND_REG_01()` |
+| IPG-HB-HEL-2 | Laser HB still 0ms on live HW | 🟡 Investigate | `HB_HEL` (REG1 byte [131]) shows 0ms on live HW after CB-20260413c fix. `ipg.HB_ms()` getter computes `millis() - lastMsgRx_ms` — if still 0, `lastMsgRx_ms` is never being stamped. First step: check `ipg.isConnected` / `ipg.isInit` on MCC serial STATUS command to confirm laser TCP state. If not connected, HB correctly reads near 0 on boot (millis() - 0). If connected but still 0, trace `parseLine()` call path. | `ipg.cpp` — `parseLine()`, `checkRsp()`; `ipg.hpp` — `HB_ms()` |
+| INCL-HB-SCALE | INCL HB saturates at 255ms — scale too fine | 🟢 Low | INCL polls at ~1001ms so HB always saturates uint8 raw ms at 255ms — not useful. Consider changing INCL pack to x0.1s units (÷100 at pack, /10.0 in C# → seconds) giving 0–25.5s range that shows the 1s interval meaningfully. Coordinate: `incl.hpp HB_ms()`, `bdc.hpp HB_INCL()`, `bdc.cpp buf[403]`, `MSG_BDC.cs HB_INCL_ms` type/parse, `frmBDC.cs` format string. | `incl.hpp`, `bdc.hpp`, `bdc.cpp`, `MSG_BDC.cs`, `frmBDC.cs` |
+| TRC-SN-LABEL | TRC SOM SN — promote from version label to dedicated tss_trc_sn | 🟢 Low | Currently appended to `tss_trc_version` text in `frmBDC.cs` line 374 as a temporary testing measure. When confirmed working on HW, add dedicated `tss_trc_sn` ToolStripStatusLabel to `ss_trc` status strip in `frmBDC_Designer.cs` and wire in `frmBDC.cs`. | `frmBDC_Designer.cs`, `frmBDC.cs` |
 | IPG-HB-4 | `HB_NTP` → `HB_TIME` rename — PTP sync not stamped | ⏳ Pending | REG1 byte [130] named `HB_NTP` but should reflect both NTP and PTP receive events. Rename `HB_NTP` → `HB_TIME` in firmware, ICD (byte [130] label), and `MSG_MCC.cs` (`HB_NTP` property). Stamp on PTP sync event in addition to NTP packet receive. Low disruption — existing C# callers update property name only. | `mcc.hpp`, `mcc.cpp`, `MSG_MCC.cs`, `CROSSBOW_ICD_INT_ENG.md` byte [130] |
-| IPG-STUBS | Dead `lastTick_*` stubs in `mcc.hpp` | ⏳ Pending | `lastTick_BAT`, `lastTick_CRG`, `lastTick_GNSS` declared but never written in `mcc.hpp`. Either remove or wire up when IPG-HB-1/2/3 implemented. `lastTick_HEL` used. | `mcc.hpp` |
+| ~~IPG-STUBS~~ | ~~Dead `lastTick_*` stubs in `mcc.hpp`~~ | ✅ **CLOSED** | `lastTick_BAT`, `lastTick_CRG`, `lastTick_GNSS` declared but never written in `mcc.hpp`. Either remove or wire up when IPG-HB-1/2/3 implemented. `lastTick_HEL` used. | `mcc.hpp` |
 
 ### BDC
 
@@ -440,6 +621,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | FW-C3 | BDC Fuji boot status — FUJI_WAIT always times out | ⏳ Open | `fuji.SETUP()` and `fuji.UPDATE()` deferred until post-boot. At DONE print, `fuji=---` always shown regardless of physical connection. Fix: run lightweight Fuji ping or move SETUP earlier in boot sequence. | `bdc.cpp` — boot sequence, `fuji.cpp` SETUP() |
 | FW-C4 | BDC A1 ARP backoff not working | ⏳ Open | `a1FailCount` not incrementing correctly when TRC offline. Workaround: `A1 OFF` serial command when TRC is offline. Root cause: send failure may not be returned correctly from `frameSend()`. | `bdc.cpp` — A1 TX path, `frameSend()` return value |
 | CLEANUP-3 | A3 ACK discrepancy — MCC visible in debug, BDC not | ⏳ Pending | MCC A3 ACK visible in debug output, BDC A3 not — both working. Likely a log level or debug print difference, not a protocol issue. Investigate when on HW. | `bdc.cpp` — A3 handler debug prints |
+| ~~BDC-FSM-VOTE-LATCH~~ | ~~`isFSMNotLimited` stale outside ATRACK/FTRACK — vote latches NO-FIRE on track exit~~ | ✅ **CLOSED** | **Opened and closed CB-20260413.** Bug: `isFSMNotLimited` (VOTE_BITS_BDC bit 7, `FSM_NOT_LTD` — inverted logic, bit set = "FSM not limited" = OK) was only updated inside the ATRACK/FTRACK case body of `BDC::PidUpdate()`. The variable is read every telemetry tick to build the broadcast vote bitmask at `bdc.hpp:224`, but the *write* only happened in track mode. On exit from ATRACK/FTRACK with the bit cleared (track point too far off-center → predicted FSM correction exceeds `FSM_ANGLE_MAX_TARGET_SPACE_DEG = 2.0°`), the value stuck at `false` and the broadcast vote kept reporting NO-FIRE until the next track entry recomputed it. User symptom: "FMC fsm limit vote not clearing on the BDC until system goes into track." Fix: compute `isFSMNotLimited` from the FMC FSM position readback (`fmc.fsm_posX_rb` / `fsm_posY_rb` — already extracted at `bdc.cpp:435-436` from FMC REG1 bytes [20-23] / [24-27] via the FW-B5 offset fix) at the top of `PidUpdate()`. Conversion: `(fsm_posX_rb - FSM_X0) * iFOV_FSM_X_DEG_COUNT` gives target-space degrees (matching units of the existing constants), magnitude check via `sqrt(ax_rb² + ay_rb²) <= FSM_ANGLE_MAX_TARGET_SPACE_DEG`. Sign omitted (magnitude only). Gimbal NED offset omitted (we want local FSM angle, not world frame). The ATRACK/FTRACK case body still overwrites with the predictive (track-error-derived) value when actively driving the FSM — the predictive computation leads the readback by one tick, which is the correct behaviour in track mode. In all other modes the readback value persists, so the vote tracks actual FSM angular state instead of latching the last ATRACK predictive value. **Placement note (preserve this design choice):** user moved the `if ((millis() - prev_PID_Millis) < TICK_PID) return;` rate gate from above the readback block to BELOW it — intentional. The FSM limit check is an instantaneous physical state read, not a control-loop concept, and gating it at PID rate would mean some A1 frames carry a vote bit up to one PID period stale. Both the readback fallback and the predictive override live inside `PidUpdate()` together by design — they are two halves of the same FSM-limit decision, paired alongside the existing FSM_X/FSM_Y/Set_FM_POS code. Do not move the rate gate back above the FSM block. Do not hoist either computation out of `PidUpdate()`. | `bdc.cpp` — `BDC::PidUpdate()` ✅ |
 
 ### FMC
 
@@ -465,7 +647,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | ID | Item | Status | Detail | Files |
 |----|------|--------|--------|-------|
 | NEW-38d | TRC PTP integration | ⏳ Pending | TRC uses `systemd-timesyncd` NTP only — no PTP path, no TIME_BITS in REG1. Scope: (1) Linux: install/configure `ptp4l` as PTP slave to NovAtel `.30`; (2) TRC firmware: add TIME_BITS equivalent to REG1; (3) `MSG_TRC.cs`: add `epochTime`, `activeTimeSource`, `activeTimeSourceLabel`. | TRC `udp_listener.cpp`, `MSG_TRC.cs` |
-| TRC-SOM-SN | TRC SOM serial number — read and pack into REG1 | 🟡 Open | Read `/proc/device-tree/serial-number` at startup into `GlobalState`, pack as `uint64 LE` into TelemetryPacket bytes [49–56]. `MSG_TRC.cs`: add `SomSerial` property. Tracks ICD v3.5.x TRC REG1 change. | TRC `udp_listener.cpp`, `MSG_TRC.cs` |
+| ~~TRC-SOM-SN~~ | ~~TRC SOM serial number — read and pack into REG1~~ | ✅ **CLOSED** | **Bench-verified CB-20260413.** Format: `uint64 LE` at TelemetryPacket bytes [49-56] (user-specified, supersedes any prior ASCII-string suggestion). Bytes [57-63] remain RESERVED (7 bytes). 8 edits applied across 5 files: `telemetry.h` (struct field + 2 static_asserts for offset 49 and 57), `types.h` (`uint64_t somSerial{0}` added to `GlobalState` after `version_word`), `main.cpp` (read `/proc/device-tree/serial-number` once at startup right after version_word print, parse via `std::stoull` with try/catch fallback to 0, log `"SOM Serial: <n> (raw: \"...\")"` to stderr), `udp_listener.cpp` (`telemetry.som_serial = state_.somSerial` packed in `buildTelemetry()` after Jetson stats), `MSG_TRC.cs` (`SomSerial` UInt64 property added near Jetson health properties; `ParseMsg()` reads 8 bytes via `BitConverter.ToUInt64` then skips 7 RESERVED; layout doc comment updated). User additionally wired `SomSerial` to the TRC on-screen display (OSD overlay) so the SN is visible on the live video stream — bonus addition beyond the surgical change set. ICD INT_ENG TRC REG1 update **held** per user request — tracked separately as TRC-SOM-SN-ICD (low, deferred). | `telemetry.h` ✅ `types.h` ✅ `main.cpp` ✅ `udp_listener.cpp` ✅ `MSG_TRC.cs` ✅ TRC OSD ✅ |
 | TRC-A1-CHK | A1 fire control packet byte [3] — checksum not validated | 🟢 Low | `trc_a1.hpp` line 26 + `trc_a1.cpp` line 191: byte [3] of the raw 4-byte `SET_BCAST_FIRECONTROL_STATUS` packet is documented as "reserved / checksum (not validated)" and currently ignored. Define checksum scheme (e.g. XOR of bytes [0-2]) and add validation in `rxThreadFunc` — discard packet and log on mismatch. Coordinate with BDC `SEND_FIRE_STATUS_TO_TRC()` to pack the same checksum at byte [3]. | `trc_a1.cpp` — `rxThreadFunc()`; `bdc.cpp` — `SEND_FIRE_STATUS_TO_TRC()` |
 | TRC-COCO-UDP | ORIN_ACAM_COCO_ENABLE via UDP — not yet implemented | 🟢 Low | After CB-20260412, `ORIN_ACAM_COCO_ENABLE = 0xD1`. TRC never had a UDP handler for this command (was at 0xDF, never implemented). Add `case ICD_CMDS::ORIN_ACAM_COCO_ENABLE:` at 0xD1 in `udp_listener.cpp` dispatch when COCO UDP control is needed. Coordinate with `coco_detector.cpp` enable/disable interface. | `udp_listener.cpp` — binary dispatch; `coco_detector.cpp` |
 | TRC-MUTEX | `buildTelemetry()` race condition — A1 TX vs A2 binary threads | 🟢 Low | `buildTelemetry()` is called from both `trc_a1.cpp` txThreadFunc (100 Hz) and `udp_listener.cpp` binaryThreadFunc (on solicited request). No mutex guards the shared `telemetry` struct. Benign at current rates — add mutex when threading issues surface. Consider moving to lock-free double-buffer. | `udp_listener.cpp` — `buildTelemetry()`; `trc_a1.hpp` |
@@ -532,6 +714,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | ARCH-FMC-HW | ARCH §12.1 FMC Hardware table — V1/V2 column refactor | 🟢 Low | Opened CB-20260413. ARCH §12.1 FMC Hardware table currently has a single column. Refactor to V1/V2 columns parallel to the TMC §11.3 pattern, with a BME280 V2 row added (now that FMC-TPH is closed and the BME280 is part of the V2 build). Documentation cleanup, no functional impact. Pairs naturally with ARCH-1 if that's the next ARCH pass. | `ARCHITECTURE.md` §12.1 |
 | FW-C5-FRAME-CLEANUP | Retire dead `A1_DEST_*_IP` defines from `frame.hpp` | 🟢 Low | Opened CB-20260413. After FW-C5's TMC pass, `A1_DEST_MCC_IP` (line 97) and `A1_DEST_BDC_IP` (line 98) in `frame.hpp` are both unreferenced. `A1_DEST_MCC_IP` had exactly one consumer (the `_mcc[]` temp-array dance in `tmc.cpp:21–22`, now cleaned up to `IPAddress(IP_MCC_BYTES)`); `A1_DEST_BDC_IP` was already unreferenced before this session. Both were left in place per FW-C5 option (a) "leave frame.hpp alone" rule. One-line cleanup: delete both `#define` lines and the surrounding "Fixed destinations for A1 TX" comment block. While in there, also refresh the now-stale comment at `tmc.hpp:235` ("`A1_DEST_MCC_IP from frame.hpp`") and the stale TODO at `fmc.hpp:188` ("NOTE: add `A1_DEST_BDC_IP = {192,168,1,20}` to frame.hpp if not already defined"). Dead code, harmless to leave but cleaner to remove. | `frame.hpp` lines 96–98; `tmc.hpp:235`; `fmc.hpp:188` |
 | TRC-CS-DEAD-IPENDPOINT | Retire dead `ipEndPoint` field in `trc.cs` | 🟢 Low | Opened CB-20260413. In `trc.cs`, the `IPEndPoint ipEndPoint` field is dead. Field declaration at line 24, assignment at line 106 (was hardcoded literal — overwritten by FW-C5 to `new IPEndPoint(IPAddress.Parse(IP), Port)` but the value is still never read), commented-out reference at line 127 (`//byte[] rxBuff = udpClient.Receive(ref ipEndPoint);`). The active receive path uses `udpClient.ReceiveAsync()` which doesn't take an endpoint. Three-line cleanup: delete field declaration, delete the assignment, delete the commented-out line. Pairs naturally with TRC-M9 (port 5010 deprecation) — both are receive-path cleanups owed to TRC. | `trc.cs` lines 24, 106, 127 |
+| ~~TRC-SOM-SN-ICD~~ | ~~TRC REG1 ICD entry for `som_serial` field~~ | ✅ **CLOSED** | **Closed CB-20260413.** TRC REG1 row added to `CROSSBOW_ICD_INT_ENG.md`: split `[49-63] RESERVED 15 bytes` into `[49-56] som_serial uint64 LE` (tagged `v4.0.0 (TRC-SOM-SN)`, with note about `/proc/device-tree/serial-number` source and `std::stoull` parse) + `[57-63] RESERVED 7 bytes`. Defined / Reserved totals: 49 / 15 → 57 / 7. ICD INT_ENG header version held at 3.6.0 (ICD-1 will do the v4.0.0 rename pass for the whole document). | `CROSSBOW_ICD_INT_ENG.md` ✅ |
 
 ---
 

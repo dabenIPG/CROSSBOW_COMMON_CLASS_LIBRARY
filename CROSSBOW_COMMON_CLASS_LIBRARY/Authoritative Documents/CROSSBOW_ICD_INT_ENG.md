@@ -2,8 +2,8 @@
 
 **Document:** `CROSSBOW_ICD_INT_ENG`
 **Doc #:** IPGD-0003
-**Version:** 3.6.0
-**Date:** 2026-04-12 (ICD command space restructuring — CB-20260412)
+**Version:** 4.0.0
+**Date:** 2026-04-13 (BDC HB REG1 bytes — CB-20260413d)
 **Classification:** IPG Internal Use Only
 **Source:** CB_ICD_v1_7.xlsx reconciled with ARCHITECTURE.md (TRC v3.0); `defines.hpp` canonical v3.X.Y
 **Audience:** IPG engineering staff, ENG GUI developers, firmware developers — all five controllers (MCC, BDC, TMC, FMC, TRC)
@@ -11,6 +11,12 @@
 ---
 
 ## Version History
+
+**v4.0.0 changes (BDC HB REG1 bytes — CB-20260413d):**
+- BDC REG1 bytes [396–403] promoted from RESERVED — eight HB counter bytes. `HB_NTP` [396] in x0.1s units (÷100, C# /10.0 → seconds); [397–403] raw ms. Defined count 396→404, reserved 116→108. Tagged `v4.0.0 (BDC-HB)`.
+- `MSG_BDC.cs`: eight HB properties added (`HB_NTP` double, `HB_FMC_ms`/`HB_TRC_ms`/`HB_MCC_ms`/`HB_GIM_ms`/`HB_FUJI_ms`/`HB_MWIR_ms`/`HB_INCL_ms` int). Parsed at bytes [396–403] in `ParseMSG01()`.
+
+---
 
 **v3.6.0 changes (ICD command space restructuring — 2026-04-12 CB-20260412):**
 A block fully assigned INT_OPS — all 16 slots active commands. See `CROSSBOW_CHANGELOG.md` (IPGD-0019) CB-20260412 entry for full design rationale.
@@ -82,7 +88,7 @@ Slots reassigned (previously held different commands):
   - [393] `TEMP_RELAY` int8 — relay area NTC thermistor °C (V2 live; V1 always `0x00`)
   - [394] `TEMP_BAT` int8 — battery-in area NTC thermistor °C (V2 live; V1 always `0x00`)
   - [395] `TEMP_USB` int8 — USB 5V area NTC thermistor °C (V2 live; V1 always `0x00`)
-  - Bytes [396–511] remain RESERVED. Defined count: 392 → 396. Reserved: 120 → 116.
+  - Bytes [396–511] — RESERVED at time of v3.5.1. Defined count: 392 → 396. Reserved: 120 → 116. Note: bytes [396–403] subsequently promoted in v4.0.0 (BDC-HB).
 - `MSG_BDC.cs`: `HealthBits`/`PowerBits` properties added; `StatusBits`/`StatusBits2` retained as backward-compat aliases. `HW_REV` byte [392] parsed; `IsV1`/`IsV2`/`HW_REV_Label` added. `isSwitchEnabled` accessor added (V2-aware). `TEMP_RELAY`/`TEMP_BAT`/`TEMP_USB` properties added.
 - See BDC_HW_DELTA.md for full change catalogue.
 
@@ -1101,9 +1107,17 @@ Embedded sub-registers:
 | 393 | 393 | 394 | 1 | TEMP_RELAY | int8 | Relay area NTC thermistor °C. V2 live; V1 always `0x00`. — v3.5.1 |
 | 394 | 394 | 395 | 1 | TEMP_BAT | int8 | Battery-in area NTC thermistor °C. V2 live; V1 always `0x00`. — v3.5.1 |
 | 395 | 395 | 396 | 1 | TEMP_USB | int8 | USB 5V area NTC thermistor °C. V2 live; V1 always `0x00`. — v3.5.1 |
-| 396 | 396 | 512 | 116 | RESERVED | — | 0x00 — headroom to 512 |
+| 396 | 396 | 397 | 1 | HB_NTP | uint8 | NTP heartbeat — x0.1s units (÷100 at pack; C# /10.0 → seconds). Elapsed since last NTP sync. — v4.0.0 (BDC-HB) |
+| 397 | 397 | 398 | 1 | HB_FMC_ms | uint8 | FMC A1 stream heartbeat — raw ms elapsed since last A1 RX, saturates at 255ms. — v4.0.0 (BDC-HB) |
+| 398 | 398 | 399 | 1 | HB_TRC_ms | uint8 | TRC A1 stream heartbeat — raw ms elapsed since last A1 RX, saturates at 255ms. — v4.0.0 (BDC-HB) |
+| 399 | 399 | 400 | 1 | HB_MCC_ms | uint8 | MCC A1 broadcast heartbeat — raw ms elapsed since last 0xAB RX, saturates at 255ms. — v4.0.0 (BDC-HB) |
+| 400 | 400 | 401 | 1 | HB_GIM_ms | uint8 | Gimbal heartbeat — raw ms elapsed since last Galil data record RX, saturates at 255ms. — v4.0.0 (BDC-HB) |
+| 401 | 401 | 402 | 1 | HB_FUJI_ms | uint8 | Fuji lens heartbeat — raw ms elapsed since last C10 serial response, saturates at 255ms. — v4.0.0 (BDC-HB) |
+| 402 | 402 | 403 | 1 | HB_MWIR_ms | uint8 | MWIR camera heartbeat — raw ms elapsed since last serial response, saturates at 255ms. — v4.0.0 (BDC-HB) |
+| 403 | 403 | 404 | 1 | HB_INCL_ms | uint8 | Inclinometer heartbeat — raw ms elapsed since last UART frame, saturates at 255ms. — v4.0.0 (BDC-HB) |
+| 404 | 404 | 512 | 108 | RESERVED | — | 0x00 — headroom to 512 |
 
-**Defined: 396 bytes. Reserved: 116 bytes. Fixed block: 512 bytes.**
+**Defined: 404 bytes. Reserved: 108 bytes. Fixed block: 512 bytes.**
 
 > ⚠ **FSM position note:** `FSM_X/Y` (int16, commanded) differs from `FSM Pos X/Y` in the FMC
 > pass-through (int32, ADC readback). Reconciliation pending — see Action Items.
@@ -1264,9 +1278,10 @@ fixed block (bytes 60–123). Fixed block size: **64 bytes**.
 | 43 | 43 | 45 | 2 | nccScore | int16 | NCC quality × 10000 — unpack: value / 10000.0f |
 | 45 | 45 | 47 | 2 | jetsonTemp | int16 | Jetson CPU temp °C |
 | 47 | 47 | 49 | 2 | jetsonCpuLoad | int16 | Jetson CPU load % |
-| 49 | 49 | 64 | 15 | RESERVED | — | 0x00 — freed from ControlByte(1) + HB(2) + focusScore(4) + Gain(4) + Exposure(4) |
+| 49 | 49 | 57 | 8 | som_serial | uint64 | Jetson SOM serial — read once at TRC startup from `/proc/device-tree/serial-number`, parsed as decimal via `std::stoull`. 0 on parse failure or missing file. Set in `main.cpp` after version_word print, packed in `udp_listener.cpp::buildTelemetry()`. — v4.0.0 (TRC-SOM-SN) |
+| 57 | 57 | 64 | 7 | RESERVED | — | 0x00 — headroom for future fields |
 
-**Defined: 49 bytes. Reserved: 15 bytes. Fixed block: 64 bytes.**
+**Defined: 57 bytes. Reserved: 7 bytes. Fixed block: 64 bytes.**
 
 ---
 

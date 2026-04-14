@@ -198,6 +198,16 @@ namespace CROSSBOW
         public sbyte TEMP_BAT { get; private set; } = 0;
         public sbyte TEMP_USB { get; private set; } = 0;
 
+        // HB counters — REG1 bytes [396-403]
+        public double HB_NTP { get; private set; } = 0;   // seconds (x0.1s units / 10.0)
+        public int HB_FMC_ms { get; private set; } = 0;   // raw ms
+        public int HB_TRC_ms { get; private set; } = 0;   // raw ms
+        public int HB_MCC_ms { get; private set; } = 0;   // raw ms
+        public int HB_GIM_ms { get; private set; } = 0;   // raw ms
+        public int HB_FUJI_ms { get; private set; } = 0;   // raw ms
+        public int HB_MWIR_ms { get; private set; } = 0;   // raw ms
+        public int HB_INCL_ms { get; private set; } = 0;   // raw ms
+
         // ── Hardware revision ─────────────────────────────────────────────────
         public byte HW_REV { get; private set; } = 0;
         public bool IsV1 => HW_REV == 0x01;
@@ -398,7 +408,17 @@ namespace CROSSBOW
         // [383–386] BDC version word uint32
         // [387–390] MCU temp float
         // [391]      TIME_BITS (session 32) — isPTP_En, ptp.isSynched, usingPTP, ntp.isSynched, ntpUsingFB, ntpHasFB
-        // [392-511]  RESERVED
+        // [392]      HW_REV
+        // [393-395]  V2 temps (TEMP_RELAY, TEMP_BAT, TEMP_USB)
+        // [396]      HB_NTP    uint8  x0.1s units
+        // [397]      HB_FMC_ms uint8  raw ms
+        // [398]      HB_TRC_ms uint8  raw ms
+        // [399]      HB_MCC_ms uint8  raw ms
+        // [400]      HB_GIM_ms uint8  raw ms
+        // [401]      HB_FUJI_ms uint8  raw ms
+        // [402]      HB_MWIR_ms uint8  raw ms
+        // [403]      HB_INCL_ms uint8  raw ms
+        // [404-511]  RESERVED
         // =========================================================================
         private void ParseMSG01(byte[] msg, int ndx)
         {
@@ -555,6 +575,16 @@ namespace CROSSBOW
             TEMP_RELAY = (sbyte)msg[ndx]; ndx++;
             TEMP_BAT = (sbyte)msg[ndx]; ndx++;
             TEMP_USB = (sbyte)msg[ndx]; ndx++;
+
+            // [396-403] HB counters
+            HB_NTP = (double)msg[ndx] / 10.0; ndx++;   // x0.1s → seconds
+            HB_FMC_ms = (int)msg[ndx]; ndx++;
+            HB_TRC_ms = (int)msg[ndx]; ndx++;
+            HB_MCC_ms = (int)msg[ndx]; ndx++;
+            HB_GIM_ms = (int)msg[ndx]; ndx++;
+            HB_FUJI_ms = (int)msg[ndx]; ndx++;
+            HB_MWIR_ms = (int)msg[ndx]; ndx++;
+            HB_INCL_ms = (int)msg[ndx]; ndx++;
         }
 
         // =========================================================================
