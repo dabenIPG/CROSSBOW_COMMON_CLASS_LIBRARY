@@ -31,7 +31,8 @@
 //   [43–44]  nccScore        int16   NCC ×10000
 //   [45–46]  jetsonTemp      int16
 //   [47–48]  jetsonCpuLoad   int16
-//   [49–63]  RESERVED        15 bytes
+//   [49–56]  somSerial       uint64  Jetson SOM serial — from /proc/device-tree/serial-number
+//   [57–63]  RESERVED        7 bytes
 
 using System;
 
@@ -82,6 +83,9 @@ namespace CROSSBOW
         public Int16 jetsonTemp    { get; private set; } = 0;
         public Int16 jetsonCpuLoad { get; private set; } = 0;
 
+        // SOM serial number — read once at TRC startup from /proc/device-tree/serial-number,
+        // packed as uint64 LE into TRC REG1 [49–56]. 0 on parse failure or missing file.
+        public UInt64 SomSerial { get; private set; } = 0;
         // ICD v3.0.0 session 4: fps = framerate ×100, unpack: value / 100.0
         public double streamFPS  { get; private set; } = 0;
         public Size   streamSize { get; private set; } = new Size(1280, 720);
@@ -153,15 +157,16 @@ namespace CROSSBOW
             FT_OFFSET_RB = new Point(ftx, fty);
 
             // ICD v3.0.0 session 4: focusScore is float (was double — saves 4 bytes)
-            VIS_FOCUS_SCORE = BitConverter.ToSingle(rxBuff, ndx); ndx += sizeof(Single);   // [29–32]
+            VIS_FOCUS_SCORE = BitConverter.ToSingle(rxBuff, ndx); ndx += sizeof(Single);    // [29–32]
 
-            _ntpTime      = BitConverter.ToInt64(rxBuff, ndx); ndx += sizeof(Int64);       // [33–40]
+            _ntpTime      = BitConverter.ToInt64(rxBuff, ndx); ndx += sizeof(Int64);        // [33–40]
             voteBitsMcc   = rxBuff[ndx]; ndx++;                                             // [41]
             voteBitsBdc   = rxBuff[ndx]; ndx++;                                             // [42]
-            nccScoreRaw   = BitConverter.ToInt16(rxBuff, ndx); ndx += sizeof(Int16);       // [43–44]
-            jetsonTemp    = BitConverter.ToInt16(rxBuff, ndx); ndx += sizeof(Int16);       // [45–46]
-            jetsonCpuLoad = BitConverter.ToInt16(rxBuff, ndx); ndx += sizeof(Int16);       // [47–48]
-            ndx += 15;                                                                      // [49–63] RESERVED
+            nccScoreRaw   = BitConverter.ToInt16(rxBuff, ndx); ndx += sizeof(Int16);        // [43–44]
+            jetsonTemp    = BitConverter.ToInt16(rxBuff, ndx); ndx += sizeof(Int16);        // [45–46]
+            jetsonCpuLoad = BitConverter.ToInt16(rxBuff, ndx); ndx += sizeof(Int16);        // [47–48]
+            SomSerial = BitConverter.ToUInt64(rxBuff, ndx); ndx += sizeof(UInt64);          // [49–56]
+            ndx += 7;                                                                       // [57–63] RESERVED
 
             return ndx;
         }

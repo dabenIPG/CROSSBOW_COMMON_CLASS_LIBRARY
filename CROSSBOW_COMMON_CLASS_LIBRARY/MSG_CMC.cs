@@ -123,7 +123,9 @@ namespace CROSSBOW
             ICD cmd = (ICD)msg[0];
             switch (cmd)
             {
-                case ICD.RES_A1: ndx = ParseMSG01(msg, ndx); break;
+                case (ICD)0x00:    // 0x00 — v4.0.0+ (FW-C10)
+                case (ICD)0xA1:    // 0xA1 — legacy pre-FW-C10
+                    ndx = ParseMSG01(msg, ndx); break;
                 //case ICD.GET_REGISTER2: ndx = ParseMSG02(msg, ndx); break;
                 default: break;
             }

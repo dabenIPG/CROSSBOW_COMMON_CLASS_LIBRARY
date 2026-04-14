@@ -1,7 +1,7 @@
-// MSG_FMC.cs  —  ICD v3.5.2 FMC REG1 parser
+// MSG_FMC.cs  —  ICD v4.0.0 FMC REG1 parser
 //
-// FMC REG1 payload layout (ICD v3.5.2, 47 bytes defined):
-//   [0]      CMD BYTE         uint8   = 0xA1
+// FMC REG1 payload layout (ICD v4.0.0, 59 bytes defined):
+//   [0]      CMD BYTE         uint8   = 0x00 (legacy 0xA1 retired — FW-C10)
 //   [1]      System State     uint8
 //   [2]      System Mode      uint8
 //   [3–4]    HB_ms            uint16 LE   ms between firmware sends
@@ -19,7 +19,14 @@
 //                                         bit3:ntp.isSynched bit4:ntpUsingFallback bit5:ntpHasFallback
 //   [45]     HW_REV           uint8       0x01=V1 (SAMD21)  0x02=V2 (STM32F7)
 //   [46]     FMC POWER_BITS   uint8       bit0:isFSM_Powered  bit1:isStageEnabled  bit2-7:RES
-//   [47–63]  RESERVED         0x00
+//   [47–50]  TPH Temp         float LE    °C   (V2 only; V1 = 0.0)
+//   [51–54]  TPH Pressure     float LE    Pa   (V2 only; V1 = 0.0)
+//   [55–58]  TPH Humidity     float LE    %    (V2 only; V1 = 0.0)
+//   [59–63]  RESERVED         0x00
+//
+// ICD v4.0.0 changes vs v3.5.2:
+//   Bytes [47–58] BME280 TPH — V2 only (FMC-TPH); V1 reads 0.0f
+//   REG1 CMD_BYTE [0] 0xA1 → 0x00 (FW-C10) — Parse() accepts both for legacy
 //
 // ICD v3.5.2 changes vs v3.3.5:
 //   Byte [7]  FSM STAT BITS → FMC HEALTH_BITS — isReady only (isFSM_Powered/isStageEnabled moved to [46])
@@ -132,11 +139,18 @@ namespace CROSSBOW
             }
         }
         public uint FW_MAJOR => (FW_VERSION >> 24) & 0xFF;   // firmware major version
-        public bool IsV4 => FW_MAJOR >= 4;                   // true = ICD v3.6.0 command space (v4.0.0+)
+        public bool IsV4 => FW_MAJOR >= 4;                   // true = ICD v4.0.0 command space
 
+        // MCU Temperature
         // MCU Temperature
         public float TEMP_MCU { get; private set; } = 0;
 
+        // BME280 TPH — bytes [47–58] — ICD v4.0.0 (FMC-TPH)
+        // V2 only; V1 returns 0.0f (firmware does not write these bytes on V1).
+        // Use IsV2 to gate display.
+        public float TPH_Temp { get; private set; } = 0;   // °C
+        public float TPH_Pressure { get; private set; } = 0;   // Pa
+        public float TPH_Humidity { get; private set; } = 0;   // %
         // REG2 / BDC REG1 calibration fields — set externally
         public UInt32 StageHome  { get;  set; } = 0;
         public Int16  FSM_X0     { get;  set; } = 0;
@@ -198,7 +212,7 @@ namespace CROSSBOW
         }
 
         // -------------------------------------------------------------------
-        // ParseMSG01 — FMC REG1 payload (ICD v3.0.0 session 4)
+        // ParseMSG01 — FMC REG1 payload (ICD v4.0.0)
         // Called embedded from MSG_BDC.ParseMSG01() with ndx = BDC REG1 [169].
         // Returns ndx + 64 (full 64-byte block).
         // -------------------------------------------------------------------
@@ -207,29 +221,33 @@ namespace CROSSBOW
             int startNdx = ndx;
             ndx++;                                                                    // [0] CMD byte
             System_State = (SYSTEM_STATES)msg[ndx]; ndx++;                          // [1]
-            BDC_Mode     = (BDC_MODES)msg[ndx];     ndx++;                          // [2]
-            HB_ms        = BitConverter.ToUInt16(msg, ndx); ndx += sizeof(UInt16);  // [3–4]
-            dt_us        = BitConverter.ToUInt16(msg, ndx); ndx += sizeof(UInt16);  // [5–6]
+            BDC_Mode = (BDC_MODES)msg[ndx]; ndx++;                          // [2]
+            HB_ms = BitConverter.ToUInt16(msg, ndx); ndx += sizeof(UInt16);  // [3–4]
+            dt_us = BitConverter.ToUInt16(msg, ndx); ndx += sizeof(UInt16);  // [5–6]
             HealthBits = msg[ndx]; ndx++;                                          // [7] FMC HEALTH_BITS
 
             StagePosition = BitConverter.ToUInt32(msg, ndx); ndx += sizeof(UInt32); // [8–11]
-            StageError    = BitConverter.ToUInt32(msg, ndx); ndx += sizeof(UInt32); // [12–15]
-            StageStatus   = BitConverter.ToUInt32(msg, ndx); ndx += sizeof(UInt32); // [16–19]
+            StageError = BitConverter.ToUInt32(msg, ndx); ndx += sizeof(UInt32); // [12–15]
+            StageStatus = BitConverter.ToUInt32(msg, ndx); ndx += sizeof(UInt32); // [16–19]
 
             FSM_PosX = BitConverter.ToInt32(msg, ndx); ndx += sizeof(Int32);        // [20–23]
             FSM_PosY = BitConverter.ToInt32(msg, ndx); ndx += sizeof(Int32);        // [24–27]
 
-            _ntpTime   = BitConverter.ToInt64(msg, ndx);  ndx += sizeof(Int64);     // [28–35]
+            _ntpTime = BitConverter.ToInt64(msg, ndx); ndx += sizeof(Int64);     // [28–35]
             FW_VERSION = BitConverter.ToUInt32(msg, ndx); ndx += sizeof(UInt32);    // [36–39]
-            TEMP_MCU   = BitConverter.ToSingle(msg, ndx); ndx += sizeof(Single);    // [40–43]
+            TEMP_MCU = BitConverter.ToSingle(msg, ndx); ndx += sizeof(Single);    // [40–43]
             TimeBits = msg[ndx]; ndx++;                                            // [44] TIME_BITS
             HW_REV = msg[ndx]; ndx++;                                            // [45] HW_REV
             PowerBits = msg[ndx]; ndx++;                                            // [46] POWER_BITS
-            // [47–63] RESERVED — skip to end of 64-byte block
+
+            // [47–58] BME280 TPH — V2 only; V1 reads 0.0f (firmware leaves bytes 0x00)
+            TPH_Temp = BitConverter.ToSingle(msg, ndx); ndx += sizeof(Single); // [47–50]
+            TPH_Pressure = BitConverter.ToSingle(msg, ndx); ndx += sizeof(Single); // [51–54]
+            TPH_Humidity = BitConverter.ToSingle(msg, ndx); ndx += sizeof(Single); // [55–58]
+            // [59–63] RESERVED — skip to end of 64-byte block
 
             return startNdx + 64;
         }
-
         // -------------------------------------------------------------------
         // ParseMSG02 — REG2 extended data (direct request only, not embedded)
         // -------------------------------------------------------------------

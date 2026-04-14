@@ -31,7 +31,7 @@ namespace CROSSBOW
         // -------------------------------------------------------------------
         // Configuration
         // -------------------------------------------------------------------
-        public string IP   { get; private set; } = "192.168.1.12";
+        public string IP   { get; private set; } = IPS.TMC;
         public int    Port { get; private set; } = 10018;   // A2 engineering port
 
         // Frame magic bytes — internal A2

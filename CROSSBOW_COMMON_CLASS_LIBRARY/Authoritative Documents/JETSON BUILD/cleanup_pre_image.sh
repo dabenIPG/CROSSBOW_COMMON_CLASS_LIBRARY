@@ -12,7 +12,7 @@ sudo rm -f /opt/VimbaX_Setup-*-Linux_ARM64.tar.gz
 rm -f  ~/CV/SETUP/gst-vmbsrc-*.zip
 rm -f  ~/CV/SETUP/install_opencv*.sh
 rm -f  ~/CV/SETUP/opencv_build_*.log
-rm -f  ~/CV/SETUP/test*.py
+# test1.py kept — diagnostic tool
 rm -rf ~/CV/SETUP/opencv_build_workspace/
 rm -rf ~/CV/SETUP/deploy/
 rm -rf ~/CV/SETUP/gst-vmbsrc/

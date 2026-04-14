@@ -2,8 +2,8 @@
 
 **Document:** `CROSSBOW_CHANGELOG.md`
 **Doc #:** IPGD-0019
-**Version:** 1.2.0
-**Date:** 2026-04-12
+**Version:** 1.3.0
+**Date:** 2026-04-13
 **Status:** Current
 **Supersedes:** `Embedded_Controllers_ACTION_ITEMS.md` (unregistered, retired), `Embedded_Controllers_CLOSED_ACTION_ITEMS.md` (unregistered, retired)
 
@@ -21,6 +21,69 @@ Session numbers marked `~` are approximate where the exact session number is unc
 ---
 
 # PART 1 — SESSION LOG
+
+---
+
+## CB-20260413 — DEF-1 / MSG-CMC-1 / FMC-TPH / FW-C5 closures
+**ICD:** v3.6.0 (FMC REG1 TPH content edit; header version held for ICD-1) | **ARCH:** v3.3.7 → v3.3.8 (§10.5 + §17 FW-C5 closure notes)
+
+Four closures landed this session — three small, one large.
+
+**DEF-1 closed.** Both `defines.hpp` and `defines.cs` verified containing all CB-20260412 enum changes — `SET_TIMESRC=0xA3`, `SET_REINIT=0xA9`, `SET_DEVICES_ENABLE=0xAA`, `SET_CHARGER=0xAF` added; `SET_HEL_TRAINING_MODE=0xA1`, `ORIN_ACAM_COCO_ENABLE=0xD1`, `SET_BCAST_FIRECONTROL_STATUS=0xE0`, `SET_BDC_VOTE_OVERRIDE=0xB1` reassigned; retired names replaced by `RES_xx` rejection markers in lockstep across both files. **Naming note:** slot `0xAB` retains the legacy name `SET_FIRE_REQUESTED_VOTE` from its `0xE6` origin — slot-only move; name preserved to minimise C# call-site churn. ICD-1 must use the canonical name `SET_FIRE_REQUESTED_VOTE` in v4.0.0 entries (not the `SET_FIRE_VOTE` shorthand from the original CB-20260412 spec).
+
+**MSG-CMC-1 closed.** Owner-confirmed fixed in `MSG_CMC.cs` — `ParseMsg()` now uses literal dual-check `case (ICD)0x00:` and `case (ICD)0xA1:` to handle both v4.0.0 and legacy pre-FW-C10 REG1 frames.
+
+**FMC-TPH closed — bench-verified on V2 STM32F7 hardware.** Firmware: `tph.hpp` include, `TPH tph` member, `tph.SETUP()`/`UPDATE()`, REG1 pack at [47–58], `PRINT_REG()` and `TEMPS` serial output — all gated `#if defined(HW_REV_V2)`. V1 leaves bytes 0x00 (decodes to 0.0f via existing `memset` in `buildReg01()`). Serial output confirmed sane: MCU 45.28°C, Ambient 30.79°C (BME280 reads warm due to board thermal coupling — same effect as TMC), Pressure 100131.88 Pa (≈1001 hPa), Humidity 30.47%. C#: `MSG_FMC.cs` parses three `BitConverter.ToSingle` reads at [47]/[51]/[55]; `TPH_Temp`/`TPH_Pressure`/`TPH_Humidity` properties added; `frmFMC.cs` populates pre-existing `lbl_FMC_tph` designer label gated on `IsV2`; V1 displays `"TPH: V1 — n/a"`. ICD INT_ENG FMC REG1 table updated with three TPH rows tagged `v4.0.0 (FMC-TPH)`; defined-bytes count 47 → 59, reserved 17 → 5. ICD header version held at v3.6.0 pending broader ICD-1 v4.0.0 rename.
+
+**Stale comment fix folded in:** while editing `fmc.cpp` header comment, also corrected stale "`ptp.INIT()` unconditional at boot (FW-B4 closed)" line — FMC's PTP init is gated by `isPTP_Enabled` (default false) per FW-B3 W5500 multicast contention, not unconditional. Header comment now matches the body code at `INIT()`.
+
+---
+
+**FW-C5 closed — full firmware + C# IP-define consolidation across all five controllers.** This was the largest item closed this session. Surgical pass (option a): every hardcoded peer-IP literal in source replaced with a registry symbol; intentional patterns (SET_NTP_CONFIG last-octet overrides, parsed-octet serial commands, log strings) left in place.
+
+**`defines.hpp` additions:**
+- `IP_HEL_BYTES 192, 168, 1, 13` — IPG laser TCP target on MCC
+- `IP_NTP_FALLBACK_BYTES 192, 168, 1, 208` — Windows HMI w32tm fallback NTP server
+- Existing IP block also reordered by last octet (cosmetic)
+
+**`defines.cs` additions:**
+- New top-level `public static class IPS` — flat string-typed registry mirroring `defines.hpp` IP_*_BYTES set, plus C#-only entries for THEIA / HYPERION (no firmware counterpart)
+- 12 `const string` entries: MCC, TMC, HEL, BDC, GIMBAL, TRC, FMC, GNSS, NTP_PRIMARY, NTP_FALLBACK, THEIA, HYPERION
+- `.208` appears twice deliberately (THEIA / NTP_FALLBACK) — same physical box, two roles
+
+**Firmware edits per controller:**
+
+| Controller | Edits | Notes |
+|---|---|---|
+| MCC | 4 | `mcc.hpp` NTP initializers (×2); `mcc.cpp` 2 × IP_HEL sites at REINIT and StateManager power-on |
+| BDC | 3 | `bdc.hpp` NTP initializers (×2); `BDC.ino:30` top-level IP_BDC declaration |
+| TMC | 3 | `tmc.hpp` NTP initializers (×2); `tmc.cpp` `_mcc[]` temp-array dance retired (was `static const uint8_t _mcc[] = A1_DEST_MCC_IP; a1DestMCC = IPAddress(_mcc[0]…)` — now clean `a1DestMCC = IPAddress(IP_MCC_BYTES)`) |
+| FMC | 1 | `fmc.hpp` NTP initializers — `fmc.cpp::INIT()` and `FMC.ino` were already clean |
+| TRC | 0 | TRC controller code (Linux/Jetson C++) was already compliant — uses its own `Defaults::` namespace registry from the start, mirrors `IPS`/`IP_*_BYTES` philosophy. `Defaults::BDC_HOST` already used by `trc_a1.cpp` for both TX socket connect and RX source validation. The only remaining literal in TRC controller code is `main.cpp:254` `destHost = "192.168.1.1"` — gateway placeholder for GStreamer video output, almost always overridden via `--dest-host` at launch; intentional, left in place. |
+
+**C# edits per controller:**
+
+| Controller | File | Edits | Notes |
+|---|---|---|---|
+| MCC | `mcc.cs:50` | 1 | IP property initializer → `IPS.MCC` |
+| BDC | `bdc.cs:45` | 1 | IP property initializer → `IPS.BDC` |
+| TMC | `tmc.cs:34` | 1 | IP property initializer → `IPS.TMC` |
+| FMC | `fmc.cs:28` | 1 | IP property initializer → `IPS.FMC` |
+| TRC | `trc.cs:20`, `trc.cs:106` | 2 | IP property → `IPS.TRC`; **plus** duplicate literal at line 106 fixed (bind site was bypassing `this.IP` and re-hardcoding `192.168.1.22` — now reads `IPAddress.Parse(IP)` matching the canonical `fmc.cs:101` pattern) |
+
+**Audited and confirmed clean (zero edits needed):**
+- All firmware peer-driver classes — MCC's `ipg.cpp/.hpp`, `gnss.cpp/.hpp`, `tmc.cpp/.hpp` (MCC-side); BDC's `fmc.cpp/.hpp`, `gimbal.cpp/.hpp`, `trc.cpp/.hpp` (BDC-side); shared `ntpClient.*`, `ptpClient.*`. Every peer-driver class takes its IP via `INIT(IPAddress _IP, …)` and stores it as a private member. Drivers themselves know nothing about 192.168.x.x literals.
+- All C# `MSG_*.cs` register parsers — five files (MCC, BDC, TMC, FMC, TRC) plus MCC's MSG_GNSS / MSG_IPG and BDC's MSG_FMC / MSG_GIMBAL / MSG_TRC. Pure register parsers, never construct endpoints.
+- All C# `frm*.cs` form classes — `frmMCC`, `frmBDC`, `frmTMC`, `frmFMC` (no `frmTRC` exists). Forms instantiate client classes via parameterless or logger-only constructors; never pass IPs; never override the IP property (`private set` enforces this at the type level).
+- `frame.hpp` `A1_DEST_*_IP` defines (lines 97-98) — left in place per option (a) "leave frame.hpp alone" rule. After TMC's `_mcc[]` fix, `A1_DEST_MCC_IP` and `A1_DEST_BDC_IP` are both unreferenced dead code; flagged for separate cleanup as **FW-C5-FRAME-CLEANUP**.
+
+**Patterns confirmed across the fleet:**
+1. **Peer-driver discipline (firmware):** every peer-driver class takes IP via `INIT()`, stores as private member. The only IP literals exist at controller-level call sites where the driver is initialised (`ipg.INIT(IP_HEL)`, `gimbal.INIT(IP_GIMBAL_BYTES)`, etc.).
+2. **Property discipline (C#):** every controller client class has `public string IP { get; private set; } = IPS.<NODE>;`. The `private set` is type-enforced — no form code can override it, no parser ever constructs an endpoint. Single point of edit per controller.
+3. **Total surface area for the entire fleet:** 11 firmware edits + 6 C# edits + 2 new firmware defines + 1 new C# class. Roughly 20 line-level changes for the whole 5-controller cleanup.
+
+**Items closed:** DEF-1, MSG-CMC-1, FMC-TPH, FW-C5
+**Items opened:** ARCH-FMC-HW (low — FMC §12.1 V1/V2 hardware table refactor), FW-C5-FRAME-CLEANUP (low — retire dead `A1_DEST_*_IP` defines from `frame.hpp`), TRC-CS-DEAD-IPENDPOINT (low — retire dead `ipEndPoint` field in `trc.cs`)
 
 ---
 
@@ -337,7 +400,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | ~~FW-B4~~ | ~~Fleet ptp.INIT() gate — all controllers must gate ptp.INIT()~~ | ✅ **CLOSED** | Confirmed in source: TMC `tmc.cpp` line 45 gates `ptp.INIT()` behind `isPTP_Enabled`. BDC `bdc.cpp` line 197 gates in boot state machine `PTP_INIT` step. MCC ✅ gated. FMC ✅ gated. All five controllers confirmed gated. |
 | ~~FW-B5~~ | ~~BDC FSM position offsets wrong in handleA1Frame()~~ | ✅ **CLOSED** | `fmc.fsm_posX_rb` offset corrected 24→20, `fmc.fsm_posY_rb` 28→24. Confirmed against FMC firmware (`buf+20`/`buf+24`) and `MSG_FMC.cs` parser. Closed CB-20260412 BDC pass. | `bdc.cpp` ✅ |
 | ~~GUI-3~~ | ~~MSG_BDC.cs activeTimeSource reads from wrong bits~~ | ✅ **CLOSED** | `activeTimeSourceLabel` line 599: `isNTP_DeviceReady` (DeviceReadyBits bit 0) → `tb_isNTP_Synched` (TimeBits bit 3). Now reads from correct TIME_BITS source. Closed CB-20260412 BDC pass. | `MSG_BDC.cs` ✅ |
-| FW-C5 | Audit/consolidate IP defines in defines.hpp | ⏳ Open | `IP_BDC_BYTES`, `IP_TMC_BYTES`, `IP_MCC_BYTES`, `IP_TRC_BYTES` added. Remaining hardcoded IPs in firmware source need replacing with defines. Full audit across all four controllers required. | `defines.hpp`, all controller `.cpp` files |
+| ~~FW-C5~~ | ~~Audit/consolidate IP defines in defines.hpp~~ | ✅ **CLOSED** | **Closed CB-20260413.** Full firmware + C# IP-define consolidation across all five controllers. `defines.hpp` gained `IP_HEL_BYTES` and `IP_NTP_FALLBACK_BYTES`; `defines.cs` gained new flat `IPS` static class with 12 string constants for all CROSSBOW node IPs (mirrors firmware-side `IP_*_BYTES` plus C#-only THEIA/HYPERION). Firmware: 11 edits across MCC (4) / BDC (3) / TMC (3) / FMC (1); TRC controller code already compliant via its own `Defaults::` namespace registry. C#: 6 edits across all five client classes (TRC had a duplicate literal at `trc.cs:106` bypassing the IP property — fixed). All peer-driver classes (firmware) and `MSG_*.cs` / `frm*.cs` files (C#) audited and confirmed clean — discipline is type-enforced via `private set` on the C# IP properties and via `INIT(IPAddress)` signatures on firmware peer drivers. Surgical option (a) — intentional patterns left in place: SET_NTP_CONFIG last-octet handlers, parsed-octet serial command handlers, log strings. **Spawned cleanup items:** FW-C5-FRAME-CLEANUP (retire dead `A1_DEST_*_IP` from `frame.hpp` after TMC's `_mcc[]` dance fix made them unreferenced), TRC-CS-DEAD-IPENDPOINT (retire dead `ipEndPoint` field in `trc.cs`). | `defines.hpp` ✅ `defines.cs` ✅ `mcc.hpp/.cpp` ✅ `bdc.hpp` ✅ `BDC.ino` ✅ `tmc.hpp/.cpp` ✅ `fmc.hpp` ✅ `mcc.cs` ✅ `bdc.cs` ✅ `tmc.cs` ✅ `fmc.cs` ✅ `trc.cs` ✅ |
 | FW-C7 | Implement `SET_TIMESRC` at `0xA3` | ⏳ Pending — **byte assigned CB-20260412** | `TIMESRC` serial command exists (FW-2, S30) but has no UDP/ICD equivalent. **Byte assigned: `0xA3`, INT_OPS, all five controllers.** Payload: `0=OFF, 1=NTP, 2=PTP, 3=AUTO`. Routing by IP. Firmware handler + `EXT_CMDS[]` whitelist entry + C# wiring in all five client classes. Resolves FMC NTP operator control without serial access. Unblocks FW-B4 runtime PTP enable. Prerequisite: FW-C8 (handler removal at `0xA3` first). | `defines.hpp`, `defines.cs`, all five controller `.cpp/.hpp`, C# client classes |
 | ~~FW-C8~~ | ~~Handler removal pass — all retired/superseded command slots~~ | ✅ **CLOSED** | All retired handlers removed during CB-20260412 session passes (MCC, BDC, TMC, FMC). `0xE4` PMS_RELAY_ENABLE and `0xEC` PMS_VICOR_ENABLE confirmed never implemented in any controller — both hit default. Fleet clean. |
 | ~~FW-C10~~ | ~~REG1 CMD_BYTE 0xA1 → 0x00 fleet-wide~~ | ✅ **CLOSED** | All five controllers confirmed: MCC ✅ BDC ✅ TMC ✅ FMC ✅ TRC ✅ — all `buf[0]`/`cmd_byte` set to `0x00` with FW-C10 comment. All C# parsers (`MSG_MCC`, `MSG_BDC`, `MSG_TMC`, `MSG_FMC`, `MSG_TRC`) updated to accept `0x00 \|\| 0xA1` dual-check. `0xA1` now fully available for new assignment. |
@@ -345,7 +408,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | ~~FW-C12~~ | ~~Implement `SET_DEVICES_ENABLE` at `0xAA` — MCC and BDC~~ | ✅ **CLOSED** | Confirmed in current source: MCC `mcc.cpp` line 622 ✅, BDC `bdc.cpp` line 1200 ✅. |
 | ~~FW-C13~~ | ~~Implement `SET_CHARGER` at `0xAF` — MCC~~ | ✅ **CLOSED** | Confirmed in current source: MCC `mcc.cpp` line 712 ✅. |
 | ICD-1 | ICD INT_ENG update pass — CB-20260412 changes | ⏳ Pending | Bump ICD to v3.6.0. Full list of changes: **(New)** `0xA1` SET_HEL_TRAINING_MODE, `0xA3` SET_TIMESRC, `0xA9` SET_REINIT, `0xAA` SET_DEVICES_ENABLE, `0xAB` SET_FIRE_VOTE, `0xAF` SET_CHARGER, `0xD1` ORIN_COCO_ENABLE, `0xE0` SET_BCAST_FIRECONTROL_STATUS, `0xB1` SET_BDC_VOTE_OVERRIDE. **(Retired)** `0xA9`, `0xB0`, `0xB1` (old), `0xBE`, `0xD1` (old), `0xD2`, `0xD8`, `0xDF`, `0xE0` (old), `0xE1`, `0xE3`, `0xE6`, `0xED`. **(Scope to INT_OPS)** `0xA2`, `0xA3`, `0xA1`, `0xAB`. **(INT_ENG)** `0xE0` BCAST_FC, `0xB1` VOTE_OVR. Update version history section. Bump ICD document register entry. | `CROSSBOW_ICD_INT_ENG.md`, IPGD-0003 register entry |
-| DEF-1 | defines.hpp / defines.cs update pass — CB-20260412 enum changes | ⏳ Pending | All command byte reassignments require enum value updates in both files. **Add:** `SET_REINIT=0xA9`, `SET_DEVICES_ENABLE=0xAA`, `SET_FIRE_VOTE=0xAB`, `SET_CHARGER=0xAF`, `SET_TIMESRC=0xA3`. **Update values:** `SET_HEL_TRAINING_MODE=0xA1` (was `0xAF`), `ORIN_ACAM_COCO_ENABLE=0xD1` (was `0xDF`), `SET_BCAST_FIRECONTROL_STATUS=0xE0` (was `0xAB`), `SET_BDC_VOTE_OVERRIDE=0xB1` (was `0xAA`). **Deprecate/remove:** `PRINT_LCH_DATA`, `SET_GIM_HOME`, `SET_BDC_REINIT`, `SET_BDC_DEVICES_ENABLE`, `SET_MCC_REINIT`, `SET_MCC_DEVICES_ENABLE`, `ORIN_SET_STREAM_MULTICAST`, `ORIN_SET_STREAM_60FPS`, `ORIN_SET_TESTPATTERN`, `PMS_CHARGER_ENABLE`, `PMS_SET_CHARGER_LEVEL`, `PMS_SET_FIRE_REQUESTED_VOTE` (replaced by `SET_FIRE_VOTE`). Note: C# code using enum names is unaffected — only numeric values change. THEIA impact minimal. | `defines.hpp`, `defines.cs` |
+| ~~DEF-1~~ | ~~defines.hpp / defines.cs update pass — CB-20260412 enum changes~~ | ✅ **CLOSED** | **Verified CB-20260413.** Both files contain all CB-20260412 enum changes — `SET_TIMESRC=0xA3`, `SET_REINIT=0xA9`, `SET_DEVICES_ENABLE=0xAA`, `SET_CHARGER=0xAF` all added; `SET_HEL_TRAINING_MODE=0xA1`, `ORIN_ACAM_COCO_ENABLE=0xD1`, `SET_BCAST_FIRECONTROL_STATUS=0xE0`, `SET_BDC_VOTE_OVERRIDE=0xB1` all reassigned; all retired names removed (replaced by `RES_xx` rejection markers, both files in lockstep). **Naming note:** slot `0xAB` retains the legacy name `SET_FIRE_REQUESTED_VOTE` from its `0xE6` origin — slot-only move, name preserved to avoid C# call-site churn. ICD-1 to use canonical name `SET_FIRE_REQUESTED_VOTE` in v4.0.0 entries (not the `SET_FIRE_VOTE` shorthand used in the original CB-20260412 spec). | `defines.hpp` ✅ `defines.cs` ✅ |
 | ARCH-1 | ARCHITECTURE.md update pass — CB-20260412 | ⏳ Pending | Update: §5 Port reference — note `0xA9`/`0xAA` as new unified fleet commands. §17 Open items — add ICD-1, DEF-1, FW-C8 through FW-C13, FW-C10. Note 0xA1 REG1 CMD_BYTE legacy status. ICD reference bump to v3.6.0 in ARCH header. All controller FW versions → 4.0.0. IsV4 gate documented. **Hardware revision sections:** Each controller section (MCC §9, BDC §10, TMC §?, FMC §12) needs V1/V2 subsections noting platform differences — MCC HW rev (laser/no-laser), BDC V1/V2 (Vicor/TRACO, IP175, new thermistors), TMC V1/V2 (single Vicor/two TRACOs, heater removed, ADS1015 removed), FMC V1/V2 (SAMD21/STM32F7). **CROSSBOW_FW_PATTERNS.md updates to incorporate into ARCH patterns appendix:** (1) platform table FMC row → V1 SAMD21 / V2 STM32F7; (2) line 19 warning update — FMC V2 follows OpenCR pattern; (3) `buildReg01()` example `ICD::GET_REGISTER1` → `0x00`; (4) HPP template `isUnSolicitedEnabled` → retired, replaced by per-client `wantsUnsolicited`. | `ARCHITECTURE.md` |
 | UG-1 | CROSSBOW_UG_ENG_GUI_draft.md update pass | ⏳ Pending | Update following all unification sessions: ICD/ARCH version refs; MCC section (LASER_MODEL, HEL training mode, IsV4 gate, charger UI); BDC section (V1/V2 hardware table, IP175, HEALTH_BITS/POWER_BITS rename, new temps, IsV2 layout switching); TMC section (V1/V2 hardware table, PUMP/PIDGAIN serial commands, isSingleLoop); FMC section (V1 SAMD21 / V2 STM32F7 platform note); TRC section (frame port 10019/10018 vs legacy 5010, retired stream controls). Add IsV4 gating strategy note. Bump document version and revision history. | `CROSSBOW_UG_ENG_GUI_draft.md` |
 | DOC-REG-1 | CROSSBOW_DOCUMENT_REGISTER.md version bumps | ⏳ Pending | Bump version entries for all documents updated during CB-20260412 and unification sessions: ICD INT_ENG, ICD INT_OPS, ARCHITECTURE.md, UG_ENG_GUI, BDC_HW_DELTA.md, TMC_HW_DELTA.md, FMC_STM32_MIGRATION_FINAL.md. Add new entries for CROSSBOW_CHANGELOG.md v1.2.0 and CROSSBOW_FW_PATTERNS.md v1.7. | `CROSSBOW_DOCUMENT_REGISTER.md` |
@@ -363,6 +426,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | CRG-2 | `PIN_CRG_OK` → `isCRG_Ready` on V2 | ⏳ Pending CRG-1 | Map `PIN_CRG_OK` read → `isCRG_Ready()` on V2 so device status panel matches V1. | `mcc.hpp` — `isCRG_Ready()` V2 case |
 | CRG-3 | `frmMCC.cs` + designer — `mb_CrgAlarm_rb` control wiring | ⏳ Pending CRG-1 | `frmMCC.cs` + designer: add `mb_CrgAlarm_rb` StatusLabel to `groupBox12`; wire readback to corrected `isCrgAlarm` logic after CRG-1. | `frmMCC.cs`, `frmMCC_Designer.cs` |
 | IPG-HB-1 | `HB_BAT` always 0 — not wired | ⏳ Pending | `HB_BAT` (REG1 byte [132]) always packs 0. Wire: add `lastMsgRx_ms` to `bat` class, stamp on each received packet, compute delta at `SEND_REG_01()` pack time — same pattern as `ipg.HB_RX_ms`. | `battery.hpp`, `mcc.cpp` `SEND_REG_01()` |
+| IPG-HB-HEL | `HB_HEL` (REG1 byte [131]) — verify updating correctly on HW | 🟡 Verify | `HB_HEL` reads `ipg.HB_RX_ms` which is stamped in `parseLine()` — only updates when a TCP line is received and parsed from laser. If laser connected but not actively sending lines, `lastMsgRx_ms` may not be re-stamped and HB grows unbounded. Verify on HW that byte [131] reflects live laser TCP interval. If not updating: stamp `lastMsgRx_ms` at TCP receive level rather than inside `parseLine()`. | `ipg.cpp` — `parseLine()`, `UPDATE()`; `mcc.cpp` — `SEND_REG_01()` byte [131] |
 | IPG-HB-2 | `HB_GNSS` always 0 — not wired | ⏳ Pending | `HB_GNSS` (REG1 byte [134]) always packs 0. Wire: add `lastMsgRx_ms` to `gnss` class, stamp on each received position fix, compute delta at `SEND_REG_01()` pack time. | `gnss.hpp`, `mcc.cpp` `SEND_REG_01()` |
 | IPG-HB-3 | `HB_CRG` always 0 — not wired (V1 only) | ⏳ Pending | `HB_CRG` (REG1 byte [133]) always packs 0. V1 only — CRG has no I2C on V2. Implement if CRG polling exists; gate behind `#if defined(HW_REV_V1)`. | `mcc.cpp` `SEND_REG_01()` |
 | IPG-HB-4 | `HB_NTP` → `HB_TIME` rename — PTP sync not stamped | ⏳ Pending | REG1 byte [130] named `HB_NTP` but should reflect both NTP and PTP receive events. Rename `HB_NTP` → `HB_TIME` in firmware, ICD (byte [130] label), and `MSG_MCC.cs` (`HB_NTP` property). Stamp on PTP sync event in addition to NTP packet receive. Low disruption — existing C# callers update property name only. | `mcc.hpp`, `mcc.cpp`, `MSG_MCC.cs`, `CROSSBOW_ICD_INT_ENG.md` byte [130] |
@@ -394,6 +458,8 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 
 *(No FMC-specific items currently open. FMC-STM32-1, FMC-NTP, SAMD-NTP closed ~S39.)*
 
+| ~~FMC-TPH~~ | ~~BME280 TPH integration — FMC V2~~ | ✅ **CLOSED** | **Bench-verified CB-20260413 on V2 STM32F7 hardware.** Firmware: `tph.hpp` include, `TPH tph` member, `tph.SETUP()`/`UPDATE()`, REG1 pack at [47–58], `PRINT_REG()` and `TEMPS` serial output — all gated `#if defined(HW_REV_V2)`. V1 leaves bytes 0x00 (decodes to 0.0f via existing `memset` in `buildReg01()`). Serial verification: MCU 45.28°C, Ambient 30.79°C, Pressure 100131.88 Pa (≈1001 hPa), Humidity 30.47% — all physically sane. C#: `MSG_FMC.cs` parses three `BitConverter.ToSingle` reads at [47]/[51]/[55]; `TPH_Temp`/`TPH_Pressure`/`TPH_Humidity` properties added; `frmFMC.cs` populates pre-existing `lbl_FMC_tph` designer label gated on `IsV2`; V1 displays "TPH: V1 — n/a". ICD INT_ENG FMC REG1 table updated with three TPH rows tagged v4.0.0 (FMC-TPH); defined-bytes 47 → 59, reserved 17 → 5. | `fmc.cpp` ✅ `fmc.hpp` ✅ `MSG_FMC.cs` ✅ `frmFMC.cs` ✅ `CROSSBOW_ICD_INT_ENG.md` ✅ |
+
 ### TRC
 
 | ID | Item | Status | Detail | Files |
@@ -415,6 +481,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | ID | Item | Status | Detail | Files |
 |----|------|--------|--------|-------|
 | ~~FW-C6~~ | ~~isUnSolicitedMode_Enabled bit retired — C# reads stale bit~~ | ✅ **CLOSED** | Confirmed removed from `MSG_MCC.cs` during CB-20260412 MCC review — line 438 comment confirms retirement. `MSG_BDC.cs` status to be verified during BDC pass. | `MSG_MCC.cs` ✅ — `MSG_BDC.cs` ⏳ verify |
+| ~~MSG-CMC-1~~ | ~~`MSG_CMC.cs` ParseMsg — `ICD.RES_A1` stale reference~~ | ✅ **CLOSED** | **Owner-confirmed fixed CB-20260413.** `ParseMsg()` now uses literal dual-check `case (ICD)0x00:` and `case (ICD)0xA1:` to handle both v4.0.0 and legacy pre-FW-C10 REG1 frames. | `MSG_CMC.cs` ✅ |
 | CLEANUP-1 | Dead code — MCC_STATUS and BDC_STATUS on controller classes | ⏳ Pending | `MCC.MCC_STATUS` and `BDC.BDC_STATUS` superseded by `CommHealth` (S30). `CB.MCC_STATUS`/`CB.BDC_STATUS` no longer call them. Remove when convenient. | `mcc.cs`, `bdc.cs` |
 
 | CLEANUP-4 | Confirm ping stops correctly at STANDBY transition | ⏳ Pending | `PING_STATUS_*` bools stay at last value when ping loop stops. Verify `CB.MCC_STATUS`/`CB.BDC_STATUS` do not use stale ping state after STANDBY transition. Confirm on HW. | `frmMain.cs` — `PingHB()`, `crossbow.cs` |
@@ -462,6 +529,9 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | DEPLOY-4 | Verify .33 GPS lock before mission | ⏳ Pending | Confirm Phoenix Contact FL TIMESERVER has GPS lock (LOCK LED steady) before relying on it as primary NTP/Stratum 1. Without GPS lock degrades to internal oscillator. | — |
 | DEPLOY-5 | NovAtel GNSS (.30) — PTP configuration per production system | ⏳ Action required | Each production CROSSBOW system ships with its own NovAtel GNSS receiver. Every unit must have the following two commands set **and saved to NVM** before PTP will operate correctly. `PTPMODE ENABLE_FINETIME` — activates PTP only when receiver is in FINESTEERING mode (clean fallback if GPS lost). `PTPTIMESCALE UTC_TIME` — **critical**: without this the epoch is GPS time not UNIX/UTC, and all MCC timestamps will be wrong by 18+ seconds (leap second offset). Bench unit confirmed S29 — each production unit requires the same procedure. Commands: `PTPMODE ENABLE_FINETIME` → `PTPTIMESCALE UTC_TIME` → `SAVECONFIG`. Add to system commissioning checklist. | Hardware — NovAtel GNSS receiver at 192.168.1.30 (per-system) |
 | DEPLOY-6 | IGMP snooping — verify switch compatibility for PTP multicast | ⏳ Investigate | PTP uses multicast 224.0.1.129. IGMP snooping on the network switch can block multicast frames from reaching controllers, silently preventing PTP sync with no obvious error. Need to confirm: (1) which switch models are used in production CROSSBOW systems; (2) whether those switches support disabling IGMP snooping per-VLAN or globally; (3) whether an alternative approach (PTP-aware switch, static multicast table entry) is preferable to disabling snooping entirely. Bench unit operates with snooping OFF — production switch behaviour unverified. | Network switch — production CROSSBOW system |
+| ARCH-FMC-HW | ARCH §12.1 FMC Hardware table — V1/V2 column refactor | 🟢 Low | Opened CB-20260413. ARCH §12.1 FMC Hardware table currently has a single column. Refactor to V1/V2 columns parallel to the TMC §11.3 pattern, with a BME280 V2 row added (now that FMC-TPH is closed and the BME280 is part of the V2 build). Documentation cleanup, no functional impact. Pairs naturally with ARCH-1 if that's the next ARCH pass. | `ARCHITECTURE.md` §12.1 |
+| FW-C5-FRAME-CLEANUP | Retire dead `A1_DEST_*_IP` defines from `frame.hpp` | 🟢 Low | Opened CB-20260413. After FW-C5's TMC pass, `A1_DEST_MCC_IP` (line 97) and `A1_DEST_BDC_IP` (line 98) in `frame.hpp` are both unreferenced. `A1_DEST_MCC_IP` had exactly one consumer (the `_mcc[]` temp-array dance in `tmc.cpp:21–22`, now cleaned up to `IPAddress(IP_MCC_BYTES)`); `A1_DEST_BDC_IP` was already unreferenced before this session. Both were left in place per FW-C5 option (a) "leave frame.hpp alone" rule. One-line cleanup: delete both `#define` lines and the surrounding "Fixed destinations for A1 TX" comment block. While in there, also refresh the now-stale comment at `tmc.hpp:235` ("`A1_DEST_MCC_IP from frame.hpp`") and the stale TODO at `fmc.hpp:188` ("NOTE: add `A1_DEST_BDC_IP = {192,168,1,20}` to frame.hpp if not already defined"). Dead code, harmless to leave but cleaner to remove. | `frame.hpp` lines 96–98; `tmc.hpp:235`; `fmc.hpp:188` |
+| TRC-CS-DEAD-IPENDPOINT | Retire dead `ipEndPoint` field in `trc.cs` | 🟢 Low | Opened CB-20260413. In `trc.cs`, the `IPEndPoint ipEndPoint` field is dead. Field declaration at line 24, assignment at line 106 (was hardcoded literal — overwritten by FW-C5 to `new IPEndPoint(IPAddress.Parse(IP), Port)` but the value is still never read), commented-out reference at line 127 (`//byte[] rxBuff = udpClient.Receive(ref ipEndPoint);`). The active receive path uses `udpClient.ReceiveAsync()` which doesn't take an endpoint. Three-line cleanup: delete field declaration, delete the assignment, delete the commented-out line. Pairs naturally with TRC-M9 (port 5010 deprecation) — both are receive-path cleanups owed to TRC. | `trc.cs` lines 24, 106, 127 |
 
 ---
 

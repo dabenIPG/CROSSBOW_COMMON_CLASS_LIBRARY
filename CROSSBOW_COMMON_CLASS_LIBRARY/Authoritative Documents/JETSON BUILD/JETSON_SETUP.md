@@ -1,6 +1,6 @@
 # JETSON_SETUP.md — TRC Jetson Orin NX Setup Procedure
 **Document:** JETSON_SETUP.md (DOC-2)  
-**Version:** 2.2.2  
+**Version:** 2.2.3  
 **Date:** 2026-04-13  
 **Confirmed on:** Unit 1 (2026-04-09), Unit 2 (2026-04-09), Unit 3 (2026-04-10) — all 54 PASS, 0 FAIL  
 **Platform:** Seeed Studio reComputer J4012 **(non-Super, J401 carrier)** — see hardware note below  
@@ -166,17 +166,22 @@ The non-Super and Super J4012 are mechanically different — do not mix them.
 > All units must be reflashed with our known-good JetPack 6.2.2 image regardless
 > of what version ships pre-installed. Pre-installed OS may contain unknown
 > packages, OEM customizations, or security vulnerabilities.
-> Boot once to accept EULA, then reflash.
 >
-> **Correct procedure for all units:**
-> 1. Boot without FC REC jumper → accept EULA → complete first-boot setup
-> 2. Power off
-> 3. Short FC REC → connect Micro-USB → power on → reflash via SDK Manager
-> 1. Power on without FC REC jumper
+> **Correct pre-flash sequence for all new units — two boots required:**
+>
+> **Boot 1 — Accept factory EULA:**
+> 1. Power on WITHOUT FC REC jumper — monitor and keyboard required
 > 2. Accept EULA on Jetson display
-> 3. Complete minimal first-boot setup (username/password)
-> 4. Power off
-> Then proceed with recovery mode below.
+> 3. Complete full OEM first-boot setup (username `ipg`, password)
+> 4. Let it fully boot to desktop
+>
+> **Boot 2 — Confirm stable:**
+> 5. Reboot — accept any second-stage prompts
+> 6. Confirm fully booted and stable at desktop
+> 7. Power off completely
+>
+> **Then proceed with recovery mode below.**
+> SDK Manager flash will fail or loop if either boot is skipped.
 >
 > Units that have previously been set up can go straight to recovery mode.
 
@@ -1084,6 +1089,17 @@ chmod +x ~/CV/SETUP/04_verify_all.sh
 chmod +x ~/CV/SETUP/cleanup_pre_image.sh
 ```
 
+> ⚠️ **Windows line endings:** Scripts transferred from Windows via SCP may contain
+> `\r\n` line endings which cause `/bin/bash^M: bad interpreter` errors on Linux.
+> Fix all scripts after every SCP transfer:
+> ```bash
+> sed -i 's/\r//' ~/CV/TRC/trc_start.sh
+> sed -i 's/\r//' ~/CV/TRC/trc_start_bench.sh
+> sed -i 's/\r//' ~/CV/SETUP/04_verify_all.sh
+> sed -i 's/\r//' ~/CV/SETUP/cleanup_pre_image.sh
+> sed -i 's/\r//' ~/CV/SETUP/install_opencv4.13.0_Jetpack6.2.2.sh
+> ```
+
 ### 7.2 Configure bench autostart — gold standard for image
 
 The **bench script is the gold standard for the production image**. Units boot
@@ -1427,7 +1443,8 @@ cd ~/CV/SETUP/
 
 | Version | Date | Notes |
 |---------|------|-------|
-| 2.2.2 | 2026-04-13 | Phase 4.6: `libVmbCPP.so: file too short` fix documented — stray file in `~/` causes error; `rm -f ~/libVmbCPP.so` resolves. Phase 8.2: `test1.py` kept as survivor (diagnostic tool) — removed from cleanup script. Phase 9.2/9.3: rewritten — `dd` and `l4t_backup_restore.sh` documented as NOT supported for cloning (QSPI not transferred). Correct tool is `l4t_initrd_flash.sh --massflash` (pending validation). Ubuntu host disk space requirement (≥50GB) documented. Path A confirmed as current new-unit procedure until massflash validated. Known issues: two new entries added. |
+| 2.2.3 | 2026-04-13 | Phase 0.3: two-boot sequence documented explicitly — Boot 1 (EULA + full OEM setup), Boot 2 (stable desktop), then recovery mode. SDK Manager confirmed as only validated flash path. Phase 7.1: Windows line endings fix (`sed -i 's/\r//'`) added for all `.sh` files after SCP transfer — prevents `/bin/bash^M: bad interpreter` error. |
+| 2.2.2 | 2026-04-13 | Phase 4.6: `libVmbCPP.so: file too short` fix documented. Phase 8.2: `test1.py` kept as survivor. Phase 9.2/9.3: rewritten — dd/l4t_backup_restore NOT supported for cloning. Known issues: two new entries. |
 | 2.2.1 | 2026-04-10 | Phase 7.1: `04_verify_all.sh` and `cleanup_pre_image.sh` added to file push step. Phase 7.3: marked POST-DEPLOYMENT ONLY. Checkpoint 7: corrected log reference and tcpdump target. Phase 8.2: `gst-vmbsrc/` directory added to cleanup script. Pass criteria table: Makefile row annotated with Gate A/B caveat. |
 | 2.2.0 | 2026-04-10 | Path C retired — upgrade path is Path B (image restore). Path B updated to cover upgrades. Path D: Super units share same TRC role IP. IP 192.168.1.22 documented as TRC role address shared by all units. Hostname scheme: `trc-<SOM serial>` from `/proc/device-tree/serial-number` — Phase 1.1a added. Phase 8 restructured: 8.1 desktop removal, 8.2 cleanup script (`cleanup_pre_image.sh`), 8.3 two-gate verify (54 PASS pre-cleanup / 53 PASS + 1 expected FAIL post-cleanup). Bench crontab documented as gold standard for image. |
 | 1.0.0 | 2026-04-09 | Initial — based on live baseline verification of lab Jetson 2026-04-06 |

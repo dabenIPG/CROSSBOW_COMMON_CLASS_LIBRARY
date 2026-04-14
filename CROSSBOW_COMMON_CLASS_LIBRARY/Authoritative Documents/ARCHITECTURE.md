@@ -1,9 +1,14 @@
 # CROSSBOW System Architecture
 
-**Document Version:** 3.3.7
-**Date:** 2026-04-11
-**ICD Reference:** ICD v3.5.2
-**Status:** FMC STM32F7 port complete.
+**Document Version:** 3.3.8
+**Date:** 2026-04-13
+**ICD Reference:** ICD v3.6.0
+**Status:** FW-C5 IP-define consolidation closed across fleet.
+
+**v3.3.8 changes (FW-C5 + FMC-TPH closures — 2026-04-13):**
+- §10.5 IP defines: FW-C5 closed. `defines.hpp` gained `IP_HEL_BYTES` (.13) and `IP_NTP_FALLBACK_BYTES` (.208). All firmware peer-IP literals replaced with `IP_*_BYTES` references across MCC (4 edits), BDC (3 edits), TMC (3 edits, including `tmc.cpp` `_mcc[]` temp-array dance retired), FMC (1 edit). TRC controller code (Linux/Jetson) was already compliant via its own `Defaults::` namespace registry — zero firmware edits needed. C# side: new flat `IPS` static class added to `defines.cs` (12 string constants for all CROSSBOW node IPs, including C#-only THEIA/HYPERION). All five C# client classes (`mcc.cs`, `bdc.cs`, `tmc.cs`, `fmc.cs`, `trc.cs`) migrated to `IPS.<NODE>` references — 6 edits total (TRC had a duplicate literal at `trc.cs:106` bypassing the IP property, also fixed). Discipline: peer-driver classes take IP via `INIT(IPAddress)`, C# client IP properties use `private set` — both type-enforced. Surgical option (a) — SET_NTP_CONFIG last-octet handlers, parsed-octet serial commands, and log strings intentionally left in place.
+- §12 FMC: FMC-TPH closed. BME280 ambient T/P/H integration on V2 (STM32F7) hardware. REG1 bytes [47–58] populated with three floats (Temp °C / Pressure Pa / Humidity %), all gated `#if defined(HW_REV_V2)`; V1 leaves bytes 0x00 → decodes to 0.0f. C# `MSG_FMC.cs` parses the new fields; `frmFMC.cs` populates `lbl_FMC_tph` gated on `IsV2`. Bench-verified on V2 hardware: MCU 45.28°C, Ambient 30.79°C, Pressure 100131.88 Pa, Humidity 30.47%.
+- §17 Open items: FW-C5 closed. Three new low-priority items opened: ARCH-FMC-HW (FMC §12.1 V1/V2 table refactor), FW-C5-FRAME-CLEANUP (retire dead `A1_DEST_*_IP` defines from `frame.hpp`), TRC-CS-DEAD-IPENDPOINT (retire dead `ipEndPoint` field in `trc.cs`).
 
 **v3.3.7 changes (FMC STM32F7 port — 2026-04-11):**
 - §3 Codebase inventory: FMC platform updated SAMD21 → STM32F7 (OpenCR board library). FW version 3.2.x → 3.3.0. STM32 migration deferred note removed.
@@ -1794,7 +1799,7 @@ Quick reference — high priority items as of session 29:
 | GUI-8 | TRC C# client model — apply standardized pattern from session 29 | 🟡 Medium |
 | FW-C3 | BDC Fuji boot status — `fuji.SETUP()` deferred post-boot, FUJI_WAIT always times out | 🟡 Medium |
 | FW-C4 | BDC A1 ARP backoff not working — `A1 OFF` workaround when TRC offline | 🟡 Medium |
-| FW-C5 | Audit/consolidate IP defines in `defines.hpp` — remove remaining hardcoded IPs | 🟡 Medium |
+| ~~FW-C5~~ | ~~Audit/consolidate IP defines in `defines.hpp` — remove remaining hardcoded IPs~~ | ✅ **Closed CB-20260413** |
 | FW-14 | GNSS socket bug — MCC `RUNONCE` case 6 and `EXEC_UDP` use wrong socket | 🟡 Medium |
 | NEW-38d | TRC PTP integration — TIME_BITS, MSG_TRC.cs, `ptp4l` | 🟡 Medium |
 | DOC-1 | Add TRC NTP setup reference to ARCHITECTURE.md §2.5 | 🟡 Medium |

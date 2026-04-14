@@ -1193,9 +1193,12 @@ Sent by FMC directly (engineering access) and passed through BDC REG1 as a 64-by
 | 44 | 44 | 45 | 1 | TIME_BITS | uint8 | bit0:isPTP_Enabled; bit1:ptp.isSynched; bit2:usingPTP; bit3:ntp.isSynched; bit4:ntpUsingFallback; bit5:ntpHasFallback; bit6–7:RES — session 33 |
 | 45 | 45 | 46 | 1 | HW_REV | uint8 | `0x01`=V1 (SAMD21 legacy); `0x02`=V2 (STM32F7 / OpenCR). Read before interpreting HEALTH_BITS [7] and POWER_BITS [46]. — v3.5.2 |
 | 46 | 46 | 47 | 1 | FMC POWER_BITS | uint8 | bit0=`isFSM_Powered`; bit1=`isStageEnabled`; bits2–7=RES. Mirrors MCC/BDC POWER_BITS pattern. — v3.5.2 |
-| 47 | 47 | 64 | 17 | RESERVED | — | 0x00 — headroom for future fields |
+| 47 | 47 | 51 | 4 | TPH: Temp | float | °C — BME280 ambient temperature. **V2 only** (V1 = 0.0). Cadence ~0.5 Hz. — v4.0.0 (FMC-TPH) |
+| 51 | 51 | 55 | 4 | TPH: Pressure | float | Pa — BME280 ambient pressure. **V2 only** (V1 = 0.0). — v4.0.0 (FMC-TPH) |
+| 55 | 55 | 59 | 4 | TPH: Humidity | float | % — BME280 relative humidity. **V2 only** (V1 = 0.0). — v4.0.0 (FMC-TPH) |
+| 59 | 59 | 64 | 5 | RESERVED | — | 0x00 — headroom for future fields |
 
-**Defined: 47 bytes. Reserved: 17 bytes. Fixed block: 64 bytes.**
+**Defined: 59 bytes. Reserved: 5 bytes. Fixed block: 64 bytes.**
 
 > ⚠ **FSM position note:** `FSM Pos X/Y` here (int32, ADC readback) differs from `FSM_X/Y`
 > in BDC REG1 (int16, commanded). Reconciliation pending — see Action Items.

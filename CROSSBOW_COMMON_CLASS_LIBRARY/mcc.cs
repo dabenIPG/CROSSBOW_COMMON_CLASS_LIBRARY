@@ -47,7 +47,7 @@ namespace CROSSBOW
         // firmware's 60-second liveness window (frame.hpp CLIENT_TIMEOUT_MS).
         private const int KEEPALIVE_INTERVAL_MS = 30_000;
 
-        public string IP   { get; private set; } = "192.168.1.10";
+        public string IP   { get; private set; } = IPS.MCC;
         public int    Port => ActivePort;
 
         // ── Transport + Logger ────────────────────────────────────────────────

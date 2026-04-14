@@ -18,6 +18,27 @@ using System.Threading.Tasks;
 
 namespace CROSSBOW
 {
+    // ─── IP address registry ────────────────────────────────────────────────────
+    // Single authority source for all CROSSBOW node IPs on the C# side.
+    // Mirrors defines.hpp IP_*_BYTES, plus C#-only entries for THEIA/HYPERION.
+    // Strings — consumers call IPAddress.Parse(IPS.X) at bind/send sites.
+    // .208 appears twice (THEIA / NTP_FALLBACK) — same machine, two roles.
+    // ─────────────────────────────────────────────────────────────────────────────
+    public static class IPS
+    {
+        public const string MCC = "192.168.1.10";
+        public const string TMC = "192.168.1.12";
+        public const string HEL = "192.168.1.13";   // IPG laser TCP target on MCC
+        public const string BDC = "192.168.1.20";
+        public const string GIMBAL = "192.168.1.21";   // Galil servo drive
+        public const string TRC = "192.168.1.22";   // role address — only one TRC unit live at a time
+        public const string FMC = "192.168.1.23";
+        public const string GNSS = "192.168.1.30";   // NovAtel — also IEEE 1588 PTP grandmaster
+        public const string NTP_PRIMARY = "192.168.1.33";   // HW Stratum 1 NTP server
+        public const string NTP_FALLBACK = "192.168.1.208";  // Windows HMI w32tm fallback
+        public const string THEIA = "192.168.1.208";  // operator HMI host (same machine as NTP_FALLBACK)
+        public const string HYPERION = "192.168.1.206";  // EXT_OPS C2 / sensor fusion
+    }
     public enum SYSTEM_STATES
     {
         OFF = 0x00,

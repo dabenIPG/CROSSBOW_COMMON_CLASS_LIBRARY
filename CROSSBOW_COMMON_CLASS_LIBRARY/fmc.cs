@@ -25,7 +25,7 @@ namespace CROSSBOW
         // -------------------------------------------------------------------
         // Configuration
         // -------------------------------------------------------------------
-        public string IP   { get; private set; } = "192.168.1.23";
+        public string IP   { get; private set; } = IPS.FMC;
         public int    Port { get; private set; } = 10018;   // A2 engineering port
 
         // Local bind IP — internal NIC (<100) so FMC firmware accepts the source address.

@@ -17,7 +17,7 @@ namespace CROSSBOW
             new CAMERA(BDC_CAM_IDS.VIS),
             new CAMERA(BDC_CAM_IDS.MWIR),
             ];
-        public string IP { get; private set; } = "192.168.1.22";
+        public string IP { get; private set; } = IPS.TRC;
         public int Port { get; private set; } = 5010;   // LEGACY — pending deprecation (TRC-M9)
 
         private UdpClient udpClient;
@@ -103,7 +103,7 @@ namespace CROSSBOW
             Task task = Task.Factory.StartNew(async () =>
             {
                 udpClient = new UdpClient(Port);
-                ipEndPoint = new IPEndPoint(IPAddress.Parse("192.168.1.22"), Port);
+                ipEndPoint = new IPEndPoint(IPAddress.Parse(IP), Port);
                 isConnected = true;
 
                 Thread.Sleep(50);
