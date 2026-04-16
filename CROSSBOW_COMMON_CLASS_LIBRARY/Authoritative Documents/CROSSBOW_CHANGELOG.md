@@ -2,7 +2,7 @@
 
 **Document:** `CROSSBOW_CHANGELOG.md`
 **Doc #:** IPGD-0019
-**Version:** 4.0.3
+**Version:** 4.0.6
 **Date:** 2026-04-13
 **Status:** Current
 **Supersedes:** `Embedded_Controllers_ACTION_ITEMS.md` (unregistered, retired), `Embedded_Controllers_CLOSED_ACTION_ITEMS.md` (unregistered, retired)
@@ -21,6 +21,49 @@ Session numbers marked `~` are approximate where the exact session number is unc
 ---
 
 # PART 1 — SESSION LOG
+
+---
+
+## CB-20260413g — INFO command cleanup fleet-wide
+**Files:** `mcc.cpp`, `bdc.cpp`, `tmc.cpp`, `fmc.cpp` (one line each)
+
+**IP + LINK combined on one line** — all four controllers. Previously IP and Link were on two separate lines with wide padding. Consolidated to a single line using `Serial.print(Ethernet.localIP())` (library-formatted, no manual octet indexing) followed by inline LINK status.
+
+Output now reads:
+```
+IP: 192.168.1.xx  LINK: UP
+```
+
+**HW_REV in INFO — fleet verified closed:**
+- MCC ✅ — inline on version line (existing)
+- BDC ✅ — added this session (CB-20260413f)
+- TMC ✅ — inline on version line (confirmed from source)
+- FMC ✅ — inline on version line (existing)
+`FW-INFO-HW-REV` closed.
+
+**Changes:**
+
+| Controller | File | Lines | Notes |
+|---|---|---|---|
+| MCC | `mcc.cpp` | 1136–1137 | `Serial.print` / `Serial.printf` → single line |
+| BDC | `bdc.cpp` | 1985–1986 | `Serial.print` / `Serial.printf` → single line |
+| TMC | `tmc.cpp` | 945–946 | `Serial.print` / `Serial.printf` → single line |
+| FMC | `fmc.cpp` | 884–885 | `FMC_SERIAL.print` / `uprintf` → single line |
+
+**Items closed:** FW-INFO-HW-REV
+**Items opened:** none
+
+---
+
+## CB-20260413f — FMC V1 stage+FSM debug + BDC INFO HW_REV gap
+**ARCH:** v4.0.1 (no change) | **Files:** `bdc.cpp` (one line pending)
+
+**FMC V1 stage+FSM readback investigation:** FSM returns 0,0 when both stage and FSM are connected on V1 (SAMD21). Verbose debug confirmed stage I2C is NOT blocking — returns 32 bytes cleanly at ~14998–14999 counts, stage healthy. FSM SPI runs immediately after but returns 0,0. `FSMPOS` serial command also returns 0,0 confirming the SPI read itself is the problem, not scheduling. `isFSM_Powered=true` confirmed. Hypothesis: **merge regression in `hw_rev.hpp`** — if `HW_REV_V2` was compiled into V1 hardware, `FMC_SPI` resolves to `SPI_IMU` (STM32 peripheral, non-existent on SAMD21) and all ADC reads return 0. **Diagnostic for next session:** run `INFO` on FMC serial and check `HW_REV=0x__` at boot — if `0x02` on a SAMD21 board, wrong hw_rev.hpp selected at compile time. Tracked as FMC-V1-FSM-0.
+
+**BDC INFO missing HW_REV:** `INFO` command in `bdc.cpp` does not print `HW_REV`. MCC and FMC both include it. BDC has it in `REG` and `STATUS` but not `INFO`. Fix: one `Serial.printf` line after the version line. Tracked as FW-INFO-HW-REV. TMC source not available to verify — needs check.
+
+**Items opened:** FMC-V1-FSM-0, FW-INFO-HW-REV
+**Items closed:** none
 
 ---
 
@@ -607,7 +650,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | ~~IPG-HB-HEL~~ | ~~`HB_HEL` (REG1 byte [131]) — verify updating correctly on HW~~ | ✅ **CLOSED** | `HB_HEL` reads `ipg.HB_RX_ms` which is stamped in `parseLine()` — only updates when a TCP line is received and parsed from laser. If laser connected but not actively sending lines, `lastMsgRx_ms` may not be re-stamped and HB grows unbounded. Verify on HW that byte [131] reflects live laser TCP interval. If not updating: stamp `lastMsgRx_ms` at TCP receive level rather than inside `parseLine()`. | `ipg.cpp` — `parseLine()`, `UPDATE()`; `mcc.cpp` — `SEND_REG_01()` byte [131] |
 | ~~IPG-HB-2~~ | ~~`HB_GNSS` always 0 — not wired~~ | ✅ **CLOSED** | `HB_GNSS` (REG1 byte [134]) always packs 0. Wire: add `lastMsgRx_ms` to `gnss` class, stamp on each received position fix, compute delta at `SEND_REG_01()` pack time. | `gnss.hpp`, `mcc.cpp` `SEND_REG_01()` |
 | ~~IPG-HB-3~~ | ~~`HB_CRG` always 0 — not wired (V1 only)~~ | ✅ **CLOSED** | `HB_CRG` (REG1 byte [133]) always packs 0. V1 only — CRG has no I2C on V2. Implement if CRG polling exists; gate behind `#if defined(HW_REV_V1)`. | `mcc.cpp` `SEND_REG_01()` |
-| IPG-HB-HEL-2 | Laser HB still 0ms on live HW | 🟡 Investigate | `HB_HEL` (REG1 byte [131]) shows 0ms on live HW after CB-20260413c fix. `ipg.HB_ms()` getter computes `millis() - lastMsgRx_ms` — if still 0, `lastMsgRx_ms` is never being stamped. First step: check `ipg.isConnected` / `ipg.isInit` on MCC serial STATUS command to confirm laser TCP state. If not connected, HB correctly reads near 0 on boot (millis() - 0). If connected but still 0, trace `parseLine()` call path. | `ipg.cpp` — `parseLine()`, `checkRsp()`; `ipg.hpp` — `HB_ms()` |
+| ~~IPG-HB-HEL-2~~ | ~~Laser HB still 0ms on live HW~~ | ✅ **CLOSED** | `HB_HEL` (REG1 byte [131]) shows 0ms on live HW after CB-20260413c fix. `ipg.HB_ms()` getter computes `millis() - lastMsgRx_ms` — if still 0, `lastMsgRx_ms` is never being stamped. First step: check `ipg.isConnected` / `ipg.isInit` on MCC serial STATUS command to confirm laser TCP state. If not connected, HB correctly reads near 0 on boot (millis() - 0). If connected but still 0, trace `parseLine()` call path. | `ipg.cpp` — `parseLine()`, `checkRsp()`; `ipg.hpp` — `HB_ms()` |
 | INCL-HB-SCALE | INCL HB saturates at 255ms — scale too fine | 🟢 Low | INCL polls at ~1001ms so HB always saturates uint8 raw ms at 255ms — not useful. Consider changing INCL pack to x0.1s units (÷100 at pack, /10.0 in C# → seconds) giving 0–25.5s range that shows the 1s interval meaningfully. Coordinate: `incl.hpp HB_ms()`, `bdc.hpp HB_INCL()`, `bdc.cpp buf[403]`, `MSG_BDC.cs HB_INCL_ms` type/parse, `frmBDC.cs` format string. | `incl.hpp`, `bdc.hpp`, `bdc.cpp`, `MSG_BDC.cs`, `frmBDC.cs` |
 | TRC-SN-LABEL | TRC SOM SN — promote from version label to dedicated tss_trc_sn | 🟢 Low | Currently appended to `tss_trc_version` text in `frmBDC.cs` line 374 as a temporary testing measure. When confirmed working on HW, add dedicated `tss_trc_sn` ToolStripStatusLabel to `ss_trc` status strip in `frmBDC_Designer.cs` and wire in `frmBDC.cs`. | `frmBDC_Designer.cs`, `frmBDC.cs` |
 | IPG-HB-4 | `HB_NTP` → `HB_TIME` rename — PTP sync not stamped | ⏳ Pending | REG1 byte [130] named `HB_NTP` but should reflect both NTP and PTP receive events. Rename `HB_NTP` → `HB_TIME` in firmware, ICD (byte [130] label), and `MSG_MCC.cs` (`HB_NTP` property). Stamp on PTP sync event in addition to NTP packet receive. Low disruption — existing C# callers update property name only. | `mcc.hpp`, `mcc.cpp`, `MSG_MCC.cs`, `CROSSBOW_ICD_INT_ENG.md` byte [130] |
@@ -627,6 +670,8 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 
 | ID | Item | Status | Detail | Files |
 |----|------|--------|--------|-------|
+| FMC-V1-FSM-0 | FMC V1 FSM ADC returns 0,0 when stage connected | 🔴 High | FSM SPI reads return 0,0 when stage I2C also connected on V1 SAMD21. Stage not blocking (confirmed via VERBOSE debug — 32 bytes returned cleanly). Hypothesis: wrong `hw_rev.hpp` compiled — `HW_REV_V2` on V1 hardware causes `FMC_SPI=SPI_IMU` (non-existent on SAMD21) → all ADC reads 0. **First step:** run `INFO` at FMC boot and check `HW_REV=0x__`. If `0x02` on SAMD21, recompile with `HW_REV_V1`. If `0x01`, deeper investigation needed — check `init_FSM()` SPI init sequence for V1/V2 merge regression. | `hw_rev.hpp` compile-time define; `fmc.cpp` — `init_FSM()`, `readSPI_ADC()` |
+| ~~FW-INFO-HW-REV~~ | ~~HW_REV missing from INFO command~~ | ✅ **CLOSED** | MCC ✅ has `HW_REV=0x%02X` inline on INFO version line. FMC ✅ same. BDC ❌ missing — `INFO` handler in `bdc.cpp` line 1982 has no HW_REV print (present in `REG` line 1913 and `STATUS` line 2816). TMC source not uploaded — needs verification. Fix for BDC: add `Serial.printf("HW_REV:        0x%02X  (%s)\n", BDC_HW_REV_BYTE, ...)` after version line at `bdc.cpp` line 1984. Apply same check+fix to TMC if missing. | `bdc.cpp` line 1984; `tmc.cpp` INFO handler (verify) |
 | FMC-15 | `readPos()` I2C clock stretching — can block indefinitely | 🟡 Medium | `Wire.requestFrom()` in `readPos()` blocks until stage releases I2C clock. Stage holds clock during calibration or mid-move. No timeout in SAMD21/STM32 Wire library. Monitor `dt_delta` in heartbeat register. Consider polling only when stage is known idle. | `fmc.cpp` — `readPos()`, `checkStagePos()` |
 | FMC-17 | `micros()` rollover — NTP timestamp jump every ~71.6 min | 🟡 Verify | `GetCurrentTime()` uses `uint32_t` `micros()` which rolls over every ~71.6 min. At rollover, `(micros() - microsEpoch)` wraps to large value → ~4295s forward jump until next NTP sync. Not listed as fixed in migration doc, not carried in §4.8. Verify during FMC code pass whether ntpClient.cpp was updated. | `ntpClient.cpp` — `GetCurrentTime()` |
 | FMC-CS7 | BDC `SEND_REG_01()` FMC pass-through — verify raw memcpy | 🟡 Verify | Migration CS-7: verify BDC `SEND_REG_01()` passes FMC REG1 block to clients via raw `memcpy` with no field interpretation. May be superseded by FW-B5 offset fix. Confirm during FMC code pass that BDC's fmc.buffer is populated and forwarded correctly. | `bdc.cpp` — `SEND_REG_01()`, `handleA1Frame()` |

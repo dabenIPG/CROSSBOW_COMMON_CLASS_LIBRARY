@@ -1,7 +1,7 @@
 # JETSON_SETUP.md — TRC Jetson Orin NX Setup Procedure
 **Document:** JETSON_SETUP.md (DOC-2)  
-**Version:** 2.2.4  
-**Date:** 2026-04-13  
+**Version:** 2.2.5  
+**Date:** 2026-04-15  
 **Confirmed on:** Unit 1 (2026-04-09), Unit 2 (2026-04-09), Unit 3 (2026-04-10) — all 54 PASS, 0 FAIL  
 **Platform:** Seeed Studio reComputer J4012 **(non-Super, J401 carrier)** — see hardware note below  
 **JetPack:** 6.2.2 (L4T 36.5, Ubuntu 22.04, CUDA 12.6, cuDNN 9.3)  
@@ -178,6 +178,11 @@ apt-mark showhold | grep nvidia-l4t
 ```bash
 sudo reboot
 ```
+
+> ⚠️ **Expect a long first boot after kernel upgrade** — initramfs regeneration can
+> make the first boot take 2–3 minutes. Use `ping -t 192.168.1.22` and wait for
+> replies before attempting SSH. Do not assume the unit is bricked until at least
+> 3 minutes have passed.
 
 After reboot — fix gateway if needed, then verify:
 ```bash
@@ -962,16 +967,30 @@ gst-inspect-1.0 | grep vmb
 ### 4.8 Camera pipeline test
 
 Verify full camera → encode → stream path before proceeding to OpenCV.
-Start receive side on Windows first, then send from Jetson.
+Two steps — videotestsrc first, then live Alvium.
 
-**Receive (Windows):**
+**Receive (Windows) — start this first for both tests:**
 ```
 gst-launch-1.0.exe udpsrc port=5000 buffer-size=2097152 caps="application/x-rtp,media=video,encoding-name=H264,payload=96" ! rtpjitterbuffer latency=50 drop-on-latency=true ! rtph264depay ! h264parse ! nvh264dec ! videoconvert n-threads=4 ! fpsdisplaysink sync=false text-overlay=true signal-fps-measurements=true
 ```
 
-**Send (Jetson) — update camera ID from ListCameras output:**
+**Test 1 — videotestsrc (no camera required):**
 ```bash
-gst-launch-1.0 -v vmbsrc camera=DEV_1AB22C04ECA1 \
+gst-launch-1.0 videotestsrc is-live=true \
+    ! "video/x-raw,width=1280,height=720,framerate=60/1" \
+    ! nvvidconv \
+    ! "video/x-raw(memory:NVMM),format=NV12" \
+    ! nvv4l2h264enc bitrate=10000000 \
+    ! h264parse \
+    ! rtph264pay config-interval=1 pt=96 \
+    ! udpsink host=192.168.1.208 port=5000 sync=false async=false
+```
+
+**Pass:** Test pattern visible on Windows. Ctrl+C to stop.
+
+**Test 2 — Live Alvium camera — substitute camera ID from ListCameras output:**
+```bash
+gst-launch-1.0 -v vmbsrc camera=DEV_1AB22C0xxxxx \
     width=1024 height=720 exposuretime=20000 \
     ! video/x-raw,format=UYVY \
     ! nvvidconv \
@@ -983,7 +1002,11 @@ gst-launch-1.0 -v vmbsrc camera=DEV_1AB22C04ECA1 \
     ! udpsink host=192.168.1.208 port=5000 sync=0
 ```
 
-**Pass:** Live H.264 video visible on Windows. ✅ Confirmed working 2026-04-09.
+> **Note — iris:** The Alvium iris may be closed on first use — image will appear
+> dark or black. This is normal and not a pipeline failure. The iris opens once
+> TRC initialises the camera with its full configuration at runtime.
+
+**Pass:** Live H.264 video visible on Windows (may be dark — see iris note). ✅ Confirmed working 2026-04-09.
 
 ---
 
@@ -1553,7 +1576,8 @@ cd ~/CV/SETUP/
 
 | Version | Date | Notes |
 |---------|------|-------|
-| 2.2.4 | 2026-04-13 | Path C reinstated — validated in-place apt upgrade from JetPack 6.2.1 → 6.2.2 (L4T 36.4 → 36.5). Full procedure documented: hold L4T packages, update sources to r36.5, dist-upgrade compute stack, unhold/upgrade L4T kernel/rehold, reboot. Bootloader left on hold (lower risk). Gateway must be set permanently via nmtui before starting — lost after reboot during upgrade. Path B updated — removed reference to retired Path C. Phase 8.2 cleanup script: `trc_start.sh`/`trc_start_bench.sh` removal from `~/CV/SETUP/` added (stray files from old units). |
+| 2.2.5 | 2026-04-15 | Path C Step 6: long boot warning added — initramfs regeneration causes 2-3 min first boot after kernel upgrade; use `ping -t` to wait. Phase 4.8: two-step pipeline test documented (videotestsrc first, then live Alvium); iris note added — camera may appear dark on first run, normal behaviour. |
+| 2.2.4 | 2026-04-13 | Path C reinstated — validated in-place apt upgrade 6.2.1 → 6.2.2. Path B updated. Phase 8.2 cleanup: stray trc_start scripts removal added. |
 | 2.2.3 | 2026-04-13 | Phase 0.3: two-boot sequence documented. Phase 7.1: Windows line endings fix added. |
 | 2.2.2 | 2026-04-13 | Phase 4.6: `libVmbCPP.so: file too short` fix documented. Phase 8.2: `test1.py` kept as survivor. Phase 9.2/9.3: rewritten — dd/l4t_backup_restore NOT supported for cloning. Known issues: two new entries. |
 | 2.2.1 | 2026-04-10 | Phase 7.1: `04_verify_all.sh` and `cleanup_pre_image.sh` added to file push step. Phase 7.3: marked POST-DEPLOYMENT ONLY. Checkpoint 7: corrected log reference and tcpdump target. Phase 8.2: `gst-vmbsrc/` directory added to cleanup script. Pass criteria table: Makefile row annotated with Gate A/B caveat. |

@@ -394,7 +394,7 @@ namespace CROSSBOW
         }
 
         // 0xAF SET_CHARGER — merged from 0xE3+0xED (v4.0.0). Level required every call.
-        // level=0: disable. level>0: enable+set. V2: rejects level>0 (no charger I2C).
+        // level=0: disable. level>0: enable+set. // V2: level>0 enables GPIO only — no I2C level control.
         public void SetCharger(CHARGE_LEVELS level)
         {
             Send((byte)ICD.SET_CHARGER, new byte[] { (byte)level });
