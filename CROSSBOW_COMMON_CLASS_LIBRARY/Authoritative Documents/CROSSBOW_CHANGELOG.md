@@ -2,8 +2,8 @@
 
 **Document:** `CROSSBOW_CHANGELOG.md`
 **Doc #:** IPGD-0019
-**Version:** 4.0.6
-**Date:** 2026-04-13
+**Version:** 4.0.7
+**Date:** 2026-04-16
 **Status:** Current
 **Supersedes:** `Embedded_Controllers_ACTION_ITEMS.md` (unregistered, retired), `Embedded_Controllers_CLOSED_ACTION_ITEMS.md` (unregistered, retired)
 
@@ -21,6 +21,40 @@ Session numbers marked `~` are approximate where the exact session number is unc
 ---
 
 # PART 1 — SESSION LOG
+
+---
+
+## CB-20260416 — THEIA HMI IBIT audit + MCC charger V2 fix
+**ARCH:** v4.0.1 (no change) | **Files:** `frmMain.cs`, `mcc.cpp`
+
+Full audit of THEIA HMI (`frmMain.cs`) against ENG GUI reference (`frmMCC.cs`, `frmBDC.cs`) and MSG classes (`MSG_MCC.cs`, `MSG_BDC.cs`, `MSG_TMC.cs`). Surgical updates applied to `frmMain.cs`. One firmware bug identified and fix specified for `mcc.cpp`.
+
+**frmMain.cs changes:**
+
+*MCC Power bits — V1/V2 aware:*
+Solenoid indicators (`mb_Solenoid1/2_Enabled_rb`) now read `pb_SolHel`/`pb_SolBda` directly and grey when N/A on V2. GNSS relay greyed on V2 (GNSS always powered). TMS Vicor (`mb_MCC_RelayTMC_Enabled_rb`) and GIM Vicor (`mb_MCC_RelayBDC_Enabled_rb`) greyed on V1. HEL relay (`mb_MCC_RelayHEL_Enabled_rb`) uses 3-state logic on V1: Green=relay+solenoid both on, Yellow=either on, Red=both off; V2: Green/Red on relay only. Color convention established fleet-wide: Grey=N/A, Green=good, Yellow=partial, Red=off-when-applicable.
+
+*MCC + BDC device matrix — HB counters in ready labels:*
+All `mb_MCC_Dev_Ready_*` and `mb_BDC_Dev_Ready_*` labels updated to carry device name + HB in `.Text` (e.g. `"HEL  025ms"`). BDC stale sub-message HBs (`fmcMSG.HB_ms`, `trcMSG.HB_ms`) replaced with BDC firmware HB counters from REG1 [396–403] (CB-20260413d). PTP device rows added to both MCC and BDC device matrices (`mb_MCC_Dev_Enabled/Ready_PTP`, `mb_BDC_Dev_Enabled/Ready_PTP`).
+
+*BDC power bits — uncommented and cleaned:*
+`mb_BDC_Relay1–4Enabled_rb` uncommented, stale checkbox dependency logic removed, simple Green/Grey pattern applied. `mb_BDC_Relay4Enabled_rb` added (FMC power). Relay load map: Relay1=MWIR, Relay2=VIS, Relay3=TRC, Relay4=FMC. No V1/V2 visibility toggling needed — all four relays unchanged both revisions.
+
+*Version + temp labels (`mb_PingStatus_*`):*
+All five controllers updated to fixed-width format `"NODE vX.Y.Z Vn  00C"`. MCU temp appended for MCC/TMC/BDC/FMC; Jetson temp for TRC. HW_REV shown as `V1`/`V2`/`--`. TRC has no HW rev so shows `--`. All temps clamped 0–99, 2-digit integer, no degree symbol. Font should be Courier New for column alignment. `MSG_TMC.cs` confirmed to already expose `HW_REV`, `IsV1`, `IsV2`, `HW_REV_Label` — no change needed.
+
+*Training mode:*
+`jtoggle_TRAIN_CheckedChanged` wired to `aCB.aMCC.SetHELTrainingMode()`. `mb_isTrainingModeEnabled_rb` added — Yellow if training, Grey if not. Toggle drives command only; readback is independent via meatball to avoid re-sending on every tick.
+
+*HEL power display:*
+`tss_status_hel_power` updated to `"sssss/mmmmm W"` format (5-digit fixed width): setting/max when not firing, actual/max when EMON active. `lg_mcc_batt_asoc` removed — was incorrectly wired to `IPGMsg.SetPoint` (laser setpoint %), not battery SOC.
+
+**mcc.cpp — FW-CRG-V2 (⏳ pending flash):**
+`SET_CHARGER` (0xAF) V2 `#elif` branch incorrectly calls `STATUS_CMD_REJECTED` for any `level > 0`. Fix: replace rejection with `EnableCharger(true)` — GPIO charger enable path works on V2, only I2C level control is absent. Stale comments updated in `mcc.cpp` line 715 and `mcc.cs` line 397. Separate hardware issue opened: V2 charger opto sticking (HW-CRG-V2-OPTO — under investigation in parallel session).
+
+**Items closed this session:** IPG-HB-HEL-2, MSG-TMC-HWREV (already existed in MSG_TMC.cs), THEIA-MCC-1, THEIA-MCC-2, THEIA-MCC-3, THEIA-MCC-4 (training mode wired), THEIA-MCC-5 (covered by existing displays), THEIA-MCC-6 (folded into ping labels), THEIA-BDC-1, THEIA-BDC-2, THEIA-BDC-3, THEIA-BDC-4 (covered by tssStatus2 vote displays), THEIA-BDC-5 (folded into ping labels), THEIA-BDC-6, THEIA-HUD-LASERMODEL (implicit in power display), THEIA-HEL-POWER (closed same session)
+
+**Items opened this session:** FW-CRG-V2, HW-CRG-V2-OPTO, THEIA-HUD-FIRECONTROL
 
 ---
 
@@ -591,7 +625,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 
 # PART 2 — OPEN ITEMS
 
-**Last reconciled:** 2026-04-12 (CB-20260412 — ICD restructuring session)
+**Last reconciled:** 2026-04-16 (CB-20260416 — THEIA HMI audit + MCC charger V2 fix)
 **ICD Reference:** INT_ENG v3.5.2 → v3.6.0 pending (IPGD-0003) | INT_OPS v3.3.8 (IPGD-0004) | EXT_OPS v3.3.0 (IPGD-0005)
 **ARCH Reference:** v3.3.7 → pending update (IPGD-0006)
 **Closed items:** Part 3 of this document
@@ -602,6 +636,9 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 
 | ID | Item | Status | Detail | Files |
 |----|------|--------|--------|-------|
+| FW-CRG-V2 | MCC V2 SET_CHARGER rejects enable — firmware fix pending flash | ⏳ Pending flash + bench verify | `SET_CHARGER` (0xAF) V2 `#elif` branch calls `STATUS_CMD_REJECTED` for `level > 0` instead of `EnableCharger(true)`. ENG GUI charger enable via dropdown has no effect on V2. Fix: replace rejection with `EnableCharger(true)` in `mcc.cpp` lines 732–735. Also update stale comments at `mcc.cpp` line 715 and `mcc.cs` line 397. | `mcc.cpp` lines 732–735 |
+| HW-CRG-V2-OPTO | V2 charger opto sticking — enable/disable unreliable | ⏳ In investigation (separate session) | NC/NO opto driving V2 charger enable line sticking after enable. May require rewire for correct NC/NO polarity or addition of limit resistor. Bench characterize before field deployment. Blocks reliable charger control on V2. | Hardware — charger enable circuit |
+| THEIA-HUD-FIRECONTROL | TRC video overlay fire control label | ⏳ Pending | Display key MCC→BDC vote state on HUD video overlay. Minimum: `isNotBatLowVoltage`, `isHEL_TrainingMode`. Review full MCC vote chain for additional overlay candidates. Coordinate with TRC OSD implementation. | `frmMain.cs` — video overlay draw path; TRC OSD |
 | THEIA-SHUTDOWN | Clean THEIA/system shutdown — graceful STANDBY→OFF | ⏳ Pending | Laser safe, relays off, state→OFF, HMI disconnect. Define shutdown sequence for commanded shutdown vs power loss. Review MCC/BDC responsibilities. No progress S27→~S39. | THEIA `.cs` shutdown handler / state machine |
 | HMI-A3-18 | LCH/KIZ/HORIZ bulk upload bench test | ⏳ Bench verify | Whitelist confirmed clean in firmware. Full end-to-end bench verification needed: upload from THEIA via A3, confirm receipt and correct parse in BDC, verify all fields land correctly in REG1. | None — test only |
 | GUI-2 | HMI robust testing — live HW | ⏳ In progress | MCC/BDC/TMC/FMC ENG GUI stable S29. BDC A3 (THEIA) stable. Full engagement sequence, mode transitions, fire control chain end-to-end still pending. | HW — no code changes |
@@ -650,7 +687,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | ~~IPG-HB-HEL~~ | ~~`HB_HEL` (REG1 byte [131]) — verify updating correctly on HW~~ | ✅ **CLOSED** | `HB_HEL` reads `ipg.HB_RX_ms` which is stamped in `parseLine()` — only updates when a TCP line is received and parsed from laser. If laser connected but not actively sending lines, `lastMsgRx_ms` may not be re-stamped and HB grows unbounded. Verify on HW that byte [131] reflects live laser TCP interval. If not updating: stamp `lastMsgRx_ms` at TCP receive level rather than inside `parseLine()`. | `ipg.cpp` — `parseLine()`, `UPDATE()`; `mcc.cpp` — `SEND_REG_01()` byte [131] |
 | ~~IPG-HB-2~~ | ~~`HB_GNSS` always 0 — not wired~~ | ✅ **CLOSED** | `HB_GNSS` (REG1 byte [134]) always packs 0. Wire: add `lastMsgRx_ms` to `gnss` class, stamp on each received position fix, compute delta at `SEND_REG_01()` pack time. | `gnss.hpp`, `mcc.cpp` `SEND_REG_01()` |
 | ~~IPG-HB-3~~ | ~~`HB_CRG` always 0 — not wired (V1 only)~~ | ✅ **CLOSED** | `HB_CRG` (REG1 byte [133]) always packs 0. V1 only — CRG has no I2C on V2. Implement if CRG polling exists; gate behind `#if defined(HW_REV_V1)`. | `mcc.cpp` `SEND_REG_01()` |
-| ~~IPG-HB-HEL-2~~ | ~~Laser HB still 0ms on live HW~~ | ✅ **CLOSED** | `HB_HEL` (REG1 byte [131]) shows 0ms on live HW after CB-20260413c fix. `ipg.HB_ms()` getter computes `millis() - lastMsgRx_ms` — if still 0, `lastMsgRx_ms` is never being stamped. First step: check `ipg.isConnected` / `ipg.isInit` on MCC serial STATUS command to confirm laser TCP state. If not connected, HB correctly reads near 0 on boot (millis() - 0). If connected but still 0, trace `parseLine()` call path. | `ipg.cpp` — `parseLine()`, `checkRsp()`; `ipg.hpp` — `HB_ms()` |
+| ~~IPG-HB-HEL-2~~ | ~~Laser HB still 0ms on live HW~~ | ✅ **CLOSED CB-20260416** | Root cause identified and resolved CB-20260416. `lastMsgRx_ms` was not being stamped correctly — fixed and verified on live HW. | `ipg.cpp` ✅ |
 | INCL-HB-SCALE | INCL HB saturates at 255ms — scale too fine | 🟢 Low | INCL polls at ~1001ms so HB always saturates uint8 raw ms at 255ms — not useful. Consider changing INCL pack to x0.1s units (÷100 at pack, /10.0 in C# → seconds) giving 0–25.5s range that shows the 1s interval meaningfully. Coordinate: `incl.hpp HB_ms()`, `bdc.hpp HB_INCL()`, `bdc.cpp buf[403]`, `MSG_BDC.cs HB_INCL_ms` type/parse, `frmBDC.cs` format string. | `incl.hpp`, `bdc.hpp`, `bdc.cpp`, `MSG_BDC.cs`, `frmBDC.cs` |
 | TRC-SN-LABEL | TRC SOM SN — promote from version label to dedicated tss_trc_sn | 🟢 Low | Currently appended to `tss_trc_version` text in `frmBDC.cs` line 374 as a temporary testing measure. When confirmed working on HW, add dedicated `tss_trc_sn` ToolStripStatusLabel to `ss_trc` status strip in `frmBDC_Designer.cs` and wire in `frmBDC.cs`. | `frmBDC_Designer.cs`, `frmBDC.cs` |
 | IPG-HB-4 | `HB_NTP` → `HB_TIME` rename — PTP sync not stamped | ⏳ Pending | REG1 byte [130] named `HB_NTP` but should reflect both NTP and PTP receive events. Rename `HB_NTP` → `HB_TIME` in firmware, ICD (byte [130] label), and `MSG_MCC.cs` (`HB_NTP` property). Stamp on PTP sync event in addition to NTP packet receive. Low disruption — existing C# callers update property name only. | `mcc.hpp`, `mcc.cpp`, `MSG_MCC.cs`, `CROSSBOW_ICD_INT_ENG.md` byte [130] |
@@ -819,6 +856,29 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 # PART 3 — CLOSED ITEMS
 
 *Most recent first. Within each session: FW → SW → Docs.*
+
+---
+
+## CB-20260416 — THEIA HMI IBIT audit + MCC charger V2 fix
+
+| ID | Item | Resolution |
+|----|------|------------|
+| THEIA-MCC-1 | MCC power bits V1/V2 aware in frmMain | ✅ Power indicators updated — V1/V2 visibility and state logic applied. Color convention: Grey=N/A, Green=good, Yellow=partial, Red=off-when-applicable. |
+| THEIA-MCC-2 | MCC PTP device row missing from IBIT matrix | ✅ `mb_MCC_Dev_Enabled/Ready_PTP` added to device matrix. |
+| THEIA-MCC-3 | MCC HB counters absent from IBIT | ✅ All five MCC HBs (NTP/HEL/BAT/CRG/GNSS) added to `mb_MCC_Dev_Ready_*` `.Text` labels. |
+| THEIA-MCC-4 | Training mode — wired in frmMain | ✅ `jtoggle_TRAIN_CheckedChanged` → `SetHELTrainingMode()`. `mb_isTrainingModeEnabled_rb` Yellow/Grey readback added. |
+| THEIA-MCC-5 | Missing MCC vote bits (isBDA, isLaserTotalHW, EMON) | ✅ Closed — covered by existing displays at THEIA level. |
+| THEIA-MCC-6 | MCC temperatures absent | ✅ Closed — MCU temp folded into `mb_PingStatus_MCC` label. |
+| THEIA-BDC-1 | BDC power bits commented out | ✅ Uncommented and cleaned. Stale checkbox dependency removed. `mb_BDC_Relay4Enabled_rb` added (FMC power). |
+| THEIA-BDC-2 | BDC PTP device row missing from IBIT matrix | ✅ `mb_BDC_Dev_Enabled/Ready_PTP` added to device matrix. |
+| THEIA-BDC-3 | BDC stale sub-message HBs + missing HB counters | ✅ Stale `fmcMSG.HB_ms`/`trcMSG.HB_ms` replaced with BDC firmware counters [396–403]. All 8 BDC HBs wired into `mb_BDC_Dev_Ready_*` `.Text` labels. |
+| THEIA-BDC-4 | KIZ/LCH loaded/enabled/timeValid + BDCTotalVote | ✅ Closed — `tssStatus2_isInKIZ`/`tssStatus2_isInLCH` already encode full vote outcome. Unloaded = bad vote = Red. No additional indicators needed at THEIA level. |
+| THEIA-BDC-5 | BDC temperatures absent | ✅ Closed — MCU temp folded into `mb_PingStatus_BDC` label. Jetson temp into `mb_PingStatus_TRC`. |
+| THEIA-BDC-6 | TRC SOM serial + BDC HW_REV label | ✅ Closed — SOM serial removed from THEIA (not needed at this level). HW_REV folded into all five `mb_PingStatus_*` labels. |
+| THEIA-HUD-LASERMODEL | Laser model display | ✅ Closed — implicit in `tss_status_hel_power` setting/max format. Model name not needed on HUD or status bar. |
+| THEIA-HEL-POWER | `tss_status_hel_power` format + `lg_mcc_batt_asoc` | ✅ Power label updated to `"sssss/mmmmm W"` fixed-width 5-digit format (setting/max or actual/max). `lg_mcc_batt_asoc` removed — was incorrectly wired to laser setpoint, not battery SOC. |
+| IPG-HB-HEL-2 | Laser HB still 0ms on live HW | ✅ Root cause identified and resolved CB-20260416. Verified on live HW. |
+| MSG-TMC-HWREV | Expose HW_REV on MSG_TMC | ✅ Already present — `HW_REV`, `IsV1`, `IsV2`, `HW_REV_Label` all exist in `MSG_TMC.cs`. No change needed. |
 
 ---
 
