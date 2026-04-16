@@ -2,7 +2,7 @@
 
 **Document:** `CROSSBOW_CHANGELOG.md`
 **Doc #:** IPGD-0019
-**Version:** 4.0.7
+**Version:** 4.0.8
 **Date:** 2026-04-16
 **Status:** Current
 **Supersedes:** `Embedded_Controllers_ACTION_ITEMS.md` (unregistered, retired), `Embedded_Controllers_CLOSED_ACTION_ITEMS.md` (unregistered, retired)
@@ -21,6 +21,32 @@ Session numbers marked `~` are approximate where the exact session number is unc
 ---
 
 # PART 1 — SESSION LOG
+
+---
+
+## CB-20260416b — BDC tracker PID blind to track position (FW-C10 regression)
+**Files:** `trc.cpp`
+
+**Root cause:** `trc.cpp::UPDATE()` gated all buffer parsing on `buffer[0] == 0xA1`. Per FW-C10, `TelemetryPacket.cmd_byte` is now `0x00` on all controllers fleet-wide. The gate therefore never passed on current firmware, leaving `TrackPointX`, `TrackPointY`, and `isTrackBValid` at their boot defaults (0, 0, false) indefinitely.
+
+**Symptom:** Two separate paths exist for `trc.buffer`:
+- **Outbound REG1** (`handleA1Frame()` → `memcpy(buf+60, trc.buffer, 64)`) — always ran correctly. ENG GUI and THEIA displayed correct TRC telemetry including track position.
+- **PID input** (`trc.UPDATE()` → typed field extraction) — silently skipped every frame. `PidUpdate()` always received stale zeros, driving a fixed large error (`0 - 640` pan, `0 - 360` tilt) regardless of actual target position.
+
+**Fix — `trc.cpp` line 40:** dual-check matching FW-C10 pattern already used in `bdc.cpp` line 430 and `MSG_BDC.cs`:
+
+```cpp
+// BEFORE
+    if (buffer[0] == 0xA1)
+
+// AFTER
+    if (buffer[0] == 0x00 || buffer[0] == 0xA1)
+```
+
+Comment updated to document FW-C10 dual-check rationale.
+
+**Items closed:** TRC-PID-BLIND (opened and closed this session)
+**Items opened:** none
 
 ---
 
@@ -856,6 +882,14 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 # PART 3 — CLOSED ITEMS
 
 *Most recent first. Within each session: FW → SW → Docs.*
+
+---
+
+## CB-20260416b — BDC tracker PID blind to track position
+
+| ID | Item | Resolution |
+|----|------|------------|
+| TRC-PID-BLIND | `trc.cpp UPDATE()` cmd_byte gate never passes on FW-C10 firmware — PID always gets stale zero track position | ✅ `buffer[0] == 0xA1` → `buffer[0] == 0x00 \|\| buffer[0] == 0xA1`. Comment updated. Verified root cause: outbound REG1 path (memcpy) was always correct; only PID typed-field extraction was broken. |
 
 ---
 
