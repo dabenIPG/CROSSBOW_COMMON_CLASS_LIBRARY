@@ -2,8 +2,8 @@
 
 **Document:** `CROSSBOW_ICD_INT_ENG`
 **Doc #:** IPGD-0003
-**Version:** 4.0.0
-**Date:** 2026-04-13 (BDC HB REG1 bytes — CB-20260413d)
+**Version:** 4.0.1
+**Date:** 2026-04-16 (CB-20260416 — AWB assigned, charger V2 fix)
 **Classification:** IPG Internal Use Only
 **Source:** CB_ICD_v1_7.xlsx reconciled with ARCHITECTURE.md (TRC v3.0); `defines.hpp` canonical v3.X.Y
 **Audience:** IPG engineering staff, ENG GUI developers, firmware developers — all five controllers (MCC, BDC, TMC, FMC, TRC)
@@ -11,6 +11,12 @@
 ---
 
 ## Version History
+
+**v4.0.1 changes (CB-20260416 — AWB assigned, charger V2 fix):**
+- `0xC4 CMD_VIS_AWB` assigned — trigger VIS auto white balance once. No payload. BDC routes to TRC via A2; TRC binary handler calls `cam->runAutoWhiteBalance()`. ASCII equivalent: `AWB`. INT_OPS (in `EXT_CMDS_BDC[]` whitelist). Firmware: `defines.hpp` `CMD_VIS_AWB=0xC4`, `bdc.hpp` whitelist, `trc.hpp/cpp` `SET_AWB()`, `bdc.cpp` handler + serial. C#: `defines.cs` `CMD_VIS_AWB=0xC4`, `bdc.cs` `TriggerAWB()`. TRC: `udp_listener.cpp` binary handler. `ICD_CMDS` alias retired from `types.h` — all TRC code now references `ICD::` directly.
+- `0xAF SET_CHARGER` description corrected: V2 hardware now supported (GPIO enable only). "V1 only — V2 returns STATUS_CMD_REJECTED" → V1: GPIO+I2C; V2: GPIO only. FW-CRG-V2 fix CB-20260416 — firmware flashed and bench-verified.
+
+---
 
 **v4.0.0 changes (BDC HB REG1 bytes — CB-20260413d):**
 - BDC REG1 bytes [396–403] promoted from RESERVED — eight HB counter bytes. `HB_NTP` [396] in x0.1s units (÷100, C# /10.0 → seconds); [397–403] raw ms. Defined count 396→404, reserved 116→108. Tagged `v4.0.0 (BDC-HB)`.
@@ -515,7 +521,7 @@ Scoping differs by codebase (`enum ICD` in C#/THEIA, `enum ICD_CMDS` in TRC, `en
 | 0xAC | SET_BDC_HORIZ | Set horizon elevation vector | float[360] | — | — | ✓ | `INT_OPS` | BDC | BDC |
 | 0xAD | SET_HEL_POWER | Set laser power level | uint8 [0–100] % | — | — | ✓ | `INT_OPS` | MCC | MCC |
 | 0xAE | CLEAR_HEL_ERROR | Clear laser error state | none | — | — | ✓ | `INT_OPS` | MCC | MCC |
-| 0xAF | SET_CHARGER | Set charger state and current level. **Assigned v3.6.0. Merges `0xE3` (PMS_CHARGER_ENABLE) and `0xED` (PMS_SET_CHARGER_LEVEL).** Level required on every call — enables and sets level simultaneously; cannot enable without specifying level; if already enabled, changes level immediately. V1 only — V2 returns `STATUS_CMD_REJECTED` (no charger I2C on V2 hardware). | uint8 level: `0`=disable, `10`=low, `30`=med, `55`=high | — | — | ✓ | `INT_OPS` | MCC | MCC |
+| 0xAF | SET_CHARGER | Set charger state and current level. **Assigned v3.6.0. Merges `0xE3` (PMS_CHARGER_ENABLE) and `0xED` (PMS_SET_CHARGER_LEVEL).** Level required on every call — enables and sets level simultaneously; cannot enable without specifying level; if already enabled, changes level immediately. **V1:** GPIO enable + I2C level control. **V2:** GPIO enable only — level `0`=disable, non-zero=enable; I2C level control not available on V2 hardware. FW-CRG-V2 fix CB-20260416. | uint8 level: `0`=disable, `10`=low, `30`=med, `55`=high | — | — | ✓ | `INT_OPS` | MCC | MCC |
 
 
 ---
@@ -556,7 +562,7 @@ Scoping differs by codebase (`enum ICD` in C#/THEIA, `enum ICD_CMDS` in TRC, `en
 | 0xC1 | SET_CAM_MAG | VIS camera zoom | uint8 mag index | — | — | ✓ | `INT_OPS` | BDC | BDC |
 | 0xC2 | SET_CAM_FOCUS | VIS camera focus | uint16 focus position | — | — | ✓ | `INT_OPS` | BDC | BDC |
 | 0xC3 | RES_C3 | Reserved (was: gain auto) | — | — | — | — | `RES` | RES | RES |
-| 0xC4 | RES_C4 | Reserved (was: white balance auto) | — | — | — | — | `RES` | RES | RES |
+| 0xC4 | CMD_VIS_AWB | Trigger VIS auto white balance once on active camera. **Assigned CB-20260416e (HMI-AWB).** No payload. BDC routes to TRC via A2; TRC calls `cam->runAutoWhiteBalance()`. ASCII equivalent: `AWB`. | none | AWB | needs impl (ICD only — TRC binary handler complete) | ✓ | `INT_OPS` | BDC, TRC | BDC |
 | 0xC5 | RES_C5 | Reserved (was: exposure auto) | — | — | — | — | `RES` | RES | RES |
 | 0xC6 | RES_C6 | Reserved (was: gamma) | — | — | — | — | `RES` | RES | RES |
 | 0xC7 | SET_CAM_IRIS | VIS camera iris position | uint8 upper nibble of iris position | — | — | ✓ | `INT_OPS` | BDC | BDC |

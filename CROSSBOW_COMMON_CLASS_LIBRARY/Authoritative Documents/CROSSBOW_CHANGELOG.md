@@ -2,7 +2,7 @@
 
 **Document:** `CROSSBOW_CHANGELOG.md`
 **Doc #:** IPGD-0019
-**Version:** 4.1.1
+**Version:** 4.2.0
 **Date:** 2026-04-16
 **Status:** Current
 **Supersedes:** `Embedded_Controllers_ACTION_ITEMS.md` (unregistered, retired), `Embedded_Controllers_CLOSED_ACTION_ITEMS.md` (unregistered, retired)
@@ -21,6 +21,38 @@ Session numbers marked `~` are approximate where the exact session number is unc
 ---
 
 # PART 1 — SESSION LOG
+
+---
+
+## CB-20260416f — Document sweep + item register reconciliation
+**Files:** `CROSSBOW_ICD_INT_ENG.md`, `CROSSBOW_ICD_INT_OPS.md`, `ARCHITECTURE.md`, `CROSSBOW_DOCUMENT_REGISTER.md`, `CROSSBOW_CHANGELOG.md`
+
+**Item register closures and deletions:**
+- GUI-7 ✅ closed — HB and status timing audit complete and verified on live HW
+- TRC-SN-LABEL ✅ closed — SOM serial on TRC OSD (CB-20260413); dropped from THEIA scope
+- DEPLOY-3 ✅ closed — sustained bench test complete, all five controllers simultaneous
+- DEPLOY-5 ✅ closed — NovAtel GNSS PTP configuration documented in IPGD-0018, verified on bench unit
+- DEPLOY-6 ✅ closed — IGMP snooping verified on production switch, no issues
+- TOOLING-1 🚫 deleted — defines.hpp→defines.cs auto-sync generator will not be implemented
+- IPG-SENTINEL 🚫 deleted — ipg.hpp sentinel value cleanup deferred indefinitely
+
+**ICD INT_ENG (IPGD-0003) — content edits:**
+- `0xAF SET_CHARGER`: description corrected — V2 now GPIO enable only (not full rejection). Reflects FW-CRG-V2 fix CB-20260416.
+- `0xC4`: `RES_C4` → `CMD_VIS_AWB` — trigger VIS auto white balance once, no payload. Reflects CB-20260416e AWB-ENG implementation.
+- Version history entry added for CB-20260416 sessions.
+
+**ICD INT_OPS (IPGD-0004) — content edits:**
+- `0xAF SET_CHARGER`: same V2 description correction.
+- `0xC4 CMD_VIS_AWB` added — INT_OPS accessible via A3 (in EXT_CMDS_BDC[] whitelist).
+- Version history entry added.
+
+**ARCHITECTURE.md (IPGD-0006) — content edits:**
+- §17: reference updated from retired `Embedded_Controllers_ACTION_ITEMS.md` → IPGD-0019.
+- FW-B4, FW-B5, DOC-2 marked closed in §17 table.
+
+**Document Register (IPGD-0001) — version table updates:**
+- IPGD-0003: 3.6.0 → 4.0.0 | IPGD-0006: 3.3.9 → 4.0.1 | IPGD-0019: 1.3.2 → 4.2.0
+- IPGD-0020 and IPGD-0021 added to index. Self-referential entry bumped to v1.6.0.
 
 ---
 
@@ -715,7 +747,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | ~~IPG-HB-3~~ | ~~`HB_CRG` always 0 — not wired (V1 only)~~ | ✅ **CLOSED** | `HB_CRG` (REG1 byte [133]) always packs 0. V1 only — CRG has no I2C on V2. Implement if CRG polling exists; gate behind `#if defined(HW_REV_V1)`. | `mcc.cpp` `SEND_REG_01()` |
 | ~~IPG-HB-HEL-2~~ | ~~Laser HB still 0ms on live HW~~ | ✅ **CLOSED CB-20260416** | Root cause identified and resolved CB-20260416. `lastMsgRx_ms` was not being stamped correctly — fixed and verified on live HW. | `ipg.cpp` ✅ |
 | INCL-HB-SCALE | INCL HB saturates at 255ms — scale too fine | 🟢 Low | INCL polls at ~1001ms so HB always saturates uint8 raw ms at 255ms — not useful. Consider changing INCL pack to x0.1s units (÷100 at pack, /10.0 in C# → seconds) giving 0–25.5s range that shows the 1s interval meaningfully. Coordinate: `incl.hpp HB_ms()`, `bdc.hpp HB_INCL()`, `bdc.cpp buf[403]`, `MSG_BDC.cs HB_INCL_ms` type/parse, `frmBDC.cs` format string. | `incl.hpp`, `bdc.hpp`, `bdc.cpp`, `MSG_BDC.cs`, `frmBDC.cs` |
-| TRC-SN-LABEL | TRC SOM SN — promote from version label to dedicated tss_trc_sn | 🟢 Low | Currently appended to `tss_trc_version` text in `frmBDC.cs` line 374 as a temporary testing measure. When confirmed working on HW, add dedicated `tss_trc_sn` ToolStripStatusLabel to `ss_trc` status strip in `frmBDC_Designer.cs` and wire in `frmBDC.cs`. | `frmBDC_Designer.cs`, `frmBDC.cs` |
+| ~~TRC-SN-LABEL~~ | ~~TRC SOM SN — promote from version label to dedicated tss_trc_sn~~ | ✅ **CLOSED CB-20260416** | SOM serial shown on TRC OSD video overlay (CB-20260413). Removed from THEIA scope — not needed at HMI level. |
 | IPG-HB-4 | `HB_NTP` → `HB_TIME` rename — PTP sync not stamped | ⏳ Pending | REG1 byte [130] named `HB_NTP` but should reflect both NTP and PTP receive events. Rename `HB_NTP` → `HB_TIME` in firmware, ICD (byte [130] label), and `MSG_MCC.cs` (`HB_NTP` property). Stamp on PTP sync event in addition to NTP packet receive. Low disruption — existing C# callers update property name only. | `mcc.hpp`, `mcc.cpp`, `MSG_MCC.cs`, `CROSSBOW_ICD_INT_ENG.md` byte [130] |
 | ~~IPG-STUBS~~ | ~~Dead `lastTick_*` stubs in `mcc.hpp`~~ | ✅ **CLOSED** | `lastTick_BAT`, `lastTick_CRG`, `lastTick_GNSS` declared but never written in `mcc.hpp`. Either remove or wire up when IPG-HB-1/2/3 implemented. `lastTick_HEL` used. | `mcc.hpp` |
 
@@ -778,7 +810,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | GUI-3 | MSG_BDC.cs activeTimeSource reads from correct bits | ⏳ Open | Verify `activeTimeSource` reads from `TimeBits` (`tb_usingPTP`/`tb_isNTP_Synched`), not `DeviceReadyBits`. `MSG_TMC.cs` — align to `tb_*` prefix naming (cosmetic). | `MSG_BDC.cs`, `MSG_TMC.cs` |
 | GUI-5 | lbl_gimbal_hb — gimbalMSG.HB_TX_ms missing | ⏳ Open | `gimbalMSG.HB_TX_ms` property does not exist on `MSG_GIMBAL`. Find correct HB property name and fix binding in `frmBDC`. | `frmBDC.cs`, `MSG_GIMBAL.cs` |
 | GUI-6 | Rolling max stats to TRC tab | ⏳ Open | Extend dt/HB rolling max stats to TRC controller tab in ENG GUI — consistent with BDC and FMC tabs. | ENG GUI TRC tab form |
-| GUI-7 | HB and status timing audit — all child devices | ⏳ Open | Review HB timing and status display for all child devices across ENG GUI — confirm correct property bindings, consistent HB_TX_ms/HB_RX_ms/dt rolling max, and liveness indicators for: GIMBAL, FMC, TRC, TMC, GNSS, HEL, BAT, CRG. GUI-5 is a symptom of this broader gap. | `frmBDC.cs`, `frmMCC.cs`, all `MSG_*.cs` classes |
+| ~~GUI-7~~ | ~~HB and status timing audit — all child devices~~ | ✅ **CLOSED CB-20260416** | Audit complete and verified on live HW. All HB bindings confirmed correct. | `frmBDC.cs`, `frmMCC.cs` ✅ |
 | GUI-8 | C# client model — apply to TRC | ⏳ Open | TRC C# client not yet updated to standardised model (S29). Apply: single `0xA4` registration, `_lastKeepalive` only in `SendKeepalive()`, any-frame liveness, `connection established` in receive loop, remove redundant elapsed check. TRC has no A3 — A2 only. | `trc.cs`, `frmTRC.cs` |
 | NEW-32 | `lch.cs` longitude `% 180.0` before negation | 🟢 Low | Longitude sign negation applied before `% 180.0` modulo — order should be reversed. Fix before operational LCH use. | `lch.cs` — longitude calculation |
 | S19-33 | Word ICD version realignment 1.x → 3.x.y | 🟢 Low | Word/docx ICD versions still carry 1.x numbering from early builds. Realign to match .md versions (3.x.y). Part of build spec three-document split (S19-34). | IPGD-0003/0004/0005 .docx |
@@ -809,16 +841,15 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | ID | Item | Status | Detail | Files |
 |----|------|--------|--------|-------|
 | FSM-1 | FSM deadband and slew rate limiter | ⏳ Deferred | FSM deadband (~2–4px / 130–260 counts) and slew rate limiter (~2000 counts/step at 50Hz) — prevents jitter and mechanical stress at low error signals. | `bdc.cpp` `PidUpdate()`, `fmc.cpp` `write_x_pos()`/`write_y_pos()` |
-| TOOLING-1 | Code generator — defines.hpp → defines.cs auto-sync | 🟢 Low | C# cannot natively include C++ headers (`enum class` vs `public enum`, `#pragma once`, etc.). A small Python/PowerShell build-time generator that parses the ICD enum block in `defines.hpp` and emits `defines.cs` would eliminate manual double-sync. `defines.cs` becomes a generated artifact — DEF-1 equivalent is then a one-file operation. Revisit after fleet scrub settles. | `defines.hpp`, `defines.cs`, new generator script |
-| IPG-SENTINEL | `ipg.hpp` sentinel values — `hk_volts`/`bus_volts` = `5.5f` | 🟢 Low | `hk_volts = 5.5f` and `bus_volts = 5.5f` init values are distinguishable-from-zero sentinels from an earlier approach. Now that C# uses `IsV1`/`IsV2` and `isSensed()` to gate display, `0.0f` is cleaner. Change at any convenient point during MCC firmware pass. | `ipg.hpp` |
+| ~~IPG-SENTINEL~~ | ~~`ipg.hpp` sentinel values — `hk_volts`/`bus_volts` = `5.5f`~~ | 🚫 **DELETED** — will not implement. |
 | IPG-ROPS | 6K ch2 output power (`ROPS`) — not in current poll | 🟢 Low | YLM-6K supports `ROPS` command for channel 2 output power readback. Not in current firmware POLL loop — future extension if dual-channel monitoring required. No action until 6K system is in field use. | `ipg.cpp` — `POLL()` loop |
 | BDC-2 | Fuji startup comms errors | ⏳ Deferred | Spurious comms errors during Fuji VIS camera settling after boot — system recovers automatically. | `bdc.cpp` — Fuji comms init |
 | TRC-M9 | Deprecate TRC port 5010 | ⏳ Deferred | Legacy 64B binary port. Remove from TRC firmware and C# after HW validation confirms port 10018 fully operational. | TRC `udp_listener.cpp`, relevant C# client |
 | TRC-MUTEX | buildTelemetry() race condition | ⏳ Deferred | Mutex on `buildTelemetry()` race condition. Linux threading means concurrent access to telemetry struct is possible. Low priority. | TRC `udp_listener.cpp` |
-| DEPLOY-3 | Sustained bench test | ⏳ Pending | All five controllers running simultaneously for full session duration. Verify no memory leaks, socket drops, stream degradation, or watchdog trips. | — |
+| ~~DEPLOY-3~~ | ~~Sustained bench test~~ | ✅ **CLOSED CB-20260416** | All five controllers running simultaneously — bench test complete. |
 | DEPLOY-4 | Verify .33 GPS lock before mission | ⏳ Pending | Confirm Phoenix Contact FL TIMESERVER has GPS lock (LOCK LED steady) before relying on it as primary NTP/Stratum 1. Without GPS lock degrades to internal oscillator. | — |
-| DEPLOY-5 | NovAtel GNSS (.30) — PTP configuration per production system | ⏳ Action required | Each production CROSSBOW system ships with its own NovAtel GNSS receiver. Every unit must have the following two commands set **and saved to NVM** before PTP will operate correctly. `PTPMODE ENABLE_FINETIME` — activates PTP only when receiver is in FINESTEERING mode (clean fallback if GPS lost). `PTPTIMESCALE UTC_TIME` — **critical**: without this the epoch is GPS time not UNIX/UTC, and all MCC timestamps will be wrong by 18+ seconds (leap second offset). Bench unit confirmed S29 — each production unit requires the same procedure. Commands: `PTPMODE ENABLE_FINETIME` → `PTPTIMESCALE UTC_TIME` → `SAVECONFIG`. Add to system commissioning checklist. | Hardware — NovAtel GNSS receiver at 192.168.1.30 (per-system) |
-| DEPLOY-6 | IGMP snooping — verify switch compatibility for PTP multicast | ⏳ Investigate | PTP uses multicast 224.0.1.129. IGMP snooping on the network switch can block multicast frames from reaching controllers, silently preventing PTP sync with no obvious error. Need to confirm: (1) which switch models are used in production CROSSBOW systems; (2) whether those switches support disabling IGMP snooping per-VLAN or globally; (3) whether an alternative approach (PTP-aware switch, static multicast table entry) is preferable to disabling snooping entirely. Bench unit operates with snooping OFF — production switch behaviour unverified. | Network switch — production CROSSBOW system |
+| ~~DEPLOY-5~~ | ~~NovAtel GNSS (.30) — PTP configuration per production system~~ | ✅ **CLOSED CB-20260416** | Configuration procedure documented in CROSSBOW_GNSS_CONFIG.md (IPGD-0018) — `PTPMODE ENABLE_FINETIME` → `PTPTIMESCALE UTC_TIME` → `SAVECONFIG`. Applied and verified on bench unit. Each production unit requires same procedure at commissioning. |
+| ~~DEPLOY-6~~ | ~~IGMP snooping — verify switch compatibility for PTP multicast~~ | ✅ **CLOSED CB-20260416** | Verified on production switch. No issues with PTP multicast. |
 | ARCH-FMC-HW | ARCH §12.1 FMC Hardware table — V1/V2 column refactor | 🟢 Low | Opened CB-20260413. ARCH §12.1 FMC Hardware table currently has a single column. Refactor to V1/V2 columns parallel to the TMC §11.3 pattern, with a BME280 V2 row added (now that FMC-TPH is closed and the BME280 is part of the V2 build). Documentation cleanup, no functional impact. Pairs naturally with ARCH-1 if that's the next ARCH pass. | `ARCHITECTURE.md` §12.1 |
 | FW-C5-FRAME-CLEANUP | Retire dead `A1_DEST_*_IP` defines from `frame.hpp` | 🟢 Low | Opened CB-20260413. After FW-C5's TMC pass, `A1_DEST_MCC_IP` (line 97) and `A1_DEST_BDC_IP` (line 98) in `frame.hpp` are both unreferenced. `A1_DEST_MCC_IP` had exactly one consumer (the `_mcc[]` temp-array dance in `tmc.cpp:21–22`, now cleaned up to `IPAddress(IP_MCC_BYTES)`); `A1_DEST_BDC_IP` was already unreferenced before this session. Both were left in place per FW-C5 option (a) "leave frame.hpp alone" rule. One-line cleanup: delete both `#define` lines and the surrounding "Fixed destinations for A1 TX" comment block. While in there, also refresh the now-stale comment at `tmc.hpp:235` ("`A1_DEST_MCC_IP from frame.hpp`") and the stale TODO at `fmc.hpp:188` ("NOTE: add `A1_DEST_BDC_IP = {192,168,1,20}` to frame.hpp if not already defined"). Dead code, harmless to leave but cleaner to remove. | `frame.hpp` lines 96–98; `tmc.hpp:235`; `fmc.hpp:188` |
 | TRC-CS-DEAD-IPENDPOINT | Retire dead `ipEndPoint` field in `trc.cs` | 🟢 Low | Opened CB-20260413. In `trc.cs`, the `IPEndPoint ipEndPoint` field is dead. Field declaration at line 24, assignment at line 106 (was hardcoded literal — overwritten by FW-C5 to `new IPEndPoint(IPAddress.Parse(IP), Port)` but the value is still never read), commented-out reference at line 127 (`//byte[] rxBuff = udpClient.Receive(ref ipEndPoint);`). The active receive path uses `udpClient.ReceiveAsync()` which doesn't take an endpoint. Three-line cleanup: delete field declaration, delete the assignment, delete the commented-out line. Pairs naturally with TRC-M9 (port 5010 deprecation) — both are receive-path cleanups owed to TRC. | `trc.cs` lines 24, 106, 127 |
@@ -886,16 +917,18 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 ---
 
 ## CB-20260416e — AWB implementation (AWB-ENG) + ICD_CMDS alias cleanup
-**Files:** `defines.hpp`, `bdc.hpp`, `trc.hpp`, `trc.cpp`, `bdc.cpp`, `udp_listener.cpp`, `types.h`
+**Files:** `defines.hpp`, `bdc.hpp`, `trc.hpp`, `trc.cpp`, `bdc.cpp`, `udp_listener.cpp`, `types.h`, `defines.cs`, `bdc.cs`
 
-**AWB-ENG complete.** `CMD_VIS_AWB` assigned to `0xC4` (reserved slot — was `RES_C4`). Full implementation across all five files:
+**AWB-ENG complete.** `CMD_VIS_AWB` assigned to `0xC4` (reserved slot — was `RES_C4`). Full implementation across all seven files:
 
 - `defines.hpp` — `RES_C4` → `CMD_VIS_AWB = 0xC4` with comment `// none — trigger VIS auto white balance once (HMI-AWB)`
+- `defines.cs` — `RES_C4 = 0xC4` → `CMD_VIS_AWB = 0xC4` — C# enum parity with `defines.hpp`
 - `bdc.hpp` — `0xC4` added to `EXT_CMDS_BDC[]` camera group: `0xC1, 0xC2, 0xC4, 0xC7, 0xC8`
 - `trc.hpp` — `SET_AWB()` declaration added after `SET_VIEW_MODE()`
 - `trc.cpp` — `SET_AWB()` implementation added: sends `CMD_VIS_AWB` (0xC4) as 1-byte no-payload frame via `EXEC_UDP`. TRC ASCII equivalent: `AWB`
 - `bdc.cpp` — three edits: (1) UDP handler `case ICD::CMD_VIS_AWB` dispatches to `trc.SET_AWB()`; (2) serial command `AWB` added before `// -- MCC` block; (3) HELP text line added in TRC COMMANDS section
-- `udp_listener.cpp` — binary handler added after `CMD_MWIR_NUC1` block: `case ICD::CMD_VIS_AWB` calls `cam->runAutoWhiteBalance()`. Mirrors existing ASCII path at line 579–582.
+- `bdc.cs` — `TriggerAWB()` method added alongside VIS camera commands: `Send((byte)ICD.CMD_VIS_AWB)` — no-payload pattern matching `ResetTrackB()` and `GimbalPark()`
+- `udp_listener.cpp` — binary handler added after `CMD_MWIR_NUC1` block: `case ICD::CMD_VIS_AWB` calls `cam->runAutoWhiteBalance()`. Mirrors existing ASCII path.
 
 **ICD_CMDS alias retired.** `types.h` contained `using ICD_CMDS = ICD;` — a redundant alias of the canonical `enum class ICD` in `defines.hpp`. Global find/replace of `ICD_CMDS` → `ICD` applied across all TRC-side source files. Alias removed from `types.h`. All case labels and casts in `udp_listener.cpp` now reference `ICD::` directly, consistent with BDC/FMC firmware convention.
 

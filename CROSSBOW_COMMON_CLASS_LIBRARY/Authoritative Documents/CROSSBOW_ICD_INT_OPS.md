@@ -2,12 +2,18 @@
 
 **Document:** `CROSSBOW_ICD_INT_OPS`
 **Doc #:** IPGD-0004
-**Version:** 3.6.0
-**Date:** 2026-04-12 (ICD command space restructuring — CB-20260412)
+**Version:** 3.6.1
+**Date:** 2026-04-16 (CB-20260416 — AWB assigned, charger V2 fix)
 
 ---
 
 ## Version History
+
+**v3.6.1 changes (CB-20260416 — AWB assigned, charger V2 fix):**
+- `0xC4 CMD_VIS_AWB` assigned — trigger VIS auto white balance once on active camera. No payload. Accessible via A3 (in `EXT_CMDS_BDC[]` whitelist). BDC routes to TRC.
+- `0xAF SET_CHARGER` description corrected: V2 hardware now GPIO-enable only (not full rejection). V1: GPIO enable + I2C level control. V2: GPIO enable only — level `0`=disable, non-zero=enable. FW-CRG-V2 fix CB-20260416.
+
+---
 
 **v3.6.0 changes (ICD command space restructuring — 2026-04-12 CB-20260412):**
 A block fully INT_OPS — all 16 slots active. Changes affecting INT_OPS clients:
@@ -273,7 +279,7 @@ For EXT_OPS interface definition see `CROSSBOW_ICD_EXT_OPS` (IPGD-0005).
 | 0xAC | SET_BDC_HORIZ | Set horizon elevation vector | float[360] | BDC |
 | 0xAD | SET_HEL_POWER | Set laser power level | uint8 [0–100] % | MCC |
 | 0xAE | CLEAR_HEL_ERROR | Clear laser error state | none | MCC |
-| 0xAF | SET_CHARGER | Set charger state and current level. **New v3.6.0. Merges `0xE3` and `0xED`.** Level required on every call — enables and sets level simultaneously. Cannot enable without specifying level; if already enabled, changes level immediately. V1 only — V2 returns STATUS_CMD_REJECTED. | uint8 level: 0=disable, 10=low, 30=med, 55=high | MCC |
+| 0xAF | SET_CHARGER | Set charger state and current level. **New v3.6.0. Merges `0xE3` and `0xED`.** Level required on every call — enables and sets level simultaneously. Cannot enable without specifying level; if already enabled, changes level immediately. **V1:** GPIO enable + I2C level control. **V2:** GPIO enable only — level `0`=disable, non-zero=enable. FW-CRG-V2 fix CB-20260416. | uint8 level: 0=disable, 10=low, 30=med, 55=high | MCC |
 
 ---
 
@@ -300,6 +306,7 @@ For EXT_OPS interface definition see `CROSSBOW_ICD_EXT_OPS` (IPGD-0005).
 |------|------|-------------|---------|----------------|
 | 0xC1 | SET_CAM_MAG | VIS camera zoom | uint8 mag index | BDC |
 | 0xC2 | SET_CAM_FOCUS | VIS camera focus | uint16 focus position | BDC |
+| 0xC4 | CMD_VIS_AWB | Trigger VIS auto white balance once. No payload. BDC routes to TRC. **Assigned CB-20260416e.** | none | BDC |
 | 0xC7 | SET_CAM_IRIS | VIS camera iris position | uint8 upper nibble of iris position | BDC |
 | 0xC8 | CMD_VIS_FILTER_ENABLE | VIS ND filter enable | uint8 0/1 | BDC |
 | 0xC9 | SET_BDC_PALOS_VOTE | Set operator/position valid vote | uint8 which (0=KIZ, 1=LCH); uint8 operatorValid; uint8 positionValid; uint8 forExec | BDC |

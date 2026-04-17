@@ -1864,11 +1864,10 @@ UInt32 patch =  VERSION_WORD        & 0xFFF;
 
 ## 17. Known Open Items
 
-Full open and closed action item tracking has moved to the unified register:
-- **`Embedded_Controllers_ACTION_ITEMS.md`** — all open items, priority-ordered
-- **`Embedded_Controllers_CLOSED_ACTION_ITEMS.md`** — full closure archive
+Full open and closed action item tracking is in the unified register:
+- **`CROSSBOW_CHANGELOG.md`** (IPGD-0019) — Part 2: all open items; Part 3: full closure archive
 
-Quick reference — high priority items as of session 29:
+Quick reference — selected items as of CB-20260416:
 
 | ID | Item | Priority |
 |----|------|----------|
@@ -1878,8 +1877,8 @@ Quick reference — high priority items as of session 29:
 | ~~FMC-NTP~~ | ~~FMC dt elevated — suspected NTP/USB CDC main loop blocking~~ ✅ Closed — SAMD21 NTP bug not applicable on STM32F7. isNTP_Enabled default true, NTP init unconditional. | ~~🔴 High~~ |
 | GUI-2 | HMI robust testing — full engagement sequence on live HW | 🔴 High |
 | FW-B3 | PTP DELAY_REQ W5500 contention — `isPTP_Enabled=false` fleet-wide workaround | 🔴 High |
-| FW-B4 | Fleet `ptp.INIT()` gate audit — BDC and TMC `ptp.INIT()` unconditional needs gate (FW-B3 multicast contention fleet-wide). MCC and FMC already gated. Fix BDC boot state machine PTP_INIT step and TMC INIT(). | 🔴 High |
-| FW-B5 | BDC FSM position offsets wrong in `handleA1Frame()` — `fsm_posX_rb` reads offset 24 (should be 20), `fsm_posY_rb` reads offset 28 (should be 24). Wrong values, no crash. Fix in next BDC session. | 🟡 Medium |
+| ~~FW-B4~~ | ~~Fleet `ptp.INIT()` gate audit — BDC and TMC `ptp.INIT()` unconditional needs gate (FW-B3 multicast contention fleet-wide). MCC and FMC already gated. Fix BDC boot state machine PTP_INIT step and TMC INIT().~~ | ✅ **Closed CB-20260412** — all five controllers confirmed gated. |
+| ~~FW-B5~~ | ~~BDC FSM position offsets wrong in `handleA1Frame()` — `fsm_posX_rb` reads offset 24 (should be 20), `fsm_posY_rb` reads offset 28 (should be 24). Wrong values, no crash. Fix in next BDC session.~~ | ✅ **Closed CB-20260412** |
 | ~~HW-FMC-1~~ | ~~FMC/BDC shared power via serial connection — brownout risk on USB power in test. Use dedicated supply for FMC. Verify power rail isolation in production harness.~~ | ✅ **Closed CB-20260413** (HW fix bench-verified by user) |
 | GUI-8 | TRC C# client model — apply standardized pattern from session 29 | 🟡 Medium |
 | FW-C3 | BDC Fuji boot status — `fuji.SETUP()` deferred post-boot, FUJI_WAIT always times out | 🟡 Medium |
@@ -1889,5 +1888,5 @@ Quick reference — high priority items as of session 29:
 | FW-14 | GNSS socket bug — MCC `RUNONCE` case 6 and `EXEC_UDP` use wrong socket | 🟡 Medium |
 | NEW-38d | TRC PTP integration — TIME_BITS, MSG_TRC.cs, `ptp4l` | 🟡 Medium |
 | DOC-1 | Add TRC NTP setup reference to ARCHITECTURE.md §2.5 | 🟡 Medium |
-| DOC-2 | Create JETSON_SETUP.md — full Jetson Orin NX setup procedure | 🟡 Medium |
+| ~~DOC-2~~ | ~~Create JETSON_SETUP.md — full Jetson Orin NX setup procedure~~ | ✅ **Closed** — JETSON_SETUP.md complete at v2.2.1 (IPGD-0020). |
 | DOC-3 | Add file format specs (horizon, KIZ/LCH, survey) to ICD INT_ENG and INT_OPS | 🟡 Medium |
