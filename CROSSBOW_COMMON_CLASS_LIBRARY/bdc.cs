@@ -487,7 +487,7 @@ namespace CROSSBOW
         {
             Send((byte)ICD.SET_CAM_FOCUS, BitConverter.GetBytes(pos));
         }
-
+        public void TriggerAWB() { Send((byte)ICD.CMD_VIS_AWB); }
         public bool VIS_FILTER_ENABLE            { set { Send((byte)ICD.CMD_VIS_FILTER_ENABLE,       new byte[] { Convert.ToByte(value) }); } }
         public bool MWIR_WhiteHot                { set { Send((byte)ICD.SET_MWIR_WHITEHOT,           new byte[] { Convert.ToByte(value) }); } }
         public AF_MODES MWIR_SET_AF_MODE         { set { Send((byte)ICD.CMD_MWIR_AF_MODE,            new byte[] { Convert.ToByte(value) }); } }

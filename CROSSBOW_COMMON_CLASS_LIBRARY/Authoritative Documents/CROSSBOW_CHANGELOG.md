@@ -2,7 +2,7 @@
 
 **Document:** `CROSSBOW_CHANGELOG.md`
 **Doc #:** IPGD-0019
-**Version:** 4.0.8
+**Version:** 4.1.1
 **Date:** 2026-04-16
 **Status:** Current
 **Supersedes:** `Embedded_Controllers_ACTION_ITEMS.md` (unregistered, retired), `Embedded_Controllers_CLOSED_ACTION_ITEMS.md` (unregistered, retired)
@@ -651,7 +651,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 
 # PART 2 — OPEN ITEMS
 
-**Last reconciled:** 2026-04-16 (CB-20260416 — THEIA HMI audit + MCC charger V2 fix)
+**Last reconciled:** 2026-04-16 (CB-20260416c — end-of-session closures)
 **ICD Reference:** INT_ENG v3.5.2 → v3.6.0 pending (IPGD-0003) | INT_OPS v3.3.8 (IPGD-0004) | EXT_OPS v3.3.0 (IPGD-0005)
 **ARCH Reference:** v3.3.7 → pending update (IPGD-0006)
 **Closed items:** Part 3 of this document
@@ -662,15 +662,15 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 
 | ID | Item | Status | Detail | Files |
 |----|------|--------|--------|-------|
-| FW-CRG-V2 | MCC V2 SET_CHARGER rejects enable — firmware fix pending flash | ⏳ Pending flash + bench verify | `SET_CHARGER` (0xAF) V2 `#elif` branch calls `STATUS_CMD_REJECTED` for `level > 0` instead of `EnableCharger(true)`. ENG GUI charger enable via dropdown has no effect on V2. Fix: replace rejection with `EnableCharger(true)` in `mcc.cpp` lines 732–735. Also update stale comments at `mcc.cpp` line 715 and `mcc.cs` line 397. | `mcc.cpp` lines 732–735 |
-| HW-CRG-V2-OPTO | V2 charger opto sticking — enable/disable unreliable | ⏳ In investigation (separate session) | NC/NO opto driving V2 charger enable line sticking after enable. May require rewire for correct NC/NO polarity or addition of limit resistor. Bench characterize before field deployment. Blocks reliable charger control on V2. | Hardware — charger enable circuit |
+| ~~FW-CRG-V2~~ | ~~MCC V2 SET_CHARGER rejects enable — firmware fix pending flash~~ | ✅ **CLOSED CB-20260416** | Flashed and bench-verified. `EnableCharger(true)` path confirmed working on V2 hardware. | `mcc.cpp` ✅ |
+| ~~HW-CRG-V2-OPTO~~ | ~~V2 charger opto sticking — enable/disable unreliable~~ | ✅ **CLOSED CB-20260416** | Root cause: mis-wire. Corrected on bench. Charger enable/disable confirmed reliable on V2. | Hardware ✅ |
 | THEIA-HUD-FIRECONTROL | TRC video overlay fire control label | ⏳ Pending | Display key MCC→BDC vote state on HUD video overlay. Minimum: `isNotBatLowVoltage`, `isHEL_TrainingMode`. Review full MCC vote chain for additional overlay candidates. Coordinate with TRC OSD implementation. | `frmMain.cs` — video overlay draw path; TRC OSD |
 | THEIA-SHUTDOWN | Clean THEIA/system shutdown — graceful STANDBY→OFF | ⏳ Pending | Laser safe, relays off, state→OFF, HMI disconnect. Define shutdown sequence for commanded shutdown vs power loss. Review MCC/BDC responsibilities. No progress S27→~S39. | THEIA `.cs` shutdown handler / state machine |
 | HMI-A3-18 | LCH/KIZ/HORIZ bulk upload bench test | ⏳ Bench verify | Whitelist confirmed clean in firmware. Full end-to-end bench verification needed: upload from THEIA via A3, confirm receipt and correct parse in BDC, verify all fields land correctly in REG1. | None — test only |
 | GUI-2 | HMI robust testing — live HW | ⏳ In progress | MCC/BDC/TMC/FMC ENG GUI stable S29. BDC A3 (THEIA) stable. Full engagement sequence, mode transitions, fire control chain end-to-end still pending. | HW — no code changes |
 | FW-B3 | PTP DELAY_REQ W5500 contention — fleet-wide workaround active | 🟢 Low | When two or more controllers have PTP active simultaneously, W5500 blocks ~40ms per DELAY_REQ on ARP resolution, saturating main loop. **Workaround: `isPTP_Enabled=false` fleet-wide — NTP only in production. NTP server (.33) provides adequate time accuracy for current operations.** Proposed fixes when PTP is needed: (1) `suppressDelayReq` flag per-controller; (2) staggered DELAY_REQ timing — FMC +50ms offset after FOLLOW_UP. Unblocks FW-B4. | `ptpClient.cpp/hpp` — DELAY_REQ transmission logic |
 | ~~HW-FMC-1~~ | ~~FMC/BDC shared power rail — HW fix applied, bench verify pending~~ | ✅ **CLOSED** | **Bench-verified CB-20260413.** Shared 5V line on USB serial connector between FMC and BDC corrected in hardware. Merged FMC-HW-4, FMC-HW-5, FMC-HW-7. Brownout no longer observed with both controllers active. Production harness isolation confirmed on user's bench. | Hardware — bench + production harness ✅ |
-| HMI-AWB | VIS camera AWB passthrough — ENG GUI then HMI | ⏳ Pending | Priority HIGH. Two sub-steps: **(1) AWB-ENG:** assign `0xC4` (reserved slot — was white balance auto), add to `EXT_CMDS_BDC[]`, BDC→TRC dispatch, TRC binary handler (`needs impl`), wire to `frmBDC.cs`. **(2) AWB-HMI:** expose on THEIA HMI — AWB maps to Xbox controller input, binding TBD. Depends on AWB-ENG. | `frmBDC.cs`, `bdc.hpp`, TRC `udp_listener.cpp`, THEIA HMI `.cs` |
+| HMI-AWB | VIS camera AWB passthrough — HMI binding pending | ⏳ AWB-ENG closed CB-20260416e | **(1) AWB-ENG ✅ CLOSED** — `CMD_VIS_AWB = 0xC4` assigned; `bdc.hpp` whitelist, `trc.hpp/cpp` `SET_AWB()`, `bdc.cpp` UDP handler + serial + HELP, `udp_listener.cpp` binary handler all complete. `ICD_CMDS` alias retired from `types.h`. **(2) AWB-HMI ⏳ pending** — expose on THEIA HMI; AWB maps to Xbox controller input, binding TBD. | THEIA `frmMain.cs` — Xbox binding |
 | HMI-TRACKER | Tracker controls (COCO + optical flow) — ENG GUI then HMI | ⏳ Pending | Two sub-steps: **(1) TRACKER-ENG:** COCO class filter (`0xD9`) in ICD and firmware whitelist — C# wiring to `frmBDC.cs` only. COCO enable is now `0xD1` (moved from `0xDF` — update C# reference). **(2) TRACKER-HMI:** expose on THEIA HMI — Xbox controller binding TBD. Optical flow deferred to TRC session. | `frmBDC.cs`, THEIA HMI `.cs`, `defines.cs` (`ORIN_ACAM_COCO_ENABLE` enum value → `0xD1`) |
 
 ---
@@ -696,7 +696,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | ARCH-1 | ARCHITECTURE.md update pass — CB-20260412 | ⏳ Pending | Update: §5 Port reference — note `0xA9`/`0xAA` as new unified fleet commands. §17 Open items — add ICD-1, DEF-1, FW-C8 through FW-C13, FW-C10. Note 0xA1 REG1 CMD_BYTE legacy status. ICD reference bump to v3.6.0 in ARCH header. All controller FW versions → 4.0.0. IsV4 gate documented. **Hardware revision sections:** Each controller section (MCC §9, BDC §10, TMC §?, FMC §12) needs V1/V2 subsections noting platform differences — MCC HW rev (laser/no-laser), BDC V1/V2 (Vicor/TRACO, IP175, new thermistors), TMC V1/V2 (single Vicor/two TRACOs, heater removed, ADS1015 removed), FMC V1/V2 (SAMD21/STM32F7). **CROSSBOW_FW_PATTERNS.md updates to incorporate into ARCH patterns appendix:** (1) platform table FMC row → V1 SAMD21 / V2 STM32F7; (2) line 19 warning update — FMC V2 follows OpenCR pattern; (3) `buildReg01()` example `ICD::GET_REGISTER1` → `0x00`; (4) HPP template `isUnSolicitedEnabled` → retired, replaced by per-client `wantsUnsolicited`. | `ARCHITECTURE.md` |
 | UG-1 | CROSSBOW_UG_ENG_GUI_draft.md update pass | ⏳ Pending | Update following all unification sessions: ICD/ARCH version refs; MCC section (LASER_MODEL, HEL training mode, IsV4 gate, charger UI); BDC section (V1/V2 hardware table, IP175, HEALTH_BITS/POWER_BITS rename, new temps, IsV2 layout switching); TMC section (V1/V2 hardware table, PUMP/PIDGAIN serial commands, isSingleLoop); FMC section (V1 SAMD21 / V2 STM32F7 platform note); TRC section (frame port 10019/10018 vs legacy 5010, retired stream controls). Add IsV4 gating strategy note. Bump document version and revision history. | `CROSSBOW_UG_ENG_GUI_draft.md` |
 | DOC-REG-1 | CROSSBOW_DOCUMENT_REGISTER.md version bumps | ⏳ Pending | Bump version entries for all documents updated during CB-20260412 and unification sessions: ICD INT_ENG, ICD INT_OPS, ARCHITECTURE.md, UG_ENG_GUI, BDC_HW_DELTA.md, TMC_HW_DELTA.md, FMC_STM32_MIGRATION_FINAL.md. Add new entries for CROSSBOW_CHANGELOG.md v1.2.0 and CROSSBOW_FW_PATTERNS.md v1.7. | `CROSSBOW_DOCUMENT_REGISTER.md` |
-| PMC-1 | PMC hardware unification session — future | 🟢 Low | PMC controller unification session not yet started. Follow `FIRMWARE_UNIFICATION_PROCESS.md` process guide. Fill in §14 PMC placeholder before session: hardware differences V1→V2, files expected, opto/polarity changes, removed peripherals, new hardware, ICD documents affected. Archive `FIRMWARE_UNIFICATION_PROCESS.md` as the session reference doc. | PMC firmware + C# files |
+| ~~PMC-1~~ | ~~PMC hardware unification session~~ | ✅ **CLOSED CB-20260416** | Completed. | PMC firmware ✅ |
 | BIT-CLEANUP | Status bits audit — defines.cs bitmask enums | ⏳ Pending | `HUD_OVERLAY_BITS`, `VOTE_BITS_MCC`, `VOTE_BITS_BDC` use different C# bitmask enum pattern vs `defines.hpp`. Walk through to confirm intentional or align. Related to TMC `tb_*` prefix inconsistency in TIME_BITS. | `defines.cs`, `defines.hpp` |
 
 ### MCC
@@ -733,7 +733,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 
 | ID | Item | Status | Detail | Files |
 |----|------|--------|--------|-------|
-| FMC-V1-FSM-0 | FMC V1 FSM ADC returns 0,0 when stage connected | 🔴 High | FSM SPI reads return 0,0 when stage I2C also connected on V1 SAMD21. Stage not blocking (confirmed via VERBOSE debug — 32 bytes returned cleanly). Hypothesis: wrong `hw_rev.hpp` compiled — `HW_REV_V2` on V1 hardware causes `FMC_SPI=SPI_IMU` (non-existent on SAMD21) → all ADC reads 0. **First step:** run `INFO` at FMC boot and check `HW_REV=0x__`. If `0x02` on SAMD21, recompile with `HW_REV_V1`. If `0x01`, deeper investigation needed — check `init_FSM()` SPI init sequence for V1/V2 merge regression. | `hw_rev.hpp` compile-time define; `fmc.cpp` — `init_FSM()`, `readSPI_ADC()` |
+| ~~FMC-V1-FSM-0~~ | ~~FMC V1 FSM ADC returns 0,0 when stage connected~~ | ✅ **CLOSED CB-20260416** | Hardware issue — resolved on bench. | Hardware ✅ |
 | ~~FW-INFO-HW-REV~~ | ~~HW_REV missing from INFO command~~ | ✅ **CLOSED** | MCC ✅ has `HW_REV=0x%02X` inline on INFO version line. FMC ✅ same. BDC ❌ missing — `INFO` handler in `bdc.cpp` line 1982 has no HW_REV print (present in `REG` line 1913 and `STATUS` line 2816). TMC source not uploaded — needs verification. Fix for BDC: add `Serial.printf("HW_REV:        0x%02X  (%s)\n", BDC_HW_REV_BYTE, ...)` after version line at `bdc.cpp` line 1984. Apply same check+fix to TMC if missing. | `bdc.cpp` line 1984; `tmc.cpp` INFO handler (verify) |
 | FMC-15 | `readPos()` I2C clock stretching — can block indefinitely | 🟡 Medium | `Wire.requestFrom()` in `readPos()` blocks until stage releases I2C clock. Stage holds clock during calibration or mid-move. No timeout in SAMD21/STM32 Wire library. Monitor `dt_delta` in heartbeat register. Consider polling only when stage is known idle. | `fmc.cpp` — `readPos()`, `checkStagePos()` |
 | FMC-17 | `micros()` rollover — NTP timestamp jump every ~71.6 min | 🟡 Verify | `GetCurrentTime()` uses `uint32_t` `micros()` which rolls over every ~71.6 min. At rollover, `(micros() - microsEpoch)` wraps to large value → ~4295s forward jump until next NTP sync. Not listed as fixed in migration doc, not carried in §4.8. Verify during FMC code pass whether ntpClient.cpp was updated. | `ntpClient.cpp` — `GetCurrentTime()` |
@@ -759,7 +759,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | TRC-A1-CHK | A1 fire control packet byte [3] — checksum not validated | 🟢 Low | `trc_a1.hpp` line 26 + `trc_a1.cpp` line 191: byte [3] of the raw 4-byte `SET_BCAST_FIRECONTROL_STATUS` packet is documented as "reserved / checksum (not validated)" and currently ignored. Define checksum scheme (e.g. XOR of bytes [0-2]) and add validation in `rxThreadFunc` — discard packet and log on mismatch. Coordinate with BDC `SEND_FIRE_STATUS_TO_TRC()` to pack the same checksum at byte [3]. | `trc_a1.cpp` — `rxThreadFunc()`; `bdc.cpp` — `SEND_FIRE_STATUS_TO_TRC()` |
 | TRC-COCO-UDP | ORIN_ACAM_COCO_ENABLE via UDP — not yet implemented | 🟢 Low | After CB-20260412, `ORIN_ACAM_COCO_ENABLE = 0xD1`. TRC never had a UDP handler for this command (was at 0xDF, never implemented). Add `case ICD_CMDS::ORIN_ACAM_COCO_ENABLE:` at 0xD1 in `udp_listener.cpp` dispatch when COCO UDP control is needed. Coordinate with `coco_detector.cpp` enable/disable interface. | `udp_listener.cpp` — binary dispatch; `coco_detector.cpp` |
 | TRC-MUTEX | `buildTelemetry()` race condition — A1 TX vs A2 binary threads | 🟢 Low | `buildTelemetry()` is called from both `trc_a1.cpp` txThreadFunc (100 Hz) and `udp_listener.cpp` binaryThreadFunc (on solicited request). No mutex guards the shared `telemetry` struct. Benign at current rates — add mutex when threading issues surface. Consider moving to lock-free double-buffer. | `udp_listener.cpp` — `buildTelemetry()`; `trc_a1.hpp` |
-| TRC-TRAINING | Training mode visibility — review VOTE_BITS_MCC | 🟡 Open | TRC needs to know when `isTrainingMode` is active (set by `SET_HEL_TRAINING_MODE` on MCC). Review `VOTE_BITS_MCC` for a suitable bit (bit 0 currently reserved). BDC packs fire control packet — extend to include training mode state. Update `SEND_FIRE_STATUS_TO_TRC()` in `bdc.cpp` to pack the bit, update `rxThreadFunc` in `trc_a1.cpp` to read and store it in `GlobalState`. Consider training-specific OSD overlay. | `bdc.cpp` — `SEND_FIRE_STATUS_TO_TRC()`; `trc_a1.cpp` — `rxThreadFunc()`; `types.h` — `GlobalState`; `defines.hpp` — `VOTE_BITS_MCC` |
+| ~~TRC-TRAINING~~ | ~~Training mode visibility — review VOTE_BITS_MCC~~ | ✅ **CLOSED CB-20260416** | Resolved via THEIA-HUD-FIRECONTROL — training mode displayed on THEIA HMI via `mb_isTrainingModeEnabled_rb` and `jtoggle_TRAIN`. OSD overlay deferred to THEIA-HUD-FIRECONTROL session. | `frmMain.cs` ✅ |
 | TRC-STATBITS | TRC STATUS_BITS (BDC REG1 byte [59]) review | 🟡 Open | `trc.hpp STATUS_BITS()`: bits 3–6 hardcoded `false` (AF/AE/AG/AWB — camera auto-control, BDC has no visibility into these). `isStarted` (bit 2) never wired — verify in `trc.cpp` or treat as available. `isTRC_A1_Alive` (stream liveness) not packed — only `isConnected` is (latches true, never resets). Proposed: wire `isTRC_A1_Alive` into bit 3; repurpose bits 4–6 or document as reserved. Coordinate with `MSG_TRC.cs` `StatusBits0` accessors. | `trc.hpp` — `STATUS_BITS()`; `trc.cpp` — `isStarted` wiring; `MSG_TRC.cs` — `StatusBits0` accessors |
 
 ---
@@ -772,7 +772,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 |----|------|--------|--------|-------|
 | ~~FW-C6~~ | ~~isUnSolicitedMode_Enabled bit retired — C# reads stale bit~~ | ✅ **CLOSED** | Confirmed removed from `MSG_MCC.cs` during CB-20260412 MCC review — line 438 comment confirms retirement. `MSG_BDC.cs` status to be verified during BDC pass. | `MSG_MCC.cs` ✅ — `MSG_BDC.cs` ⏳ verify |
 | ~~MSG-CMC-1~~ | ~~`MSG_CMC.cs` ParseMsg — `ICD.RES_A1` stale reference~~ | ✅ **CLOSED** | **Owner-confirmed fixed CB-20260413.** `ParseMsg()` now uses literal dual-check `case (ICD)0x00:` and `case (ICD)0xA1:` to handle both v4.0.0 and legacy pre-FW-C10 REG1 frames. | `MSG_CMC.cs` ✅ |
-| CLEANUP-1 | Dead code — MCC_STATUS and BDC_STATUS on controller classes | ⏳ Pending | `MCC.MCC_STATUS` and `BDC.BDC_STATUS` superseded by `CommHealth` (S30). `CB.MCC_STATUS`/`CB.BDC_STATUS` no longer call them. Remove when convenient. | `mcc.cs`, `bdc.cs` |
+| ~~CLEANUP-1~~ | ~~Dead code — MCC_STATUS and BDC_STATUS on controller classes~~ | ✅ **CLOSED CB-20260416** | Removed. | `mcc.cs`, `bdc.cs` ✅ |
 
 | CLEANUP-4 | Confirm ping stops correctly at STANDBY transition | ⏳ Pending | `PING_STATUS_*` bools stay at last value when ping loop stops. Verify `CB.MCC_STATUS`/`CB.BDC_STATUS` do not use stale ping state after STANDBY transition. Confirm on HW. | `frmMain.cs` — `PingHB()`, `crossbow.cs` |
 | GUI-3 | MSG_BDC.cs activeTimeSource reads from correct bits | ⏳ Open | Verify `activeTimeSource` reads from `TimeBits` (`tb_usingPTP`/`tb_isNTP_Synched`), not `DeviceReadyBits`. `MSG_TMC.cs` — align to `tb_*` prefix naming (cosmetic). | `MSG_BDC.cs`, `MSG_TMC.cs` |
@@ -882,6 +882,57 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 # PART 3 — CLOSED ITEMS
 
 *Most recent first. Within each session: FW → SW → Docs.*
+
+---
+
+## CB-20260416e — AWB implementation (AWB-ENG) + ICD_CMDS alias cleanup
+**Files:** `defines.hpp`, `bdc.hpp`, `trc.hpp`, `trc.cpp`, `bdc.cpp`, `udp_listener.cpp`, `types.h`
+
+**AWB-ENG complete.** `CMD_VIS_AWB` assigned to `0xC4` (reserved slot — was `RES_C4`). Full implementation across all five files:
+
+- `defines.hpp` — `RES_C4` → `CMD_VIS_AWB = 0xC4` with comment `// none — trigger VIS auto white balance once (HMI-AWB)`
+- `bdc.hpp` — `0xC4` added to `EXT_CMDS_BDC[]` camera group: `0xC1, 0xC2, 0xC4, 0xC7, 0xC8`
+- `trc.hpp` — `SET_AWB()` declaration added after `SET_VIEW_MODE()`
+- `trc.cpp` — `SET_AWB()` implementation added: sends `CMD_VIS_AWB` (0xC4) as 1-byte no-payload frame via `EXEC_UDP`. TRC ASCII equivalent: `AWB`
+- `bdc.cpp` — three edits: (1) UDP handler `case ICD::CMD_VIS_AWB` dispatches to `trc.SET_AWB()`; (2) serial command `AWB` added before `// -- MCC` block; (3) HELP text line added in TRC COMMANDS section
+- `udp_listener.cpp` — binary handler added after `CMD_MWIR_NUC1` block: `case ICD::CMD_VIS_AWB` calls `cam->runAutoWhiteBalance()`. Mirrors existing ASCII path at line 579–582.
+
+**ICD_CMDS alias retired.** `types.h` contained `using ICD_CMDS = ICD;` — a redundant alias of the canonical `enum class ICD` in `defines.hpp`. Global find/replace of `ICD_CMDS` → `ICD` applied across all TRC-side source files. Alias removed from `types.h`. All case labels and casts in `udp_listener.cpp` now reference `ICD::` directly, consistent with BDC/FMC firmware convention.
+
+**AWB-HMI** (THEIA HMI Xbox controller binding) remains open — depends on AWB-ENG (now complete).
+
+**Items closed:** HMI-AWB (AWB-ENG sub-step)
+**Items opened:** none
+
+---
+
+## CB-20260416d — ICD command matrix visualization + 0xAF description fix
+**Files:** `CROSSBOW_ICD_INT_ENG.md`
+
+**ICD command matrix format established.** 6×16 color-coded grid (rows 0xA_–0xF_, columns _0–_F) adopted as the canonical quick-reference view for the full command space. Color legend: INT_OPS (blue), INT_ENG (purple), available (grey), outbound slot (yellow), retired (red), retiring this session (orange), needs impl (green), conflict/notable (amber border), candidate (green dashed), awaiting confirmation (dotted). Hover titles carry detail. Produced as an HTML widget — to be regenerated at the start of any ICD review session.
+
+**Notable flags in current matrix:**
+- **0xAF** — ICD description stale: still says "V2 returns STATUS_CMD_REJECTED". Fix: V2 now GPIO enable only (FW-CRG-V2 closed CB-20260416). ICD text correction due under ICD-1.
+- **0xA3** — candidate: byte assigned, FW-C7 not implemented.
+- **0xC4** — candidate: proposed for AWB (HMI-AWB pending).
+- **0xD9** — needs impl: COCO class filter, TRC binary handler not written.
+- **0xBF/0xCF/0xEF/0xFF** — awaiting confirmation: may be outbound response CMD_BYTEs.
+
+**Items closed:** none
+**Items opened:** none
+
+---
+
+## CB-20260416c — End-of-session closures
+
+| ID | Item | Resolution |
+|----|------|------------|
+| FW-CRG-V2 | MCC V2 SET_CHARGER firmware fix | ✅ Flashed and bench-verified. `EnableCharger(true)` path confirmed working on V2. |
+| HW-CRG-V2-OPTO | V2 charger opto sticking | ✅ Root cause: mis-wire. Corrected on bench. Charger enable/disable reliable on V2. |
+| FMC-V1-FSM-0 | FMC V1 FSM ADC returns 0,0 when stage connected | ✅ Hardware issue — resolved on bench. |
+| TRC-TRAINING | Training mode visibility to TRC | ✅ Training mode displayed on THEIA HMI via `mb_isTrainingModeEnabled_rb` / `jtoggle_TRAIN`. OSD overlay aspect deferred to THEIA-HUD-FIRECONTROL. |
+| PMC-1 | PMC hardware unification session | ✅ Completed. |
+| CLEANUP-1 | Dead MCC_STATUS / BDC_STATUS on controller classes | ✅ Removed from `mcc.cs`, `bdc.cs`. |
 
 ---
 

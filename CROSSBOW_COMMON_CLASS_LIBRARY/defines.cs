@@ -278,7 +278,7 @@ namespace CROSSBOW
         SET_CAM_MAG = 0xC1,  // ZOOM
         SET_CAM_FOCUS = 0xC2,  // FOCUS (AUTO)
         RES_C3 = 0xC3,  // GAIN (AUTO)
-        RES_C4 = 0xC4,  // WB (AUTO)
+        CMD_VIS_AWB = 0xC4,  // none — trigger VIS auto white balance once (HMI-AWB)
         RES_C5 = 0xC5,  // EXP (AUTO)
         RES_C6 = 0xC6,  // GAMMA
         SET_CAM_IRIS = 0xC7,  // IRIS
