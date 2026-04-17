@@ -1,7 +1,7 @@
 # JETSON_SETUP.md — TRC Jetson Orin NX Setup Procedure
 **Document:** JETSON_SETUP.md (DOC-2)  
-**Version:** 2.2.5  
-**Date:** 2026-04-15  
+**Version:** 2.2.8  
+**Date:** 2026-04-17  
 **Confirmed on:** Unit 1 (2026-04-09), Unit 2 (2026-04-09), Unit 3 (2026-04-10) — all 54 PASS, 0 FAIL  
 **Platform:** Seeed Studio reComputer J4012 **(non-Super, J401 carrier)** — see hardware note below  
 **JetPack:** 6.2.2 (L4T 36.5, Ubuntu 22.04, CUDA 12.6, cuDNN 9.3)  
@@ -98,12 +98,78 @@ configurations. Validated 2026-04-13.
 - Internet access on the Jetson (Windows ICS or direct)
 - Gateway must be set correctly and survive reboot — fix permanently via nmtui before starting
 - L4T packages must be held before touching apt
+- **Clock must be correct** — apt will fail with "not valid yet" errors if the system clock is wrong
 
-**Step 1 — Set gateway permanently (survives reboot):**
+**Step 1 — Verify and sync clock:**
+
+The system clock must be correct before running apt. Old units with a dead RTC battery
+will have a stale clock that causes apt repo validation failures.
+
 ```bash
-sudo nmtui
-# Edit connection → enP8p1s0 → Gateway: 192.168.1.208 (or your internet gateway)
-# Save → deactivate/reactivate
+# Check current time
+date
+
+# Set temporary NTP to your internet gateway (e.g. 192.168.1.8 or 192.168.1.208)
+sudo tee /etc/systemd/timesyncd.conf > /dev/null << 'EOF'
+[Time]
+NTP=192.168.1.8
+EOF
+sudo systemctl restart systemd-timesyncd
+sleep 15
+timedatectl timesync-status
+# Must show Packet count > 0
+```
+
+If NTP sync fails, force the time manually:
+```bash
+sudo timedatectl set-ntp false
+sudo timedatectl set-time "YYYY-MM-DD HH:MM:SS"   # use current local time
+sudo timedatectl set-ntp true
+date
+```
+
+> **At the end of Path C** — restore NTP to gold standard:
+> ```bash
+> sudo tee /etc/systemd/timesyncd.conf > /dev/null << 'EOF'
+> [Time]
+> NTP=192.168.1.33
+> FallbackNTP=192.168.1.208
+> EOF
+> sudo systemctl restart systemd-timesyncd
+> ```
+
+**Step 1b — Set gateway and verify internet:**
+
+> ⚠️ Always set the gateway before testing internet — the default gateway on old units
+> typically points to `.1` which has no internet access.
+
+```bash
+# Set gateway to your internet source
+sudo ip route replace default via 192.168.1.208   # or .8 depending on your setup
+echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf
+ping 8.8.8.8 -c 3
+# Must succeed before continuing
+```
+
+**Step 1c — Passwordless sudo:**
+
+```bash
+sudo grep -q "ipg ALL=(ALL) NOPASSWD" /etc/sudoers || \
+    echo "ipg ALL=(ALL) NOPASSWD: ALL" | sudo tee -a /etc/sudoers
+sudo echo "sudo works"
+```
+
+**Step 1d — Clean CV directory:**
+
+Old units may have stale TRC source, old VimbaX references, and legacy scripts in `~/CV/`.
+Remove and recreate clean:
+
+```bash
+rm -rf ~/CV/
+mkdir -p ~/CV/SETUP
+mkdir -p ~/CV/TRC
+ls ~/CV/
+# Expect: SETUP  TRC
 ```
 
 **Step 2 — Hold L4T packages:**
@@ -134,6 +200,15 @@ cat /etc/apt/sources.list.d/nvidia-l4t-apt-source.list
 ```
 
 **Step 4 — Upgrade CUDA compute stack:**
+
+> ⚠️ **REVISION 4.7 units:** On units running L4T REVISION 4.7, `dist-upgrade` with
+> L4T packages held will show "0 upgraded" because r36.5 packages have a dependency
+> chain that requires all L4T packages to upgrade together. If you see this, skip to
+> Step 5 — the full upgrade will happen there with the unhold.
+>
+> **REVISION 4.4 units:** `dist-upgrade` works normally with packages held — CUDA
+> stack upgrades independently.
+
 ```bash
 sudo apt-get update
 sudo apt-get dist-upgrade -y
@@ -141,8 +216,11 @@ sudo apt install --fix-broken -o Dpkg::Options::="--force-overwrite"
 ```
 
 > If prompted about config files — answer **N** (keep current version).
+> If output shows `0 upgraded, 0 newly installed` — this is expected on 4.7 units, proceed to Step 5.
 
 **Step 5 — Upgrade L4T kernel:**
+
+**For REVISION 4.4 units** — selective upgrade (kernel only, bootloader stays held):
 ```bash
 # Unhold
 sudo apt-mark unhold \
@@ -153,15 +231,32 @@ sudo apt-mark unhold \
     nvidia-l4t-core \
     nvidia-l4t-init
 
-# Install new kernel packages (bootloader left on hold — lower risk)
+# Install new kernel packages
 sudo apt-get install -y \
     nvidia-l4t-core \
     nvidia-l4t-kernel \
     nvidia-l4t-kernel-dtbs \
     nvidia-l4t-kernel-headers \
     nvidia-l4t-init
+```
 
-# Rehold immediately
+**For REVISION 4.7 units** — full upgrade (all packages together):
+```bash
+# Unhold all
+sudo apt-mark unhold \
+    nvidia-l4t-bootloader \
+    nvidia-l4t-kernel \
+    nvidia-l4t-kernel-dtbs \
+    nvidia-l4t-kernel-headers \
+    nvidia-l4t-core \
+    nvidia-l4t-init
+
+# Full dist-upgrade — upgrades everything together
+sudo apt-get dist-upgrade -y
+```
+
+**Both paths — rehold immediately after:**
+```bash
 sudo apt-mark hold \
     nvidia-l4t-bootloader \
     nvidia-l4t-kernel \
@@ -682,8 +777,12 @@ sudo jetson_clocks --show | grep -E "cpu0:|GPU Min"
 Verify the hardware encode pipeline before proceeding. Start Windows receive first:
 
 ```
-gst-launch-1.0.exe udpsrc port=5000 buffer-size=2097152 caps="application/x-rtp,media=video,encoding-name=H264,payload=96" ! rtpjitterbuffer latency=50 drop-on-latency=true ! rtph264depay ! h264parse ! nvh264dec ! videoconvert n-threads=4 ! fpsdisplaysink sync=false text-overlay=true
+gst-launch-1.0.exe udpsrc address=192.168.1.208 port=5000 buffer-size=2097152 caps="application/x-rtp,media=video,encoding-name=H264,payload=96" ! rtpjitterbuffer latency=50 drop-on-latency=true ! rtph264depay ! h264parse ! nvh264dec ! videoconvert n-threads=4 ! fpsdisplaysink sync=false text-overlay=true
 ```
+
+> **Dual-NIC Windows:** If THEIA has multiple NICs, always specify `address=192.168.1.208`
+> to bind the receiver to the correct interface. Without it, the stream may arrive on a
+> different NIC and not display.
 
 Then on Jetson:
 ```bash
@@ -971,8 +1070,10 @@ Two steps — videotestsrc first, then live Alvium.
 
 **Receive (Windows) — start this first for both tests:**
 ```
-gst-launch-1.0.exe udpsrc port=5000 buffer-size=2097152 caps="application/x-rtp,media=video,encoding-name=H264,payload=96" ! rtpjitterbuffer latency=50 drop-on-latency=true ! rtph264depay ! h264parse ! nvh264dec ! videoconvert n-threads=4 ! fpsdisplaysink sync=false text-overlay=true signal-fps-measurements=true
+gst-launch-1.0.exe udpsrc address=192.168.1.208 port=5000 buffer-size=2097152 caps="application/x-rtp,media=video,encoding-name=H264,payload=96" ! rtpjitterbuffer latency=50 drop-on-latency=true ! rtph264depay ! h264parse ! nvh264dec ! videoconvert n-threads=4 ! fpsdisplaysink sync=false text-overlay=true signal-fps-measurements=true
 ```
+
+> **Dual-NIC Windows:** Specify `address=192.168.1.208` to bind to the correct NIC.
 
 **Test 1 — videotestsrc (no camera required):**
 ```bash
@@ -1556,6 +1657,34 @@ cd ~/CV/SETUP/
 
 ---
 
+## Fleet Registry
+
+All deployed TRC units. Update this table when a unit is built, upgraded, or retired.
+
+> **SOM serial** is read from `/proc/device-tree/serial-number` — unique per NVIDIA module from factory.
+> **Hostname** is `trc-<full SOM serial>`. **IP** is always `192.168.1.22` (role address).
+
+| Hostname | SOM Serial | TRC Version | JetPack | Path | Date | Notes |
+|---|---|---|---|---|---|---|
+| `trc-1420825016588` | 1420825016588 | 3.0.2 | 6.2.2 | A | 2026-04-09 | Unit 1 |
+| `trc-1423624314616` | 1423624314616 | 3.0.2 | 6.2.2 | A | 2026-04-09 | Unit 2 |
+| `trc-1420825019234` | 1420825019234 | 3.0.2 | 6.2.2 | A | 2026-04-10 | Unit 3 |
+| `trc-1420825020919` | 1420825020919 | 4.0.1 | 6.2.2 | A | 2026-04-13 | Unit 4 |
+| `trc-1420825016537` | 1420825016537 | 4.0.1 | 6.2.2 | A | 2026-04-13 | Unit 5 |
+| `trc-1423624314071` | 1423624314071 | 4.0.1 | 6.2.2 | C | 2026-04-13 | Path C validated (4.4→5.0) |
+| `trc-1420825013697` | 1420825013697 | 4.0.1 | 6.2.2 | C | 2026-04-13 | Path C validated (4.7→5.0) |
+| `trc-1420825019951` | 1420825019951 | 4.0.2 | 6.2.2 | C | 2026-04-15 | Path C (4.7→5.0) |
+| `trc-1420825020046` | 1420825020046 | 4.0.2 | 6.2.2 | C | 2026-04-17 | Path C (4.4→5.0) |
+| `trc-1420825022024` | 1420825022024 | 4.0.2 | 6.2.2 | C | 2026-04-17 | Path C (4.4→5.0) |
+
+> **`04_verify_all.sh` TRC version check:** The script checks for a TRC version string prefix (e.g. `"TRC 4"`). After any TRC major version change, update the check in the script and push the updated script to all units:
+> ```bash
+> sed -i 's/"TRC 3"/"TRC 4"/' ~/CV/SETUP/04_verify_all.sh
+> ```
+> The updated `04_verify_all.sh` should be included in the standard file transfer (Phase 7.1) so new units always have the correct check from the start.
+
+---
+
 ## Known Issues and Notes
 
 | Issue | Notes |
@@ -1576,7 +1705,10 @@ cd ~/CV/SETUP/
 
 | Version | Date | Notes |
 |---------|------|-------|
-| 2.2.5 | 2026-04-15 | Path C Step 6: long boot warning added — initramfs regeneration causes 2-3 min first boot after kernel upgrade; use `ping -t` to wait. Phase 4.8: two-step pipeline test documented (videotestsrc first, then live Alvium); iris note added — camera may appear dark on first run, normal behaviour. |
+| 2.2.8 | 2026-04-17 | Fleet Registry: `trc-1420825022024` added. Path C Step 1b: gateway must be set before ping (always). Step 1c added: passwordless sudo check. Step 1d added: clean `~/CV/` directory and recreate standard structure. |
+| 2.2.7 | 2026-04-17 | Fleet Registry section added. `04_verify_all.sh` TRC version check note added. |
+| 2.2.6 | 2026-04-15 | Path C Step 1: clock sync verification added. Path C Step 4: REVISION 4.7 note. Path C Step 5: split 4.4/4.7 paths. Phase 2.3 and 4.8: Windows GStreamer `address=` parameter for dual-NIC. |
+| 2.2.5 | 2026-04-15 | Path C Step 6: long boot warning added. Phase 4.8: two-step pipeline test and iris note added. |
 | 2.2.4 | 2026-04-13 | Path C reinstated — validated in-place apt upgrade 6.2.1 → 6.2.2. Path B updated. Phase 8.2 cleanup: stray trc_start scripts removal added. |
 | 2.2.3 | 2026-04-13 | Phase 0.3: two-boot sequence documented. Phase 7.1: Windows line endings fix added. |
 | 2.2.2 | 2026-04-13 | Phase 4.6: `libVmbCPP.so: file too short` fix documented. Phase 8.2: `test1.py` kept as survivor. Phase 9.2/9.3: rewritten — dd/l4t_backup_restore NOT supported for cloning. Known issues: two new entries. |
