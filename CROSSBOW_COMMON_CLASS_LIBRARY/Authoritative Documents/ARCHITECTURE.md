@@ -1,11 +1,22 @@
 # CROSSBOW System Architecture
 
-**Document Version:** 4.0.1
-**Date:** 2026-04-13
-**ICD Reference:** ICD v3.6.0 (targeting v4.0.0 — ICD-1 pending)
-**Status:** CB-20260413 fleet closures complete (FW-C5, FMC-TPH, HW-FMC-1, BDC-FSM-VOTE-LATCH, TRC-SOM-SN).
+**Document Version:** 4.0.4
+**Date:** 2026-04-19
+**ICD Reference:** ICD v4.1.0
+**Status:** CB-20260419b TRC ENG GUI pass complete.
 
-**v4.0.1 changes (BDC HB subsystem wiring — 2026-04-13):**
+**v4.0.4 changes (TRC ENG GUI update pass — 2026-04-19):**
+- §3 Codebase inventory: `TRC_ENG_GUI_PRESERVE` → `CROSSBOW_ENG_GUIS` throughout. Inventory row expanded with full MDI child form list (`frmMCC`, `frmBDC`, `frmTMC`, `frmFMC`, `frmTRC`, `frmHEL`, `frmNTP_PTP`, `frmFWProgrammer`). CROSSBOW lib row updated.
+- §4.2/§4.5/§7.4: All remaining `TRC_ENG_GUI_PRESERVE` references → `CROSSBOW_ENG_GUIS`. §7.4 namespace corrected `CROSSBOW` → `CROSSBOW_ENG_GUIS`.
+- §17: GUI-8 closed — TRC C# client model complete and verified on live HW (CB-20260419b).
+- ICD Reference updated: v4.0.3 → v4.1.0.
+
+**v4.0.3 changes (TRC COCO ambient, OSD redesign, GPU telemetry — 2026-04-19):**
+- §8 TRC — COCO ambient scan: compositor bug fix (push/poll now outside tracker block); ambient detection hold; `--coco-ambient` launch flag; COCO NMS + min/max area filter (runtime-tunable ASCII commands); OSD redesign (STATE/MODE/FC top-right, COCO rows below TRACK, colour coding); GPU load telemetry (sysfs → REG1 [57–58] → OSD JGPU); CPU/GPU complementary filter at alpha=0.3 1Hz poll; trackbox W/H reset on tracker off and COCO RESET.
+- §8.4 TRC REG1: `jetsonGpuLoad int16` at [57–58]; RESERVED shrinks [7]→[5] at [59–63]. Defined: 57→59. Reserved: 7→5.
+- §8.2 Thread table: stats thread corrected to 1Hz (was 1Hz temp / 5Hz CPU — now both CPU+GPU at 1Hz).
+
+**v4.0.2 changes (BDC HB subsystem wiring — 2026-04-13):**
 - §10 BDC: Eight HB counter bytes added to REG1 in reserved space [396–403]. Bytes [396]=HB_NTP (x0.1s), [397]=HB_FMC_ms, [398]=HB_TRC_ms, [399]=HB_MCC_ms, [400]=HB_GIM_ms, [401]=HB_FUJI_ms, [402]=HB_MWIR_ms, [403]=HB_INCL_ms (all raw ms). Defined count 396→404, reserved 116→108. ICD rows to be added under ICD-1 pass.
 - §10.9 Build config: `prev_HB_NTP`/`HB_NTP` added to BDC. NTP stamp added to A2 intercept block.
 
@@ -381,8 +392,8 @@ For full TRC/Jetson setup procedure (OS install, static IP, software deployment)
 | **THEIA** | Windows PC | C# / .NET 8 / WinForms | Operator HMI, Xbox controller, video display, fire control |
 | **HYPERION** | Windows PC | C# / .NET 8 / WinForms | Sensor fusion — ADS-B, Echodyne, RADAR, LoRa, Stellarium. Track filtering (6-state Kalman), operator track selection, CUE unicast output to THEIA. |
 | **CUE SIM** | Windows PC | C# / .NET 8 / WinForms | EXT_OPS test and simulation tool — simulated track injection into HYPERION (UDP:15001) or direct to THEIA (UDP:15009). HyperionSniffer for CUE output verification. |
-| **TRC_ENG_GUI_PRESERVE** | Windows PC | C# / .NET 8 / WinForms | Engineering GUI — all 5 controllers via A2 |
-| **CROSSBOW lib** | Shared | C# / .NET 8 | Shared class library — namespace CROSSBOW. MSG_MCC, MSG_BDC and all sub-message parsers. Used by both THEIA and TRC_ENG_GUI_PRESERVE. |
+| **CROSSBOW_ENG_GUIS** | Windows PC | C# / .NET 8 / WinForms | IPG CROSSBOW MANAGEMENT SUITE — MDI shell (`frmCROSSBOW_ENG`). Child forms: `frmMCC`, `frmBDC`, `frmTMC`, `frmFMC`, `frmTRC` (A2 controller GUIs); `frmHEL` (laser direct TCP); `frmNTP_PTP` (time source management); `frmFWProgrammer` (firmware programmer). Engineering-only — not present in operational configuration. |
+| **CROSSBOW lib** | Shared | C# / .NET 8 | Shared class library — namespace CROSSBOW. MSG_MCC, MSG_BDC and all sub-message parsers. Used by both THEIA and CROSSBOW_ENG_GUIS. |
 
 
 ### 3.1 Hardware Revision Quick Reference
@@ -453,7 +464,7 @@ and which C# entry points to call. This is the authoritative reference for call 
 | Client | Transport | Port | Magic | Controllers Accessible | C# Entry Point |
 |--------|-----------|------|-------|------------------------|----------------|
 | **THEIA (HMI)** | A3 External | 10050 | `0xCB 0x58` | MCC, BDC **only** | `ParseA3(byte[] frame)` |
-| **TRC_ENG_GUI_PRESERVE** | A2 Internal | 10018 | `0xCB 0x49` | MCC, BDC, TMC, FMC, TRC | `ParseA2(byte[] msg)` |
+| **CROSSBOW_ENG_GUIS** | A2 Internal | 10018 | `0xCB 0x49` | MCC, BDC, TMC, FMC, TRC | `ParseA2(byte[] msg)` |
 
 Sub-controllers (TMC, FMC, TRC) have **no A3 listener** — they are unreachable from the
 external IP range. THEIA never communicates with TMC, FMC, or TRC directly.
@@ -586,7 +597,7 @@ Deployed session 16/17. NEW-12 ✅ closed.
 
 ### 4.5 ENG GUI — Per-Controller Access
 
-TRC_ENG_GUI_PRESERVE connects to each of the five controllers independently on A2 port 10018.
+CROSSBOW_ENG_GUIS connects to each of the five controllers independently on A2 port 10018.
 Each controller has its own message class instance:
 
 | Controller | IP | Port | C# Class | Entry Point |
@@ -963,10 +974,10 @@ Three separate Windows C# applications form the CROSSBOW operational software st
 | **HYPERION** | `Hyperion` | Reference CUE source — sensor fusion, track management, operator track selection, EXT_OPS CUE output | External sensors (15001/15002); THEIA via UDP:15009 |
 | **THEIA** | `CROSSBOW` | Operator HMI, fire control, gimbal/FSM control, video display | MCC + BDC via A3; any conforming CUE source via UDP:15009 |
 | **CUE SIM** | `CROSSBOW_EMPLACEMENT_GUIS` | EXT_OPS test tool — simulated track injection, HYPERION sniffer, direct THEIA verification | HYPERION via UDP:15001; THEIA direct via UDP:15009 |
-| **TRC_ENG_GUI_PRESERVE** | `CROSSBOW` | Engineering GUI — all 5 controllers | All controllers via A2 |
+| **CROSSBOW_ENG_GUIS** | `CROSSBOW_ENG_GUIS` | IPG CROSSBOW MANAGEMENT SUITE — MDI engineering GUI. Child forms: `frmMCC`, `frmBDC`, `frmTMC`, `frmFMC`, `frmTRC`, `frmHEL`, `frmNTP_PTP`, `frmFWProgrammer` | All controllers via A2 |
 
 HYPERION and THEIA can run on the same PC but are typically on separate machines in
-deployment. TRC_ENG_GUI_PRESERVE is engineering-only and not present in the operational configuration.
+deployment. CROSSBOW_ENG_GUIS is engineering-only and not present in the operational configuration.
 
 #### HYPERION Architecture
 
@@ -1140,7 +1151,7 @@ AlviumCamera (VIS, 60 Hz) / MWIRCamera (MWIR, 30 Hz)
 | A2 binary | UdpListener::binaryThreadFunc | blocking | Command receive |
 | A2 unsolicited | UdpListener::a2UnsolThreadFunc | 100 Hz | Telemetry → A2 clients |
 | ASCII | UdpListener::asciiThreadFunc | blocking | ASCII command receive |
-| stats | statsThreadFunc | 1 Hz | Jetson temp/CPU load |
+| stats | statsThreadFunc | 1 Hz | Jetson temp (30s), CPU+GPU load (1Hz, complementary filtered) |
 
 ### 8.3 Tracker Architecture
 
@@ -1185,8 +1196,12 @@ Tracker enable/disable per-ID via `0xDB ORIN_ACAM_ENABLE_TRACKERS`.
 | 42 | 1 | uint8 | voteBitsBdc | BDC geometry vote bits (relay from 0xAB) |
 | 43 | 2 | int16 | nccScore | NCC quality × 10000 |
 | 45 | 2 | int16 | jetsonTemp | Jetson CPU temp °C |
-| 47 | 2 | int16 | jetsonCpuLoad | Jetson CPU load % |
-| 49 | 15 | uint8[] | RESERVED | 0x00 |
+| 47 | 2 | int16 | jetsonCpuLoad | Jetson CPU load % (complementary filtered, alpha=0.3) |
+| 49 | 8 | uint64 | som_serial | Jetson SOM serial — `/proc/device-tree/serial-number` — v4.0.0 |
+| 57 | 2 | int16 | jetsonGpuLoad | Jetson GPU load % — `/sys/devices/platform/gpu.0/load` ÷ 10 (complementary filtered, alpha=0.3) — v4.0.3 |
+| 59 | 5 | uint8[] | RESERVED | 0x00 |
+
+**Defined: 59 bytes. Reserved: 5 bytes. Fixed block: 64 bytes.**
 
 **BDC embedding:** TRC REG1 occupies bytes [60–123] of BDC REG1 payload (64-byte fixed block).
 
@@ -1219,11 +1234,51 @@ Tracker enable/disable per-ID via `0xDB ORIN_ACAM_ENABLE_TRACKERS`.
 ### 8.6 Startup
 
 ```bash
-./multi_streamer --dest-host 192.168.1.208
+./trc --dest-host 192.168.1.208 --osd ON --focusscore ON --coco-ambient
 ```
 
-`--dest-host` sets the video stream destination (port 5000, H.264 RTP). Telemetry auto-targets
-BDC (`192.168.1.20`) at boot regardless of `--dest-host`. If omitted, video does not stream.
+**Launch flags:**
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--dest-host <ip>` | 192.168.1.1 | Video stream destination (port 5000, H.264 RTP). Required. |
+| `--osd <ON\|OFF>` | ON | OSD text overlay on boot. |
+| `--focusscore <ON\|OFF>` | OFF | Focus score overlay on boot. |
+| `--coco-ambient` | off | Load COCO model + enable ambient scan after compositor starts (500ms settle). Non-fatal on model load failure. |
+| `--bitrate <1-50>` | 10 | H.264 encoder bitrate Mbps. |
+| `--view <CAM1\|CAM2\|PIP\|PIP8>` | CAM1 | Default compositor view. |
+| `--debug` | off | Enable debug logging from boot. |
+| `--mwir-live` | off | Start MWIR in live mode (default test pattern). |
+
+`--dest-host` sets the video stream destination. Telemetry auto-targets BDC (`192.168.1.20`) at boot regardless of `--dest-host`.
+
+### 8.7 COCO Inference Architecture
+
+SSD MobileNet V3 Large (80-class COCO). CUDA FP16 backend on Orin, CPU fallback.
+
+```
+Compositor (60 Hz)
+  ├── Ambient push (full frame, every Nth frame when tracker off or interleaved)
+  └── Track push  (MOSSE bbox crop, every Nth frame when tracking)
+        └── CocoDetector (inference thread, single-slot non-blocking)
+              ├── net_->detect() with runtime NMS threshold (default 0.35)
+              ├── Area filter: minAreaFrac (default 0.002) × maxAreaFrac (default 0.50)
+              └── CocoResult → pollResult() → compositor → OSD + telemetry
+```
+
+**Modes:**
+- **Ambient** — full-frame scan, independent of tracker. Detections latched for OSD display and NEXT/PREV operator cycle. Enabled via `COCO AMBIENT ON` or `--coco-ambient` flag.
+- **Track** — intra-box crop inference. Drift computed vs crop centre. Enabled via `COCO TRACK ON` (requires tracker active).
+
+**Runtime tunables (ASCII):** `COCO NMS`, `COCO MINAREA`, `COCO MAXAREA`, `COCO DRIFT`, `COCO INTERVAL`.
+
+### 8.8 OSD Layout
+
+**Left column (top-down):** camera name/source, view mode, exposure, gain, ICT, gamma, FPS, DT, device temp, AMR, TRACK state + tx/ty + AT offset, COCO rows (3, model-loaded only).
+
+**Top-right fixed-width block:** STATE / MODE / MCC / BDC — colour-coded by operational state. Anchor computed from `getTextSize("STATE: COMBAT ")` — column never shifts.
+
+**Bottom-right:** SOM serial (dim), `JTEMP: N°C  JCPU: N%  JGPU: N%`.
 
 ---
 
@@ -1880,7 +1935,7 @@ Quick reference — selected items as of CB-20260416:
 | ~~FW-B4~~ | ~~Fleet `ptp.INIT()` gate audit — BDC and TMC `ptp.INIT()` unconditional needs gate (FW-B3 multicast contention fleet-wide). MCC and FMC already gated. Fix BDC boot state machine PTP_INIT step and TMC INIT().~~ | ✅ **Closed CB-20260412** — all five controllers confirmed gated. |
 | ~~FW-B5~~ | ~~BDC FSM position offsets wrong in `handleA1Frame()` — `fsm_posX_rb` reads offset 24 (should be 20), `fsm_posY_rb` reads offset 28 (should be 24). Wrong values, no crash. Fix in next BDC session.~~ | ✅ **Closed CB-20260412** |
 | ~~HW-FMC-1~~ | ~~FMC/BDC shared power via serial connection — brownout risk on USB power in test. Use dedicated supply for FMC. Verify power rail isolation in production harness.~~ | ✅ **Closed CB-20260413** (HW fix bench-verified by user) |
-| GUI-8 | TRC C# client model — apply standardized pattern from session 29 | 🟡 Medium |
+| ~~GUI-8~~ | ~~TRC C# client model — apply standardized pattern from session 29~~ | ✅ **Closed CB-20260419b** — `trc.cs` fully rewritten: port 10018, INT framing, `BuildA2Frame`/`CrcHelper`/`CrossbowNic`, single `0xA4` registration, `KeepaliveLoop`, frame-driven `isConnected`, `DropCount`, `LatestMSG`. Verified on live HW. |
 | FW-C3 | BDC Fuji boot status — `fuji.SETUP()` deferred post-boot, FUJI_WAIT always times out | 🟡 Medium |
 | FW-C4 | BDC A1 ARP backoff not working — `A1 OFF` workaround when TRC offline | 🟡 Medium |
 | ~~FW-C5~~ | ~~Audit/consolidate IP defines in `defines.hpp` — remove remaining hardcoded IPs~~ | ✅ **Closed CB-20260413** |

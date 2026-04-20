@@ -2,8 +2,8 @@
 
 **Document:** `CROSSBOW_ICD_INT_ENG`
 **Doc #:** IPGD-0003
-**Version:** 4.0.1
-**Date:** 2026-04-16 (CB-20260416 — AWB assigned, charger V2 fix)
+**Version:** 4.2.0
+**Date:** 2026-04-19 (CB-20260419c — Jetson health compaction, GPU temp)
 **Classification:** IPG Internal Use Only
 **Source:** CB_ICD_v1_7.xlsx reconciled with ARCHITECTURE.md (TRC v3.0); `defines.hpp` canonical v3.X.Y
 **Audience:** IPG engineering staff, ENG GUI developers, firmware developers — all five controllers (MCC, BDC, TMC, FMC, TRC)
@@ -11,6 +11,22 @@
 ---
 
 ## Version History
+
+**v4.2.0 changes (CB-20260419c — Jetson health compaction + GPU temp):**
+- TRC REG1 Jetson health fields compacted int16 → uint8 — resolution sufficient for all values (temps 0–95°C, loads 0–100%); saves 4 bytes.
+- `jetsonTemp` [45–46] int16 → `jetsonTemp` [45] uint8. Source: `thermal_zone0` millidegrees ÷ 1000.
+- `jetsonCpuLoad` [47–48] int16 → `jetsonCpuLoad` [46] uint8. Source: `/proc/stat` delta.
+- `jetsonGpuLoad` [57–58] int16 → `jetsonGpuLoad` [47] uint8. Moved adjacent to other health fields. Source: `/sys/devices/platform/gpu.0/load` ÷ 10. Path corrected from `/sys/devices/gpu.0/load` (was returning 0 silently).
+- `jetsonGpuTemp` uint8 [48] added — NEW. GPU temp °C from `/sys/devices/virtual/thermal/thermal_zone1/temp` millidegrees ÷ 1000. Polled every 5s.
+- `som_serial` uint64 [49–56] — unchanged.
+- RESERVED expands [59–63] 5 bytes → [57–63] 7 bytes. Defined: 59→57, Reserved: 5→7.
+- OSD bottom-right block: 2 rows → 3 rows (SN / CPU / GPU). Load and temp values colour-coded: GREEN <60 / YELLOW 60–79°C or 60–84% / RED ≥80°C or ≥85%.
+- `MSG_TRC.cs`: all four jetson properties `Int16`→`byte`. `ParseMsg` updated. Header comment updated.
+
+**v4.1.0 changes (CB-20260419 — LK tracker + COCO ops):**
+- `0xDB ORIN_ACAM_ENABLE_TRACKERS`: LK (tracker_id=4) fully implemented; `mosseReseed` 3rd byte added.
+- `COCO_ENABLE_OPS` enum added (0x00–0x08).
+- `BDC_TRACKERS`: `LK=4` added.
 
 **v4.0.1 changes (CB-20260416 — AWB assigned, charger V2 fix):**
 - `0xC4 CMD_VIS_AWB` assigned — trigger VIS auto white balance once. No payload. BDC routes to TRC via A2; TRC binary handler calls `cam->runAutoWhiteBalance()`. ASCII equivalent: `AWB`. INT_OPS (in `EXT_CMDS_BDC[]` whitelist). Firmware: `defines.hpp` `CMD_VIS_AWB=0xC4`, `bdc.hpp` whitelist, `trc.hpp/cpp` `SET_AWB()`, `bdc.cpp` handler + serial. C#: `defines.cs` `CMD_VIS_AWB=0xC4`, `bdc.cs` `TriggerAWB()`. TRC: `udp_listener.cpp` binary handler. `ICD_CMDS` alias retired from `types.h` — all TRC code now references `ICD::` directly.
@@ -595,7 +611,7 @@ Scoping differs by codebase (`enum ICD` in C#/THEIA, `enum ICD_CMDS` in TRC, `en
 | 0xD8 | RES_D8 | **RETIRED v3.6.0** — ORIN_SET_TESTPATTERN retired. Test pattern is compile/launch time configuration only. ASCII `TESTSRC CAM1\|CAM2 TEST\|LIVE` on port 5012 covers all ENG use. TRC binary handler was never implemented. | — | TESTSRC CAM1\|CAM2 TEST\|LIVE | — | — | `RES` | RES | RES |
 | 0xD9 | ORIN_ACAM_COCO_CLASS_FILTER | Filter COCO inference to specific class ID. 0xFF = accept all (default). Repurposed from ORIN_ACAM_SET_AI_TRACK_PRIORITY (never implemented). | uint8 class_id (0–79 per COCO 80-class; 0xFF=all) | COCO FILTER <id|ALL> | needs impl | — | `INT_ENG` | BDC, TRC | BDC |
 | 0xDA | ORIN_ACAM_RESET_TRACKB | Reset MOSSE tracker to current preview gate | none | TRACKER RESET | ✓ | ✓ | `INT_OPS` | BDC, TRC | BDC |
-| 0xDB | ORIN_ACAM_ENABLE_TRACKERS | Enable/disable tracker for active camera | uint8 tracker_id (0=AI,1=MOSSE,2=Centroid,3=Kalman,4=LK placeholder); uint8 0/1 tracker_id=4: optional 3rd byte = reseed_interval (LK-02, pending) | TRACKER ON|OFF / LK ON|OFF | ✓ | ✓ | `INT_OPS` | BDC, TRC | BDC |
+| 0xDB | ORIN_ACAM_ENABLE_TRACKERS | Enable/disable tracker for active camera. **ICD v4.1.0 (CB-20260419):** LK (tracker_id=4) fully implemented — "placeholder" label removed. 3rd byte added: `mosseReseed 0x01/0x00` — enables NCC-gated MOSSE template reseed from `lkBbox_` when LK is healthy. ASCII `LK MOSSE ON\|OFF` maps to this byte. | uint8 tracker_id (0=AI,1=MOSSE,2=Centroid,3=Kalman,4=LK); uint8 0/1; [uint8 mosseReseed 0x01/0x00 — LK only, ICD v4.1.0] | TRACKER ON\|OFF / LK ON\|OFF / LK MOSSE ON\|OFF | ✓ | ✓ | `INT_OPS` | BDC, TRC | BDC |
 | 0xDC | ORIN_ACAM_SET_ATOFFSET | Set AT reticle offset | int8 dx, int8 dy (pixels, −128 to 127) | ATOFFSET <x> <y> | ✓ | ✓ | `INT_OPS` | BDC, TRC | BDC |
 | 0xDD | ORIN_ACAM_SET_FTOFFSET | Set FT (fine-track) offset | int8 dx, int8 dy (pixels, −128 to 127) | FTOFFSET <x> <y> | ✓ | ✓ | `INT_OPS` | BDC, TRC | BDC |
 | 0xDE | ORIN_SET_VIEW_MODE | Set compositor output view | uint8 (0=CAM1,1=CAM2,2=PIP4,3=PIP8) | VIEW CAM1|CAM2|PIP|PIP8 | ✓ | ✓ | `INT_OPS` | BDC, TRC | BDC |
@@ -701,18 +717,26 @@ Commands accepted on TRC ASCII port (5012) with no binary ICD equivalent. Send v
 
 ### COCO Commands (active camera, Phase 4)
 
-`COCO LOAD` must precede `COCO ON`. Binary equivalent `0xDF` wires to `LOAD`+`ON` in the ISR lifecycle (not yet implemented — COCO-04).
+`COCO LOAD` must precede `COCO AMBIENT ON` or `COCO TRACK ON`. Binary equivalent `0xDF` wires to `LOAD`+`ON` in the ISR lifecycle (not yet implemented — COCO-04).
 
 | Command | Description |
 |---------|-------------|
 | `COCO LOAD` | Load SSD MobileNet V3 model from `model_data/`, start inference thread. Probes CUDA FP16 backend; falls back to CPU if unavailable. Idempotent — no-op if already loaded. |
 | `COCO UNLOAD` | Stop inference thread and release model. Frees GPU memory. |
-| `COCO ON` | Enable inference on active camera. Requires model loaded. Compositor begins pushing trackbox crops each frame. |
-| `COCO OFF` | Disable inference. Model stays loaded. Flushes last result — OSD DET label clears, telemetry `cocoConfidence` zeroes. |
-| `COCO STATUS` | Print: loaded, enabled, tracking, confidence, classId, class name, drift flag, driftDx, driftDy |
+| `COCO AMBIENT ON\|OFF` | Enable/disable ambient full-frame scan. Model must be loaded. Compositor pushes full frames at `interval` rate; detections latched for OSD display and NEXT/PREV cycle. |
+| `COCO TRACK ON\|OFF` | Enable/disable intra-box track mode. Compositor pushes MOSSE trackbox crops at `interval` rate; drift computed vs crop centre. |
+| `COCO ON` | Legacy alias — enables track mode on active camera. Requires model loaded. |
+| `COCO OFF` | Legacy alias — disables track mode. Model stays loaded. |
+| `COCO NEXT` | Step ambient cycle to next detection (wraps). Moves trackgate preview to selected detection box. |
+| `COCO PREV` | Step ambient cycle to previous detection (wraps). |
+| `COCO RESET` | Clear ambient cycle selection and restore trackgate to default size (256×256) and centre. |
+| `COCO STATUS` | Print: loaded, ambient, track, interval, nms, minArea, maxArea, tracking, ambientDets, cycleIdx, conf, classId, class, drift, driftDx, driftDy |
 | `COCO DRIFT <0.0–1.0>` | Set drift detection threshold as a fraction of `min(bbox.w, bbox.h)`. Default `0.20`. Takes effect immediately on next inference result. |
 | `COCO INTERVAL <1–100>` | Push a crop every Nth fresh camera frame. Rate = `60/N` Hz (camera runs at 60 Hz). Default `3` = 20 Hz. Gated on fresh frames only — not compositor tick rate (100 Hz). |
-| `COCO FILTER <id\|ALL>` | Filter inference to a specific COCO class ID (0–79) or accept all (`ALL`). Maps to `0xD9 ORIN_ACAM_COCO_CLASS_FILTER`. **Not yet implemented.** |
+| `COCO NMS <0.0–1.0>` | NMS IoU overlap threshold. Boxes with IoU above this value are suppressed. Lower = fewer overlapping boxes. Default `0.35`. Runtime-tunable — takes effect on next inference. |
+| `COCO MINAREA <0.0–1.0>` | Minimum detection area as a fraction of frame area. Detections smaller than `frac × W × H` are discarded. Default `0.002` ≈ 1850 px² on 1280×720. Resolution-independent. |
+| `COCO MAXAREA <0.0–1.0>` | Maximum detection area as a fraction of frame area. Detections larger than `frac × W × H` are discarded. Default `0.50` = half frame. |
+| `COCO FILTER <id\|ALL>` | Filter inference to a specific COCO class ID (0–79) or accept all (`ALL`). Maps to `0xD9 ORIN_ACAM_COCO_CLASS_FILTER`. |
 
 ### LK ASCII Commands
 
@@ -722,6 +746,16 @@ Commands accepted on TRC ASCII port (5012) with no binary ICD equivalent. Send v
 | `LK OFF` | Disable LK. Clears all LK state — point set, bbox, drift flag. |
 | `LK STATUS` | Print: enabled, pointCount, flowMag, drift, reseedInterval. |
 | `LK RESEED <0–300>` | Set NCC-gated reseed interval in fresh frames. `0` = disabled (hold points from init only). Default `30` = 0.5s at 60 Hz. Reseed only fires when `nccScore ≥ 0.50` — prevents reseeding onto background when drifted. |
+
+### ENG Debug Injection Commands
+
+ASCII-only commands for OSD symbology verification. Inject fire control and system state without requiring live BDC/MCC traffic. Values overwritten on next `0xE0`/`0xAB` broadcast.
+
+| Command | Description |
+|---------|-------------|
+| `STATE <state>` | Inject system state. Values: `OFF`, `STNDBY`, `ISR`, `COMBAT`, `MAINT`, `FAULT`. OSD top-right STATE row updates immediately. |
+| `MODE <mode>` | Inject gimbal mode. Values: `OFF`, `POS`, `RATE`, `CUE`, `ATRACK`, `FTRACK`. OSD top-right MODE row and reticle arm tips update immediately. |
+| `FCVOTES <mcc_hex> <bdc_hex>` | Inject fire control vote bytes directly. `mcc_hex` = MCC vote bits (e.g. `0xFE`), `bdc_hex` = BDC geometry bits (e.g. `0x80`). Drives reticle colour and interlock message. See FC symbology checkout sequence in Example Bash Usage. |
 
 ---
 
@@ -846,25 +880,39 @@ trc3 TRACKBOX 128 128 640 360        # centre gate on 1280×720 frame
 trc3 TRACKER ON                       # init MOSSE at current trackbox
 trc3 STATUS                           # verify TrackB_Enabled + TrackB_Valid bits
 
-# --- COCO LOAD and enable ---
-trc3 COCO LOAD                        # loads model_data/, starts inference thread
-# wait ~2s for model load, then:
-trc3 COCO ON                          # start pushing trackbox crops
-trc3 COCO STATUS                      # check: loaded=YES enabled=YES interval=3
-# STATUS output includes: loaded, enabled, interval, tracking, conf, classId, class, drift, driftDx, driftDy
+# --- COCO ambient scan (boot flag: --coco-ambient loads + enables on startup) ---
+trc3 COCO LOAD                        # loads model_data/, starts inference thread (~2s)
+trc3 COCO AMBIENT ON                  # enable full-frame ambient scan
+trc3 COCO STATUS                      # check: loaded=YES ambient=YES ambientDets=N
+# STATUS output: loaded, ambient, track, interval, nms, minArea, maxArea,
+#                tracking, ambientDets, cycleIdx, conf, classId, class, drift, driftDx, driftDy
 
-# --- Tune inference rate (default 3 = 20 Hz at 60 Hz camera) ---
-trc3 COCO INTERVAL 6                  # reduce to 10 Hz if CPU load too high
+# --- Ambient cycle: step through detections ---
+trc3 COCO NEXT                        # gate preview moves to highest-confidence detection
+trc3 COCO NEXT                        # step to next
+trc3 COCO PREV                        # step back
+trc3 COCO RESET                       # clear selection, gate returns to 256×256 centre
+
+# --- Start MOSSE tracker from selected ambient detection ---
+trc3 COCO NEXT                        # select detection (gate moves to it)
+trc3 TRACKER ON                       # init MOSSE at gate position (= selected detection)
+
+# --- COCO track mode (intra-box crop inference while tracking) ---
+trc3 COCO TRACK ON                    # enable track mode — requires TRACKER ON
+trc3 COCO STATUS                      # confirm track=YES, watch drift field
+
+# --- Tune inference rate ---
+trc3 COCO INTERVAL 6                  # reduce to 10 Hz if load too high
 trc3 COCO INTERVAL 2                  # increase to 30 Hz for faster response
 trc3 COCO INTERVAL 1                  # every fresh frame = 60 Hz (max)
 
-# --- Monitor inference results via telemetry ---
-# Start 1 Hz telemetry to this host (raw 64-byte UDP on port 5010)
-trc3 REPORT START 1000
-# In another terminal — dump telemetry bytes as hex:
-nc -u -l 5010 | xxd | head -4
-# bytes [58-59] = nccScore (int16_t × 10000) — live as of TRC-25
-# bytes [60-63] = reserved — cocoConfidence not yet in telemetry packet (COCO-04 pending)
+# --- Tune NMS and area filter ---
+trc3 COCO NMS 0.35                    # default — lower removes more overlapping boxes
+trc3 COCO NMS 0.20                    # tighter NMS for dense scenes
+trc3 COCO MINAREA 0.002               # default ~1850px² minimum (1280×720)
+trc3 COCO MINAREA 0.005               # filter small noise boxes
+trc3 COCO MAXAREA 0.50                # default half-frame maximum
+trc3 COCO STATUS                      # confirm nms/minArea/maxArea values took effect
 
 # --- COCO STATUS poll loop ---
 while true; do trc3 COCO STATUS; sleep 2; done
@@ -873,15 +921,25 @@ while true; do trc3 COCO STATUS; sleep 2; done
 trc3 COCO DRIFT 0.15                  # tighten from default 0.20
 trc3 COCO DRIFT 0.30                  # loosen if too noisy
 
-# --- Camera switch test (verifies COCO teardown) ---
-trc3 COCO STATUS                      # note CAM1 state
-trc3 SELECT CAM2                      # COCO disabled + result flushed on CAM1
-trc3 COCO STATUS                      # should show enabled=NO on CAM2 (not re-enabled)
-trc3 SELECT CAM1
-trc3 COCO ON                          # must explicitly re-enable after switch
+# --- Monitor inference results via telemetry ---
+trc3 REPORT START 1000
+# In another terminal — dump telemetry bytes as hex:
+nc -u -l 5010 | xxd | head -4
+# bytes [43-44] = nccScore (int16_t × 10000)
+# bytes [45-46] = jetsonTemp (int16, °C)
+# bytes [47-48] = jetsonCpuLoad (int16, %)
+# bytes [57-58] = jetsonGpuLoad (int16, %)
+# bytes [59-63] = RESERVED
+
+# --- Camera switch ---
+trc3 SELECT CAM2                      # switch to MWIR
+trc3 TESTSRC CAM2 TEST                # switch CAM2 to test pattern (ball)
+trc3 TESTSRC CAM2 LIVE                # switch back to live
+trc3 SELECT CAM1                      # switch back to Alvium
 
 # --- Teardown ---
-trc3 COCO OFF
+trc3 COCO AMBIENT OFF
+trc3 COCO TRACK OFF
 trc3 TRACKER OFF
 trc3 COCO UNLOAD                      # free GPU memory if done for session
 ```
@@ -908,6 +966,84 @@ trc3 LK RESEED 30                     # restore default = every 0.5s
 trc3 LK OFF
 trc3 TRACKER OFF
 ```
+
+### FC Symbology Checkout Sequence
+
+Walks every reticle colour and interlock message in order. Requires OSD ON, reticle enabled, not tracking.
+
+```bash
+trc3 OSD ON
+
+# 1. Abort active — yellow reticle, "ABORT"
+trc3 FCVOTES 0x00 0x00
+
+# 2. Not abort, idle — green reticle, no message
+trc3 FCVOTES 0x02 0x00
+
+# 3. Armed — orange reticle, "ARMED"
+trc3 FCVOTES 0x06 0x00
+
+# --- Trigger pulled interlocks (white reticle) ---
+
+# 4. Trigger, no combat → "INTERLOCK - NOT COMBAT"
+trc3 FCVOTES 0x22 0x00
+
+# 5. + combat, no armed → "INTERLOCK - NOT ARMED"
+trc3 FCVOTES 0xA2 0x00
+
+# 6. + armed, FSM limited → "INTERLOCK - FSM LIMIT"
+trc3 FCVOTES 0xA6 0x00
+
+# 7. FSM clear, above horizon, no LCH → "INTERLOCK - LCH"
+trc3 FCVOTES 0xA6 0x80
+
+# 8. In LCH, no KIZ → "INTERLOCK - KIZ"
+trc3 FCVOTES 0xA6 0x84
+
+# 9. Below horizon, FSM clear, no KIZ → "INTERLOCK - KIZ"
+trc3 FCVOTES 0xA6 0x81
+
+# 10. Below horizon + KIZ → silent transitioning (green reticle, no message)
+trc3 FCVOTES 0xA6 0x83
+
+# 11. Above horizon, LCH + KIZ → silent transitioning
+trc3 FCVOTES 0xA6 0x86
+
+# 12. FIRE_STATE set, not firing → "FC ERROR"
+trc3 FCVOTES 0xAE 0x80
+
+# 13. All votes — red reticle, "FIRE"
+trc3 FCVOTES 0xFE 0x80
+
+# --- Reset ---
+trc3 FCVOTES 0x00 0x00
+trc3 OSD OFF
+```
+
+### OSD STATE/MODE Colour Reference
+
+| Field | Value | Colour |
+|-------|-------|--------|
+| STATE | OFF | WHITE |
+| STATE | STNDBY | DIM_GREY |
+| STATE | ISR | BLUE |
+| STATE | COMBAT | GREEN |
+| STATE | MAINT | YELLOW |
+| STATE | FAULT | RED |
+| MODE | OFF | WHITE |
+| MODE | POS / RATE | BLUE |
+| MODE | CUE | YELLOW |
+| MODE | ATRACK / FTRACK | GREEN |
+| MCC | zero | DIM_GREY |
+| MCC | FIRING | RED |
+| MCC | TRIGGER | WHITE |
+| MCC | ARMED | ORANGE |
+| MCC | ABORT active | YELLOW |
+| MCC | NOT_ABORT, idle | GREEN |
+| BDC | zero | DIM_GREY |
+| BDC | FSM limited | RED |
+| BDC | FSM clear, geo incomplete | YELLOW |
+| BDC | FSM clear, geo clear | GREEN |
 
 > **Note:** `nc -u -w1` sends one UDP packet and exits after 1 s. For interactive sessions use `socat - UDP:$TRC:$PORT`. TRC echoes all `dlog()` output back to the ASCII sender — pipe to a log file for long test sessions: `socat - UDP:$TRC:$PORT | tee trc3_session.log`
 
@@ -1282,9 +1418,11 @@ fixed block (bytes 60–123). Fixed block size: **64 bytes**.
 | 41 | 41 | 42 | 1 | voteBitsMcc | uint8 | MCC fire control vote bits readback (0xAB) |
 | 42 | 42 | 43 | 1 | voteBitsBdc | uint8 | BDC geometry vote bits readback (0xAB) |
 | 43 | 43 | 45 | 2 | nccScore | int16 | NCC quality × 10000 — unpack: value / 10000.0f |
-| 45 | 45 | 47 | 2 | jetsonTemp | int16 | Jetson CPU temp °C |
-| 47 | 47 | 49 | 2 | jetsonCpuLoad | int16 | Jetson CPU load % |
-| 49 | 49 | 57 | 8 | som_serial | uint64 | Jetson SOM serial — read once at TRC startup from `/proc/device-tree/serial-number`, parsed as decimal via `std::stoull`. 0 on parse failure or missing file. Set in `main.cpp` after version_word print, packed in `udp_listener.cpp::buildTelemetry()`. — v4.0.0 (TRC-SOM-SN) |
+| 45 | 45 | 46 | 1 | jetsonTemp | uint8 | Jetson CPU temp °C (0–255). Read from `/sys/devices/virtual/thermal/thermal_zone0/temp` (millidegrees ÷ 1000). — v4.2.0 (CB-20260419c): int16→uint8 |
+| 46 | 46 | 47 | 1 | jetsonCpuLoad | uint8 | Jetson CPU load % (0–100). Computed from `/proc/stat` delta. — v4.2.0 (CB-20260419c): int16→uint8, shifted from [47–48] |
+| 47 | 47 | 48 | 1 | jetsonGpuLoad | uint8 | Jetson GPU load % (0–100). Read from `/sys/devices/platform/gpu.0/load` (0–1000 ÷ 10). — v4.2.0 (CB-20260419c): int16→uint8, moved from [57–58] |
+| 48 | 48 | 49 | 1 | jetsonGpuTemp | uint8 | Jetson GPU temp °C (0–255). Read from `/sys/devices/virtual/thermal/thermal_zone1/temp` (millidegrees ÷ 1000). Polled every 5s. — v4.2.0 (CB-20260419c): NEW |
+| 49 | 49 | 57 | 8 | som_serial | uint64 | Jetson SOM serial — read once at TRC startup from `/proc/device-tree/serial-number`, parsed as decimal via `std::stoull`. 0 on parse failure or missing file. — v4.0.0 (TRC-SOM-SN) |
 | 57 | 57 | 64 | 7 | RESERVED | — | 0x00 — headroom for future fields |
 
 **Defined: 57 bytes. Reserved: 7 bytes. Fixed block: 64 bytes.**
@@ -1293,7 +1431,7 @@ fixed block (bytes 60–123). Fixed block size: **64 bytes**.
 
 ## Key Enumerations
 
-> **Canonical source:** All enumerations below are defined in `defines.hpp` (C++) and `defines.cs` (C#, namespace `CROSSBOW`), both v3.X.Y. Enum names and values are identical across all 5 controllers (MCC, BDC, TMC, FMC, TRC), THEIA HMI, and TRC_ENG_GUI_PRESERVE. Exception: `TMC_DAC_CHANNELS` is absent from FW `pin_defs_tmc.hpp` (use `defines.hpp` instead).
+> **Canonical source:** All enumerations below are defined in `defines.hpp` (C++) and `defines.cs` (C#, namespace `CROSSBOW`), both v3.X.Y. Enum names and values are identical across all 5 controllers (MCC, BDC, TMC, FMC, TRC), THEIA HMI, and CROSSBOW_ENG_GUIS. Exception: `TMC_DAC_CHANNELS` is absent from FW `pin_defs_tmc.hpp` (use `defines.hpp` instead).
 
 ### SYSTEM_STATES
 | Value | Name |

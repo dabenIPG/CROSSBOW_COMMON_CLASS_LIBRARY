@@ -3,9 +3,15 @@
 **Project:** CROSSBOW  
 **Document:** `CROSSBOW_DOCUMENT_REGISTER.md`  
 **Doc #:** IPGD-0001  
-**Version:** 1.6.0  
-**Date:** 2026-04-16  
+**Version:** 1.7.0  
+**Date:** 2026-04-19  
 **Status:** Current  
+
+**v1.7.0 changes (2026-04-19 — CB-20260419b document sweep):**
+- IPGD-0003 (ICD INT_ENG) → 4.1.0 — `0xDB` table row corrected (LK fully implemented, 3rd byte `mosseReseed`); `CROSSBOW_ENG_GUIS` naming
+- IPGD-0006 (ARCH) → 4.0.4 — `CROSSBOW_ENG_GUIS` naming sweep, §3 inventory expanded, GUI-8 closed in §17
+- IPGD-0014 (UG ENG GUI) → 1.4.0 — §4.7 TRC section written, action item closures (CONN-4/MCC-8/FORM-1)
+- IPGD-0019 (changelog) → 4.4.0 — CB-20260419b session entry, GUI-6/GUI-8/TRC-CS-DEAD-IPENDPOINT closed
 
 **v1.6.0 changes (2026-04-16 — CB-20260416 document sweep):**
 - IPGD-0003 (ICD INT_ENG) → 4.0.1 — `0xC4 CMD_VIS_AWB` assigned; `0xAF` V2 description corrected
@@ -59,9 +65,9 @@ This register is the canonical reference for all CROSSBOW project documents. It 
   <td><code>CROSSBOW_ICD_INT_ENG.docx</code></td>
   <td>CROSSBOW ICD — Internal Engineering</td>
   <td>IPGD-0003</td>
-  <td>4.0.1</td>
+  <td>4.1.0</td>
   <td>⚠️ .md current — docx pending regen</td>
-  <td>2026-04-16</td>
+  <td>2026-04-19</td>
   <td><code>CROSSBOW_ICD_INT_ENG.md</code></td>
   <td><code>gen_eng_icd.js</code></td>
 </tr>
@@ -165,9 +171,9 @@ This register is the canonical reference for all CROSSBOW project documents. It 
   <td><code>CROSSBOW_UG_ENG_GUI.docx</code></td>
   <td>CROSSBOW User Guide — Engineering GUI</td>
   <td>IPGD-0014 <sup>†</sup></td>
-  <td>1.3.0</td>
+  <td>1.4.0</td>
   <td>✅ Current</td>
-  <td>2026-04-08</td>
+  <td>2026-04-19</td>
   <td><code>CROSSBOW_UG_ENG_GUI.md</code></td>
   <td><code>gen_user_guides.py</code></td>
 </tr>
@@ -420,9 +426,9 @@ This register is the canonical reference for all CROSSBOW project documents. It 
   <td>—</td>
   <td>CROSSBOW Document Register</td>
   <td>IPGD-0001</td>
-  <td>1.6.0</td>
+  <td>1.7.0</td>
   <td>✅ Current</td>
-  <td>2026-04-16</td>
+  <td>2026-04-19</td>
   <td><code>CROSSBOW_DOCUMENT_REGISTER.md</code></td>
   <td>—</td>
 </tr>

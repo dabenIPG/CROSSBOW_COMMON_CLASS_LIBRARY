@@ -1,230 +1,353 @@
 using System;
-using System.Collections.Generic;
 using System.Diagnostics;
-using System.Linq;
 using System.Net;
 using System.Net.Sockets;
-using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace CROSSBOW
 {
+    // -----------------------------------------------------------------------
+    // TRC — engineering GUI connection to the TRC controller on A2.
+    //
+    // A2 protocol (ICD v4.1.0):
+    //   Port    : 10018
+    //   Magic   : 0xCB 0x49 (internal)
+    //   Framing : 8-byte min request, 521-byte fixed response
+    //   CRC     : CRC-16/CCITT (poly 0x1021, init 0xFFFF), big-endian
+    //   SEQ     : rolling uint8, client-managed, replay window = 32
+    //
+    // Client model:
+    //   Register   : send 0xA4 FRAME_KEEPALIVE on connect
+    //   Keep-alive : send 0xA4 every KEEPALIVE_INTERVAL_MS (must be < 60s)
+    //   Subscribe  : send 0xA0 {0x01} SET_UNSOLICITED after registering
+    //   Poll       : send 0xA4 {0x01} for one-shot REG1 (rate-gated 1 Hz)
+    //
+    // All outgoing commands are wrapped in BuildA2Frame().
+    // All incoming frames are validated against magic, length, and CRC.
+    //
+    // Legacy port 5010 — RETIRED. Pending deprecation (TRC-M9).
+    // -----------------------------------------------------------------------
     public class TRC
     {
+        // -------------------------------------------------------------------
+        // Configuration
+        // -------------------------------------------------------------------
+        public string IP   { get; private set; } = IPS.TRC;
+        public int    Port { get; private set; } = 10018;   // A2 engineering port
 
-        public CAMERA[] Cameras { get; set; } =
-            [
-            new CAMERA(BDC_CAM_IDS.VIS),
-            new CAMERA(BDC_CAM_IDS.MWIR),
-            ];
-        public string IP { get; private set; } = IPS.TRC;
-        public int Port { get; private set; } = 5010;   // LEGACY — pending deprecation (TRC-M9)
+        // Frame magic bytes — internal A2
+        private const byte MAGIC_HI = 0xCB;
+        private const byte MAGIC_LO = 0x49;
 
-        private UdpClient udpClient;
-        private IPEndPoint ipEndPoint;
-        private CancellationTokenSource ts;
-        private CancellationToken ct;
-        public DateTime lastMsgRx { get; private set; } = DateTime.UtcNow;
-        public VERSION Version { get; private set; } = new VERSION();
-        public SYSTEM_STATES System_State { get; set; } = SYSTEM_STATES.OFF;
-        public BDC_MODES BDC_Mode { get; set; } = BDC_MODES.OFF;
-        public BDC_CAM_IDS Active_CAM { get; set; } = BDC_CAM_IDS.VIS;
+        // Local bind IP — internal NIC (<100) so TRC firmware accepts the source address.
+        private string LocalIP => CrossbowNic.GetInternalIP();
 
-        public Single HB_us { get; private set; } = 0;
-        public double RX_HB_us { get; private set; } = 0;
+        // Keepalive — re-send 0xA4 every 30s to stay within firmware's 60s liveness window.
+        private const int    KEEPALIVE_INTERVAL_MS = 30_000;
+        private const double STALE_WARN_MS         = 2000.0;
 
-        public UInt16 dt { get; private set; } = 0;
-        public Int16 CPUTemp { get; private set; } = 0;
-        public double streamFPS { get; private set; } = 0;
-        public Size streamSize { get; private set; } = new Size(1280, 720);
-        public PointF streamScale { get; set; } = new PointF(1f, 1f);
-        public bool isConnected { get; private set; } = false;
-        public bool UnsolicitedMode { set { SendUDPBytes(new byte[] { (byte)ICD.SET_UNSOLICITED, Convert.ToByte(value) }); } }
-        public bool CueFlag { set { SendUDPBytes(new byte[] { (byte)ICD.ORIN_ACAM_SET_CUE_FLAG, Convert.ToByte(value) }); } }
-        private Int64 _ntpTime { get; set; } = 0;
-        public DateTime ntpTime { get { return DateTimeOffset.FromUnixTimeMilliseconds(_ntpTime).UtcDateTime; } }
-        public Point TrackPoint { get; private set; } = new Point(0, 0);
-        public Point AT_OFFSET_RB { get; private set; } = new Point(0, 0);
-        public Point FT_OFFSET_RB { get; private set; } = new Point(0, 0);
-        public Single VIS_FOCUS_SCORE { get; private set; } = 0;
+        // -------------------------------------------------------------------
+        // State
+        // -------------------------------------------------------------------
+        private UdpClient               _udp;
+        private IPEndPoint              _remoteEP;
+        private CancellationTokenSource _ts;
+        private CancellationToken       _ct;
+        private byte                    _seq = 0;
+        private DateTime _lastKeepalive  = DateTime.MinValue;
+        private bool     _wasConnected   = false;
+        private DateTime _connectedSince = DateTime.MinValue;
+        private DateTime _dropTime       = DateTime.MinValue;
+        private int      _dropCount      = 0;
 
-        public bool HUD_Overlays { set { SendUDPBytes(new byte[] { (byte)ICD.ORIN_SET_STREAM_OVERLAYS, Convert.ToByte(value) }); } }
+        public bool     isConnected    { get; private set; } = false;
+        public DateTime ConnectedSince { get { return _connectedSince; } }
+        public int      DropCount      { get { return _dropCount; } }
+        public DateTime lastMsgRx      { get; private set; } = DateTime.UtcNow;
+        public double   HB_RX_ms      { get; private set; } = 0;
 
-        public void setTrackBox(Point pt)
-        {
-            //// set a track box around mouse of 100x75 pixels for test
-            //// [cmd, int16 x, int16 y, int16 w, int 16 h]
-
-            //Int16 x = (Int16)pt.X;
-            //Int16 y = (Int16)pt.Y;
-
-            //Int16 w = 100;
-            //Int16 h = 100;
-            //if (x > streamSize.Width - w || x > streamSize.Height - h)
-            //{
-            //    Debug.WriteLine($"Invalid Track Point chose [{x}, {y}]");
-            //    return;
-            //}
-
-            ////x -= 50;  // center on track box?
-            ////y -= 50;
-
-            //byte[] msg = new byte[9];
-            //msg[0] = (byte)ICD.ORIN_ACAM_SET_TRACKBOX;
-            //BitConverter.GetBytes((Int16)pt.X).CopyTo(msg, 1);
-            //BitConverter.GetBytes((Int16)pt.Y).CopyTo(msg, 3);
-            //BitConverter.GetBytes(w).CopyTo(msg, 5);
-            //BitConverter.GetBytes(h).CopyTo(msg, 7);
-            //SendUDPBytes(msg);
-        }
-
-        public byte StatusBits { get; private set; } = 0;
-
+        public MSG_TRC       LatestMSG    { get; private set; } = new MSG_TRC();
+        public SYSTEM_STATES System_State { get { return LatestMSG.System_State; } }
+        public BDC_MODES     BDC_Mode     { get { return LatestMSG.BDC_Mode; } }
 
         public TRC() { }
 
+        // -------------------------------------------------------------------
+        // Start / Stop
+        // -------------------------------------------------------------------
         public void Start()
         {
-            ts = new CancellationTokenSource();
-            ct = ts.Token;
-            Debug.WriteLine("Starting trackController Listener");
-            backgroundUDPRead();
+            _ts = new CancellationTokenSource();
+            _ct = _ts.Token;
+
+            // Randomise starting SEQ to avoid landing in the firmware's stale
+            // replay window from the previous session (window = ±32 of last_seq).
+            _seq = (byte)new Random().Next(33, 224);   // 33–223: clear of both wrap edges
+
+            Debug.WriteLine("TRC: starting listener");
+            _ = BackgroundUDPRead();
+            _ = KeepaliveLoop();
         }
 
         public void Stop()
         {
-            Debug.WriteLine("Stopping trackController Listener");
-            ts.Cancel();
+            Debug.WriteLine("TRC: stopping listener");
+            _ts?.Cancel();
         }
-        private async Task backgroundUDPRead()
+
+        // -------------------------------------------------------------------
+        // BackgroundUDPRead — receive loop (runs on thread pool)
+        // -------------------------------------------------------------------
+        private async Task BackgroundUDPRead()
         {
-
-            // Start a task - this runs on the background thread...
-            Task task = Task.Factory.StartNew(async () =>
+            await Task.Run(async () =>
             {
-                udpClient = new UdpClient(Port);
-                ipEndPoint = new IPEndPoint(IPAddress.Parse(IP), Port);
-                isConnected = true;
+                _udp      = new UdpClient();
+                _udp.Client.Bind(new IPEndPoint(IPAddress.Parse(LocalIP), 0));  // pin to internal NIC
+                _remoteEP = new IPEndPoint(IPAddress.Parse(IP), Port);
+                _udp.Connect(_remoteEP);
+                Debug.WriteLine($"TRC: UDP connected ({LocalIP} → {IP}:{Port})");
 
-                Thread.Sleep(50);
-                UnsolicitedMode = true;
+                // Single 0xA4 FRAME_KEEPALIVE registers this client in the firmware's
+                // client table. Does NOT auto-subscribe — user must tick UnSolicited checkbox.
+                Send(BuildA2Frame((byte)ICD.FRAME_KEEPALIVE));
+                _lastKeepalive = DateTime.UtcNow;
+                Debug.WriteLine("TRC: registration sent (0xA4)");
 
-                Debug.WriteLine("UDP Connected");
-                do
+                while (!_ct.IsCancellationRequested)
                 {
-                    if (ct.IsCancellationRequested)
+                    try
                     {
-                        // another thread decided to cancel
-                        Debug.WriteLine("task canceled");
-                        isConnected = false;
-                        udpClient.Close();
-                        Debug.WriteLine("UDP Closed");
+                        var result = await _udp.ReceiveAsync(_ct);
+                        byte[] frame = result.Buffer;
+
+                        if (frame.Length == MSG_TRC.FRAME_RESPONSE_LEN)
+                        {
+                            // Any valid-length frame from firmware counts as liveness
+                            isConnected = true;
+                            if (!_wasConnected)
+                            {
+                                _wasConnected   = true;
+                                _connectedSince = DateTime.UtcNow;
+                                Debug.WriteLine("TRC: connection established");
+                            }
+                            HB_RX_ms  = (DateTime.UtcNow - lastMsgRx).TotalMilliseconds;
+                            lastMsgRx = DateTime.UtcNow;
+
+                            LatestMSG.Parse(frame);   // validates magic, CRC, status; routes to ParseMsg internally
+                        }
+                        else
+                        {
+                            Debug.WriteLine($"TRC: unexpected frame length {frame.Length}");
+                        }
+                    }
+                    catch (OperationCanceledException)
+                    {
                         break;
                     }
-
-                    //if (udpClient.Available > 0)
-                    //{
-                    //byte[] rxBuff = udpClient.Receive(ref ipEndPoint);
-                    var res = await udpClient.ReceiveAsync();
-                    byte[] rxBuff = res.Buffer;
-
-                    int rxLen = rxBuff.Length;
-                    //Debug.WriteLine($"UDP RX: {rxLen} bytes");
-                    if (rxLen > 0)
+                    catch (Exception ex)
                     {
-
-
-                        RX_HB_us = (DateTime.UtcNow - lastMsgRx).TotalMicroseconds;
-                        lastMsgRx = DateTime.UtcNow;
-                                                
-                        // ── ICD v1.7 session 4 TelemetryPacket (64 bytes) ──────────────
-                        // NOTE: port 5010 is LEGACY and pending deprecation.
-                        // TRC telemetry is now embedded in BDC REG1 and parsed
-                        // via MSG_TRC.ParseMsg() — prefer that path for new code.
-                        int ndx = 0;
-                        byte cmd     = rxBuff[ndx]; ndx++;                                              // [0]  cmd (0xA1)
-                        UInt32 verWord = BitConverter.ToUInt32(rxBuff, ndx); ndx += sizeof(UInt32);     // [1-4] version_word
-                        System_State = (SYSTEM_STATES)rxBuff[ndx]; ndx++;                              // [5]  systemState
-                        BDC_Mode     = (BDC_MODES)rxBuff[ndx]; ndx++;                                  // [6]  systemMode
-                        HB_us        = (Single)BitConverter.ToUInt16(rxBuff, ndx); ndx += sizeof(UInt16); // [7-8] HB_ms (uint16)
-                        dt           = BitConverter.ToUInt16(rxBuff, ndx); ndx += sizeof(UInt16);      // [9-10] dt_us
-                        StatusBits   = rxBuff[ndx]; ndx++;                                              // [11] overlayMask
-                        streamFPS    = (double)BitConverter.ToUInt16(rxBuff, ndx) / 100.0; ndx += sizeof(UInt16); // [12-13] fps x100
-                        CPUTemp      = BitConverter.ToInt16(rxBuff, ndx); ndx += sizeof(Int16);        // [14-15] deviceTemp
-                        Active_CAM   = (BDC_CAM_IDS)rxBuff[ndx]; ndx++;                               // [16] camid
-
-                        for (int i = 0; i < Cameras.Length; i++)
-                        {
-                            Cameras[i].StatusBits = rxBuff[ndx]; ndx++;                                // [17,19] status_cam
-                            Cameras[i].TrackBits  = rxBuff[ndx]; ndx++;                                // [18,20] track_cam
-                        }
-
-                        int tx = BitConverter.ToInt16(rxBuff, ndx); ndx += sizeof(Int16);              // [21-22] tx
-                        int ty = BitConverter.ToInt16(rxBuff, ndx); ndx += sizeof(Int16);              // [23-24] ty
-                        TrackPoint = new Point(tx, ty);
-
-                        int atx = (sbyte)rxBuff[ndx]; ndx++;                                           // [25] atX0
-                        int aty = (sbyte)rxBuff[ndx]; ndx++;                                           // [26] atY0
-                        int ftx = (sbyte)rxBuff[ndx]; ndx++;                                           // [27] ftX0
-                        int fty = (sbyte)rxBuff[ndx]; ndx++;                                           // [28] ftY0
-                        AT_OFFSET_RB = new Point(atx, aty);
-                        FT_OFFSET_RB = new Point(ftx, fty);
-
-                        VIS_FOCUS_SCORE = BitConverter.ToSingle(rxBuff, ndx); ndx += sizeof(Single);   // [29-32] focusScore (float)
-                        _ntpTime = BitConverter.ToInt64(rxBuff, ndx); ndx += sizeof(Int64);            // [33-40] ntpEpochTime
-                        // [41-48] voteBitsMcc, voteBitsBdc, nccScore, jetsonTemp, jetsonCpuLoad
-                        ndx += 8;
-                        // [49-63] RESERVED
-                        ndx += 15;
-
-
-
-
-
-
+                        Debug.WriteLine($"TRC: receive error: {ex.Message}");
                     }
-                    //}
                 }
-                while (!ct.IsCancellationRequested);
-            }, ct);
+                isConnected = false;
+                _udp.Close();
+                Debug.WriteLine("TRC: UDP closed");
+            }, _ct);
         }
-        public void SendUDPBytes(byte[] msg)
+
+        // -------------------------------------------------------------------
+        // KeepaliveLoop — runs independently of the receive loop.
+        // Fires every KEEPALIVE_INTERVAL_MS regardless of packet activity.
+        // Send() resets _lastKeepalive so user commands suppress the next tick.
+        // -------------------------------------------------------------------
+        private async Task KeepaliveLoop()
         {
-            udpClient.Send(msg, IP, Port);
+            using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(KEEPALIVE_INTERVAL_MS));
+            try
+            {
+                while (await timer.WaitForNextTickAsync(_ct))
+                {
+                    SendKeepalive();
+
+                    bool stale = isConnected &&
+                        (DateTime.UtcNow - lastMsgRx).TotalMilliseconds > STALE_WARN_MS;
+
+                    if (isConnected && !_wasConnected)
+                    {
+                        var downTime = (_dropCount > 0 && _dropTime != DateTime.MinValue)
+                            ? (DateTime.UtcNow - _dropTime).TotalSeconds : 0.0;
+                        _connectedSince = DateTime.UtcNow;
+                        _wasConnected   = true;
+                        if (_dropCount > 0)
+                            Debug.WriteLine($"TRC: connection restored — was down {downTime:0.0}s");
+                    }
+
+                    if (stale && _wasConnected && _connectedSince != DateTime.MinValue
+                        && (DateTime.UtcNow - _connectedSince).TotalMilliseconds > KEEPALIVE_INTERVAL_MS)
+                    {
+                        _dropTime  = DateTime.UtcNow;
+                        _dropCount++;
+                        _wasConnected = false;
+                        Debug.WriteLine($"TRC: connection lost — drop #{_dropCount} after {(DateTime.UtcNow - _connectedSince).TotalSeconds:0.0}s uptime");
+                    }
+                }
+            }
+            catch (OperationCanceledException) { /* normal shutdown */ }
         }
-        public void SetSystemState(SYSTEM_STATES _state)
+
+        // -------------------------------------------------------------------
+        // BuildA2Frame — wrap a command payload in a framed A2 request.
+        // FRAME_RESPONSE_LEN, PAYLOAD_OFFSET, STATUS_OK live on MSG_TRC.
+        //
+        // Request layout:
+        //   [0]     MAGIC_HI
+        //   [1]     MAGIC_LO
+        //   [2]     SEQ_NUM  (auto-incremented)
+        //   [3]     CMD_BYTE
+        //   [4–5]   PAYLOAD_LEN  uint16 LE
+        //   [6+]    PAYLOAD      (may be empty)
+        //   [last2] CRC-16/CCITT BE
+        // -------------------------------------------------------------------
+        private byte[] BuildA2Frame(byte cmd, byte[] payload = null)
         {
-            SendUDPBytes(new byte[] { (byte)ICD.SET_SYSTEM_STATE, (byte)_state });
+            payload ??= Array.Empty<byte>();
+            int payloadLen = payload.Length;
+            int frameLen   = 6 + payloadLen + 2;   // header + payload + CRC
+
+            byte[] frame = new byte[frameLen];
+            frame[0] = MAGIC_HI;
+            frame[1] = MAGIC_LO;
+            frame[2] = _seq++;
+            frame[3] = cmd;
+            frame[4] = (byte)( payloadLen       & 0xFF);   // LE low
+            frame[5] = (byte)((payloadLen >> 8)  & 0xFF);   // LE high
+
+            if (payloadLen > 0)
+                Array.Copy(payload, 0, frame, 6, payloadLen);
+
+            // CRC over bytes [0 .. frameLen-3]
+            ushort crc = CrcHelper.Crc16(frame, frameLen - 2);
+            frame[frameLen - 2] = (byte)((crc >> 8) & 0xFF);   // BE high
+            frame[frameLen - 1] = (byte)( crc        & 0xFF);   // BE low
+
+            return frame;
         }
-        public void SetGimbalMode(BDC_MODES _mode)
+
+        private void Send(byte[] frame)
         {
-            SendUDPBytes(new byte[] { (byte)ICD.SET_GIMBAL_MODE, (byte)_mode });
+            if (_udp == null) return;
+            try
+            {
+                _udp.Send(frame);
+            }
+            catch (Exception ex) { Debug.WriteLine($"TRC: send error: {ex.Message}"); }
         }
-        public void SetActiveCamera(BDC_CAM_IDS _id)
+
+        // 0xA4 FRAME_KEEPALIVE — register/refresh liveness without changing subscription state.
+        private void SendKeepalive()
         {
-            SendUDPBytes(new byte[] { (byte)ICD.ORIN_CAM_SET_ACTIVE, (byte)_id });
+            Send(BuildA2Frame((byte)ICD.FRAME_KEEPALIVE));
+            Debug.WriteLine("TRC: keepalive (0xA4) sent");
+            _lastKeepalive = DateTime.UtcNow;
         }
-        public void SetTrackerEnable(BDC_TRACKERS _tracker, bool _en)
+
+        // -------------------------------------------------------------------
+        // ICD commands — verified against ICD v4.1.0
+        // -------------------------------------------------------------------
+
+        // 0xA0 SET_UNSOLICITED — register (true) or deregister (false) for unsolicited stream
+        public bool UnsolicitedMode
         {
-            SendUDPBytes(new byte[] { (byte)ICD.ORIN_ACAM_ENABLE_TRACKERS, Convert.ToByte(_tracker), Convert.ToByte(_en) });
+            set { Send(BuildA2Frame((byte)ICD.SET_UNSOLICITED, new[] { (byte)(value ? 1 : 0) })); }
         }
-        public void SetFireStatus(byte status)
+
+        // 0xA2 SET_NTP_CONFIG
+        // 0 bytes  = force resync on current server
+        // 1 byte   = set primary server last octet + resync
+        // 2 bytes  = set primary + fallback last octets + resync
+        public void SetNtpConfig(byte? primaryOctet = null, byte? fallbackOctet = null)
         {
-            SendUDPBytes(new byte[] { (byte)ICD.SET_BCAST_FIRECONTROL_STATUS, status });
+            byte[] payload = primaryOctet == null  ? Array.Empty<byte>() :
+                             fallbackOctet == null ? new[] { primaryOctet.Value } :
+                                                     new[] { primaryOctet.Value, fallbackOctet.Value };
+            Send(BuildA2Frame((byte)ICD.SET_NTP_CONFIG, payload));
+        }
+
+        // 0xA5 SET_SYSTEM_STATE
+        public void SetSystemState(SYSTEM_STATES state)
+        {
+            Send(BuildA2Frame((byte)ICD.SET_SYSTEM_STATE, new[] { (byte)state }));
+        }
+
+        // 0xA6 SET_GIMBAL_MODE
+        public void SetGimbalMode(BDC_MODES mode)
+        {
+            Send(BuildA2Frame((byte)ICD.SET_GIMBAL_MODE, new[] { (byte)mode }));
+        }
+
+        // 0xD0 ORIN_CAM_SET_ACTIVE — select active camera (VIS/MWIR)
+        public void SetActiveCamera(BDC_CAM_IDS id)
+        {
+            Send(BuildA2Frame((byte)ICD.ORIN_CAM_SET_ACTIVE, new[] { (byte)id }));
+        }
+
+        // 0xD3 ORIN_SET_STREAM_OVERLAYS — send HUD_OVERLAY_FLAGS bitmask directly
+        public void SetOverlayMask(byte mask)
+        {
+            Send(BuildA2Frame((byte)ICD.ORIN_SET_STREAM_OVERLAYS, new[] { mask }));
+        }
+
+        // 0xD4 ORIN_ACAM_SET_CUE_FLAG
+        public bool CueFlag
+        {
+            set { Send(BuildA2Frame((byte)ICD.ORIN_ACAM_SET_CUE_FLAG, new[] { (byte)(value ? 1 : 0) })); }
+        }
+
+        // 0xD5 ORIN_ACAM_SET_TRACKGATE_SIZE — set trackgate dimensions in pixels
+        public void SetTrackGateSize(byte w, byte h)
+        {
+            Send(BuildA2Frame((byte)ICD.ORIN_ACAM_SET_TRACKGATE_SIZE, new[] { w, h }));
+        }
+
+        // 0xD7 ORIN_ACAM_SET_TRACKGATE_CENTER — set trackgate center (uint16 x LE, uint16 y LE)
+        // Use SetTrackGateSize() separately to change dimensions.
+        public void setTrackBox(Point pt)
+        {
+            byte[] px = BitConverter.GetBytes((UInt16)pt.X);
+            byte[] py = BitConverter.GetBytes((UInt16)pt.Y);
+            Send(BuildA2Frame((byte)ICD.ORIN_ACAM_SET_TRACKGATE_CENTER,
+                new[] { px[0], px[1], py[0], py[1] }));
+        }
+
+        // 0xDB ORIN_ACAM_ENABLE_TRACKERS — enable/disable tracker for active camera
+        public void SetTrackerEnable(BDC_TRACKERS tracker, bool en)
+        {
+            Send(BuildA2Frame((byte)ICD.ORIN_ACAM_ENABLE_TRACKERS,
+                new[] { (byte)tracker, (byte)(en ? 1 : 0) }));
+        }
+
+        // 0xDB ORIN_ACAM_ENABLE_TRACKERS — ICD v4.1.0: 3rd byte mosseReseed
+        // NCC-gated MOSSE template reseed from LK bbox. LK tracker only.
+        public void SetTrackerEnable(BDC_TRACKERS tracker, bool en, bool mosseReseed)
+        {
+            Send(BuildA2Frame((byte)ICD.ORIN_ACAM_ENABLE_TRACKERS,
+                new[] { (byte)tracker, (byte)(en ? 1 : 0), (byte)(mosseReseed ? 1 : 0) }));
+        }
+
+        // 0xC4 CMD_VIS_AWB — trigger VIS auto white balance once, no payload (CB-20260416e)
+        public void TriggerAWB()
+        {
+            Send(BuildA2Frame((byte)ICD.CMD_VIS_AWB));
+        }
+
+        // 0xE0 SET_BCAST_FIRECONTROL_STATUS — fire control vote bytes (INT_ENG)
+        // voteBitsMcc: VOTE_BITS_MCC bitmask; voteBitsBdc: VOTE_BITS_BDC bitmask
+        public void SetFireStatus(byte voteBitsMcc, byte voteBitsBdc = 0)
+        {
+            Send(BuildA2Frame((byte)ICD.SET_BCAST_FIRECONTROL_STATUS,
+                new[] { voteBitsMcc, voteBitsBdc }));
         }
     }
-
-    public class VERSION
-    {
-        public UInt32 major { get; set; }
-        public UInt32 minor { get; set; }
-        public UInt32 year { get; set; }
-        public UInt32 month { get; set; }
-        public UInt32 day { get; set; }
-        public override string ToString()
-        {
-            return string.Format($"{major}.{minor}.{day}.{month}.{year}");
-        }
-    }
-
 }

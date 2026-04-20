@@ -1,12 +1,12 @@
 # CROSSBOW — Cross-Application Consistency Summary
 
-**Document Version:** 3.0.5
-**Date:** 2026-03-17 (updated session 24)
-**ICD Reference:** v3.1.0
-**ARCHITECTURE Reference:** v3.0.3
+**Document Version:** 4.0.0
+**Date:** 2026-04-19 (CB-20260419b)
+**ICD Reference:** v4.1.0 (IPGD-0003)
+**ARCHITECTURE Reference:** v4.0.4 (IPGD-0006)
 
 **Scope:** Consistency audit across all five embedded controllers (MCC, BDC, TMC, FMC, TRC)
-and both C# applications (THEIA, TRC_ENG_GUI_PRESERVE). Covers namespace, naming, wire format,
+and both C# applications (THEIA, CROSSBOW_ENG_GUIS). Covers namespace, naming, wire format,
 parsing, logging, and transport path decisions.
 
 ---
@@ -16,10 +16,12 @@ parsing, logging, and transport path decisions.
 | Application | Namespace | Transport | Controllers | Entry Point |
 |-------------|-----------|-----------|-------------|-------------|
 | **THEIA** | `CROSSBOW` | A3 / port 10050 / magic `0xCB 0x58` | MCC, BDC only | `Parse(data)` → internal `ParseA3` |
-| **TRC_ENG_GUI_PRESERVE** | `CROSSBOW` | A2 / port 10018 / magic `0xCB 0x49` | All 5 controllers | `Parse(data)` → internal `ParseA2` |
-| **HYPERION** | `Hyperion` | UDP:10009 (CUE output to THEIA) | External sensors only | N/A — separate stack |
+| **CROSSBOW_ENG_GUIS** | `CROSSBOW_ENG_GUIS` (shell) / `CROSSBOW` (lib) | A2 / port 10018 / magic `0xCB 0x49` | All 5 controllers | `Parse(data)` → internal `ParseA2` |
+| **HYPERION** | `Hyperion` | UDP:15009 (CUE output to THEIA) | External sensors only | N/A — separate stack |
 
-Both THEIA and TRC_ENG_GUI_PRESERVE use the **shared CROSSBOW class library** (`namespace CROSSBOW`).
+CROSSBOW_ENG_GUIS is the MDI shell (`frmCROSSBOW_ENG`). Child forms: `frmMCC`, `frmBDC`, `frmTMC`, `frmFMC`, `frmTRC` (A2 controller GUIs); `frmHEL` (laser direct TCP); `frmNTP_PTP` (time source management); `frmFWProgrammer` (firmware programmer).
+
+Both THEIA and CROSSBOW_ENG_GUIS use the **shared CROSSBOW class library** (`namespace CROSSBOW`).
 The shared library is the single source of truth for all message parsing.
 
 ---
@@ -31,8 +33,8 @@ The shared library is the single source of truth for all message parsing.
 | Namespace | `CROSSBOW` | ✅ Both apps updated |
 | Class naming | `MSG_XXX` (e.g. `MSG_MCC`, `MSG_BDC`) | ✅ Canonical |
 | File naming | `MSG_XXX.cs` | ✅ Canonical |
-| THEIA old names | `MCC_MSG`, `BDC_MSG`, etc. | ✅ Shared library canonical — THEIA uses shared lib |
-| ENG GUI old namespace | `CROSSBOW_ENG_GUIS` | ✅ Updated to `CROSSBOW` |
+| ENG GUI project name | `CROSSBOW_ENG_GUIS` | ✅ MDI shell project |
+| ENG GUI old name | `TRC_ENG_GUI_PRESERVE` | 🚫 Retired — use `CROSSBOW_ENG_GUIS` |
 
 ---
 
@@ -57,80 +59,66 @@ mcc.Parse(payload); // raw 512-byte A2 payload, magic 0xCB 0x49
 `MAGIC_LO` is computed from `TransportPath` — not hardcoded. `ParseA3` and `ParseA2` are
 `private` — cross-wiring is impossible at the call site.
 
+`MSG_TRC` uses the same pattern: `Parse(byte[] frame)` validates magic/CRC/status on the
+521-byte A2 framed response, then calls `ParseMsg(frame, PAYLOAD_OFFSET)` internally. The
+BDC embedded path calls `ParseMsg(bdcReg1, 60)` directly — no frame wrapper needed.
+
 ---
 
 ## 4. Message Class Audit — All Levels
 
 ### Level 0 — No Dependencies
 
-| Class | Block | Size | THEIA name | ENG GUI name | Status |
-|-------|-------|------|-----------|--------------|--------|
-| `MSG_BATTERY` | MCC REG1 [34–44] | 11 B | `BATTERY_MSG` | `MSG_BATTERY` | ✅ Verified + copied to THEIA |
-| `MSG_IPG` | MCC REG1 [45–65] | 21 B | `IPG_MSG` | `MSG_IPG` | ✅ Verified + copied to THEIA |
-| `MSG_GIMBAL` | BDC REG1 [20–58] | 39 B | `GIMBAL_MSG` | `MSG_GIMBAL` | ✅ Verified + copied to THEIA |
+| Class | Block | Size | Status |
+|-------|-------|------|--------|
+| `MSG_BATTERY` | MCC REG1 [34–44] | 11 B | ✅ Verified |
+| `MSG_IPG` | MCC REG1 [45–65] | 21 B | ✅ Verified + TCP direct path (v3.5.0) |
+| `MSG_GIMBAL` | BDC REG1 [20–58] | 39 B | ✅ Verified |
 
 ### Level 1 — Single Dependency
 
 | Class | Block | Size | Status |
 |-------|-------|------|--------|
-| `MSG_TMC` | MCC REG1 [66–129] | 64 B | ✅ Verified — copy ENG GUI → THEIA + namespace |
-| `MSG_CMC` | MCC REG1 [213–244] | 32 B | ✅ Verified — copy ENG GUI → THEIA + namespace |
-| `MSG_GNSS` | MCC REG1 [135–212] | 78 B | ✅ Verified — copy ENG GUI → THEIA + namespace |
-| `MSG_FMC` | BDC REG1 [169–232] | 64 B | ✅ Merged + generated (session 15) |
-| `MSG_TRC` | BDC REG1 [60–123] | 64 B | ✅ Verified — ENG GUI renamed from `TRC_MSG` |
+| `MSG_TMC` | MCC REG1 [66–129] | 64 B | ✅ V1/V2 hardware abstraction (v3.3.9). Packed struct via `MemoryMarshal`. `FW_VERSION_STRING`, `HW_REV_Label`, `IsV1`/`IsV2`, `epochTime`, `activeTimeSourceLabel`. |
+| `MSG_CMC` | MCC REG1 [213–244] | 32 B | ✅ Verified |
+| `MSG_GNSS` | MCC REG1 [135–212] | 78 B | ✅ `Altitude_HAE`/`Altitude_MSL` properties added |
+| `MSG_FMC` | BDC REG1 [169–232] | 64 B | ✅ V1/V2 hardware abstraction (v3.5.2). `HEALTH_BITS`/`POWER_BITS`/`HW_REV`/`TPH_*` added. |
+| `MSG_TRC` | BDC REG1 [60–123] | 64 B | ✅ A2 framed `Parse()` + `ParseMsg()` dual entry. `jetsonGpuLoad` [57–58] (v4.0.3). `FW_VERSION_STRING`, `SomSerialLabel`, `epochTime`. CB-20260419b. |
 
 ### Level 2 — Multiple Dependencies (dispatchers)
 
 | Class | Status | Notes |
 |-------|--------|-------|
-| `MSG_MCC` | ✅ Generated session 16 — deployed, HW verify pending | 13 changes applied. TransportPath pattern. TMC embedding [66–129] verified. |
-| `MSG_BDC` | ✅ Generated session 16 — deployed, HW verify pending | 11 changes applied. TransportPath pattern. FMC [169–232], TRC [60–123] pass-through. |
+| `MSG_MCC` | ✅ Deployed — HW verified | V1/V2 abstraction. `HEALTH_BITS`/`POWER_BITS`. `LASER_MODEL` byte [255]. `isTrainingMode`. |
+| `MSG_BDC` | ✅ Deployed — HW verified | V1/V2 abstraction. `HEALTH_BITS`/`POWER_BITS`. `HW_REV`/`TEMP_*` thermistors. HB counters [396–403]. FMC/TRC pass-through. |
 
 ---
 
 ## 5. MSG_MCC — Change Summary
 
-Base: ENG GUI `MSG_MCC.cs` (`namespace CROSSBOW`, `public class MSG_MCC`)
-
 | # | Change | Status |
 |---|--------|--------|
 | 1 | A3 frame constants | ✅ `MAGIC_HI=0xCB, FRAME_RESPONSE_LEN=521, PAYLOAD_OFFSET=7, STATUS_OK=0x00` |
-| 2 | `ParseA3` (private) | ✅ A3 magic/CRC/STATUS → `ParseMSG01(frame, PAYLOAD_OFFSET+1)` |
-| 3 | `ParseA2` (private) | ✅ Raw A2 payload — `if (cmd == ICD.GET_REGISTER1)` |
-| 4 | `Parse()` public dispatcher | ✅ Routes to ParseA3 or ParseA2 via `TransportPath` |
-| 5 | `TransportPath` + `MagicLo` | ✅ `MagicLo` computed — `0x58` A3, `0x49` A2 |
-| 6 | `LastFrameStatus` property | ✅ `public byte LastFrameStatus { get; private set; } = 0xFF` |
-| 7 | Remove `ParseMSG02` | ✅ GET_REGISTER2 deprecated — deleted |
-| 8 | Fix `CMCMsg` call | ✅ `CMCMsg.ParseMsg()` → `CMCMsg.Parse()` |
-| 9 | `SW_VERSION_STRING` | ✅ `v` prefix removed — `$"{major}.{minor}.{patch}"` |
-| 10 | `dt_us > dtmax` logging | ✅ `MSG_MCC:` prefix + `if (isVerboseLogEnabled) Log?.Debug(...)` |
-| 11 | Sub-object names | ✅ `MSG_BATTERY`, `MSG_IPG`, `MSG_TMC`, `MSG_GNSS`, `MSG_CMC` |
-| 12 | Stale NOTE comments | ✅ Both instances removed — Battery/IPG updates complete, ICD v3.0.0 is authoritative |
-| 13 | `using System` | ✅ Added |
-
-**TMC embedding verified:** `TMCMsg.Parse(msg, ndx)` enters at payload[66] on A2 path, frame[73] on A3 path — both correct per ICD.
+| 2 | `Parse()` public dispatcher | ✅ Routes to ParseA3 or ParseA2 via `TransportPath` |
+| 3 | `LastFrameStatus` property | ✅ |
+| 4 | V1/V2 hardware abstraction | ✅ ICD v3.4.0 — `HEALTH_BITS` byte [9], `POWER_BITS` byte [10], `HW_REV` byte [254] |
+| 5 | `LASER_MODEL` byte [255] | ✅ ICD v3.5.0 |
+| 6 | `isTrainingMode` | ✅ ICD v3.5.0 — `HEALTH_BITS` bit 3 |
+| 7 | `FW_VERSION_STRING` | ✅ No `v` prefix |
+| 8 | Sub-object names | ✅ `MSG_BATTERY`, `MSG_IPG`, `MSG_TMC`, `MSG_GNSS`, `MSG_CMC` |
 
 ---
 
 ## 6. MSG_BDC — Change Summary
 
-Base: ENG GUI `MSG_BDC.cs` (`namespace CROSSBOW`, `public class MSG_BDC`)
-
 | # | Change | Status |
 |---|--------|--------|
-| 1 | A3 frame constants | ✅ Same as MSG_MCC |
-| 2 | `ParseA3` (private) | ✅ Full magic/CRC/STATUS validation, liveness inside STATUS_OK block |
-| 3 | `ParseA2` (private) | ✅ Raw A2 payload — `if (cmd == ICD.GET_REGISTER1)` |
-| 4 | `Parse()` public dispatcher | ✅ Routes via `TransportPath` |
-| 5 | `TransportPath` + `MagicLo` | ✅ Computed — `0x58` A3, `0x49` A2 |
-| 6 | `LastFrameStatus` property | ✅ Set in ParseA3 only |
-| 7 | `dt_us > 25000` logging | ✅ `MSG_BDC:` prefix + Serilog. `dtmax` high-water only — not reset |
-| 8 | `isFMCEnabled` alias | ✅ `public bool isFMCEnabled { get { return isFSMEnabled; } }` |
-| 9 | `isFMCReady` alias | ✅ `public bool isFMCReady { get { return isFSMReady; } }` |
-| 10 | Sub-object names | ✅ `MSG_GIMBAL`, `MSG_TRC`, `MSG_FMC` |
-| 11 | `FW_VERSION_STRING` | ✅ `v` prefix removed |
-| 12 | `using System` | ✅ Added |
-| 13 | ParseMSG01 header comment | ✅ Full ICD v3.0.0 BDC REG1 layout comment added |
+| 1 | A3 frame constants + `Parse()` dispatcher | ✅ Same pattern as MSG_MCC |
+| 2 | V1/V2 hardware abstraction | ✅ ICD v3.5.1 — `HEALTH_BITS` byte [10], `POWER_BITS` byte [11], `HW_REV` byte [392] |
+| 3 | BDC thermistors | ✅ ICD v3.5.1 — `TEMP_RELAY` [393], `TEMP_BAT` [394], `TEMP_USB` [395] |
+| 4 | HB counters | ✅ ICD v4.0.0 — `HB_NTP`/`HB_FMC_ms`/`HB_TRC_ms`/`HB_MCC_ms`/`HB_GIM_ms`/`HB_FUJI_ms`/`HB_MWIR_ms`/`HB_INCL_ms` at [396–403] |
+| 5 | FMC/TRC pass-through | ✅ `MSG_TRC.ParseMsg(bdcReg1, 60)`, `MSG_FMC.ParseMsg(bdcReg1, 169)` |
+| 6 | `FW_VERSION_STRING` | ✅ No `v` prefix |
 
 ---
 
@@ -141,30 +129,25 @@ Base: ENG GUI `MSG_BDC.cs` (`namespace CROSSBOW`, `public class MSG_BDC`)
 | Namespace | `CROSSBOW` |
 | Class naming | `MSG_XXX` |
 | Transport entry | Single `Parse(byte[] data)` — routes internally via `TransportPath` |
-| `TransportPath` default | `A3_External` |
-| `SW_VERSION_STRING` / `FW_VERSION_STRING` | No `v` prefix — `$"{major}.{minor}.{patch}"` |
-| Logging pattern | `Debug.WriteLine($"MSG_XXX: ...")` always + `if (isVerboseLogEnabled) Log?.Debug(...)` |
-| `isVerboseLogEnabled` | Gates `Log?.Debug` and non-critical `Debug.WriteLine` |
-| `ParseMSG02` | Deleted — GET_REGISTER2 deprecated |
-| `CMCMsg` embedded call | `CMCMsg.Parse(msg, ndx)` — not `ParseMsg` |
-| CMD dispatch | `if (cmd == ICD.GET_REGISTER1)` — no switch, REG2 deprecated |
+| `FW_VERSION_STRING` / `SW_VERSION_STRING` | No `v` prefix — `$"{major}.{minor}.{patch}"` |
+| CMD_BYTE dispatch (FW-C10) | Accept `0x00` (v4.0.0+) and `0xA1` (legacy) as valid REG1 |
+| Controller client pattern | `BuildA2Frame()` / `CrcHelper.Crc16()` / `CrossbowNic.GetInternalIP()` / `KeepaliveLoop()` / `LatestMSG` |
 | `isFMCEnabled`/`isFMCReady` | Legacy aliases on `MSG_BDC` — new code uses `isFSMEnabled`/`isFSMReady` |
 
 ---
 
 ## 8. Wire Format Consistency — All 5 Controllers
 
-All verified at ICD v3.0.0. All controllers on `VERSION_PACK` semver encoding.
-
 | Controller | IP | FW Version | A1 → | A2 | A3 | VERSION_PACK |
 |------------|----|-----------|------|----|----|--------------|
-| MCC | .10 | 3.0.1 | BDC | ✅ | ✅ | `VERSION_PACK(3,0,1)` |
-| BDC | .20 | 3.0.1 | TRC (fire ctl) | ✅ | ✅ | `VERSION_PACK(3,0,1)` |
-| TMC | .12 | 3.0.2 | MCC | ✅ | — | `VERSION_PACK(3,0,2)` — intentional patch |
-| FMC | .23 | 3.0.1 | BDC | ✅ | — | `VERSION_PACK(3,0,1)` |
-| TRC | .22 | 3.0.1 | BDC | ✅ | — | `VERSION_PACK(3,0,1)` |
+| MCC | .10 | 4.0.0 | BDC | ✅ | ✅ | `VERSION_PACK(4,0,0)` |
+| BDC | .20 | 4.0.0 | TRC (fire ctl) | ✅ | ✅ | `VERSION_PACK(4,0,0)` |
+| TMC | .12 | 4.0.0 | MCC | ✅ | — | `VERSION_PACK(4,0,0)` |
+| FMC | .23 | 4.0.0 | BDC | ✅ | — | `VERSION_PACK(4,0,0)` |
+| TRC | .22 | 4.0.3 | BDC | ✅ | — | `VERSION_PACK(4,0,3)` |
 
-VERSION_PACK unpack logic verified in both THEIA and ENG GUI (NEW-3 ✅).
+**IsV4 gate:** `FW_VERSION >> 24 >= 4` — detects ICD v3.6.0 command space.
+**FW-C10:** REG1 CMD_BYTE is `0x00` in v4.0.0+ (was `0xA1`). All parsers accept both.
 
 ### Sub-Register Embedding
 
@@ -183,39 +166,37 @@ VERSION_PACK unpack logic verified in both THEIA and ENG GUI (NEW-3 ✅).
 
 ## 9. defines.hpp / defines.cs — Canonical State
 
-`defines.hpp` is the canonical source for all 5 embedded controllers.
-`defines.cs` is the canonical source for both C# applications.
-Both are at version 3.X.Y. All constants, enums, and command bytes are aligned.
+Both at version 4.0.0 (CB-20260419b). All constants, enums, and command bytes aligned.
 
-### New enums added session 15 (now canonical in both files)
+### Key enums
 
-`MWIR_RUN_STATES`, `BDC_TRACKERS`, `AF_MODES`, `VIEW_MODES`, `TMC_DAC_CHANNELS`,
-`HUD_OVERLAY_BITS`, `VOTE_BITS_MCC`, `VOTE_BITS_BDC`
+`SYSTEM_STATES`, `BDC_MODES`, `BDC_CAM_IDS`, `MCC_DEVICES`, `BDC_DEVICES`,
+`BDC_TRACKERS` (incl. `LK=4` v4.1.0), `DEBUG_LEVELS`, `TMC_FAN_SPEEDS`,
+`TMC_PUMP_SPEEDS`, `TMC_VICORS` (PUMP1/PUMP2), `TMC_LCM_SPEEDS`, `TMC_LCMS`,
+`TMC_DAC_CHANNELS`, `AF_MODES`, `MCC_POWER`, `LASER_MODEL`, `VIEW_MODES`,
+`HUD_OVERLAY_FLAGS`, `VOTE_BITS_MCC`, `VOTE_BITS_BDC`, `MWIR_RUN_STATES`,
+`COCO_ENABLE_OPS` (v4.1.0), `ICD` (full command space)
 
-### Key corrections in canonical defines
+### ICD v3.6.0 command space restructuring summary
 
-| Item | Before | After |
-|------|--------|-------|
-| `TMC_PUMP_SPEEDS` | LO=800/MED=1007/HI=1200 (in BDC/MCC/FMC) | LO=350/MED=500/HI=800 (TMC authoritative) |
-| `0xE0/0xE1` device 7 | Reserved | BDC |
-| `SYSTEM_STATES` MAINT | `0xAA` | `0x04` |
-| `SYSTEM_STATES` FAULT | `0xFF` | `0x05` |
-| `0xA4` | `RES_A4` | `EXT_FRAME_PING` |
-| `BDC_DEVICES::RTCLOCK=7` | Conflict | HW present, FW deprecated — enum retained |
+| Byte | Assignment | Notes |
+|------|------------|-------|
+| `0xA1` | `SET_HEL_TRAINING_MODE` | Moved from `0xAF` |
+| `0xAB` | `SET_FIRE_REQUESTED_VOTE` | Moved from `0xE6` |
+| `0xC4` | `CMD_VIS_AWB` | Assigned CB-20260416e |
+| `0xD1` | `ORIN_ACAM_COCO_ENABLE` | Moved from `0xDF` |
+| `0xE0` | `SET_BCAST_FIRECONTROL_STATUS` | Moved from `0xAB` |
 
 ---
 
-## 10. ICD Scope Labels — Renamed in ICD v3.0.2 (NEW-13 ✅)
+## 10. ICD Scope Labels
 
-Rename applied in ICD v3.0.2 (session 17). All command tables, column headers, scope
-definitions, and prose updated.
-
-| Old | New | Meaning | Port |
-|-----|-----|---------|------|
-| `EXT` | `INT_OPS` | Operator-accessible — THEIA and integrators | A3 / 10050 |
-| `INT` | `INT_ENG` | Engineering-only — ENG GUI, maintenance | A2 / 10018 |
-| `RES` | `RES` | Reserved — no distribution | — |
-| *(new)* | `EXT_OPS` | External integration — HYPERION/CUE→THEIA | UDP / 10009 |
+| Label | Meaning | Port |
+|-------|---------|------|
+| `INT_OPS` | Operator-accessible — THEIA and integrators | A3 / 10050 |
+| `INT_ENG` | Engineering-only — ENG GUI, maintenance | A2 / 10018 |
+| `RES` | Reserved — no distribution | — |
+| `EXT_OPS` | External integration — HYPERION/CUE→THEIA | UDP / 15009 |
 
 ---
 
@@ -223,25 +204,24 @@ definitions, and prose updated.
 
 | Document | Version | Status |
 |----------|---------|--------|
-| `ARCHITECTURE.md` | 3.0.3 | ✅ Current — session 24 (THEIA .208, NTP direct, ICD filenames updated) |
-| `CROSSBOW_ICD_INT_ENG.md` | 3.1.0 | ✅ Current — session 24 (full review and corrections) |
-| `CROSSBOW_ICD_EXT_OPS.md` | 3.1.0 | ✅ Current — session 24 (full review and corrections) |
-| `CROSSBOW_ICD_INT_OPS.md` | 3.1.0 | ✅ Current — session 24 (full review and corrections) |
-| `ExtOpsFrame.cs` | — | ✅ Generated session 17 — shared EXT_OPS framing layer (`namespace CROSSBOW`) |
-| `CueReceiver.cs` | — | ✅ Generated session 17 — THEIA UDP:10009 listener + `0xAF`/`0xAB` responder |
-| `CueSender.cs` | — | ✅ Generated session 17 — integrator CUE sender + `TheiaStatus`/`TheiaPosAtt` parsers |
-| `MSG_GNSS.cs` | — | ✅ Updated session 17 — `LatestPostion.alt` now HAE; `Altitude_HAE`/`Altitude_MSL` properties added |
-| `THEIA_USER_GUIDE.md` | 1.0.0 | ✅ Generated session 18 — ICD ref fixed, Xbox controller section added |
-| `ENG_GUI_USER_GUIDE.md` | 1.0.0 | ✅ Generated session 18 |
-| `HYPERION_USER_GUIDE.md` | 1.0.0 | ✅ Generated session 18 |
-| `EMPLACEMENT_GUI_USER_GUIDE.md` | 1.0.0 | ✅ Complete — session 19 (§2 Horizon Generator, §4 Platform Registration) |
-| `GSTREAMER_INSTALL.md` | 3.0.0 | ✅ Current — session 16 |
-| `defines.hpp` | 3.X.Y | ✅ Canonical — session 15 |
-| `defines.cs` | — | ✅ Canonical — session 15 |
-| `MSG_MCC.cs` | — | ✅ Generated session 16 — deployed, HW verify pending |
-| `MSG_BDC.cs` | — | ✅ Generated session 16 — deployed, HW verify pending |
-| `TRC_MIGRATION.md` | v4 | ✅ Current — session 15 |
-| `CROSS_APP_SUMMARY.md` | 3.0.5 | ✅ This document — updated session 24 |
+| `ARCHITECTURE.md` (IPGD-0006) | 4.0.4 | ✅ Current — CB-20260419b |
+| `CROSSBOW_ICD_INT_ENG.md` (IPGD-0003) | 4.1.0 | ✅ Current — CB-20260419 |
+| `CROSSBOW_ICD_EXT_OPS.md` (IPGD-0005) | 3.3.0 | ✅ Current |
+| `CROSSBOW_ICD_INT_OPS.md` (IPGD-0004) | 3.6.1 | ✅ Current — CB-20260416 |
+| `CROSSBOW_CHANGELOG.md` (IPGD-0019) | 4.4.0 | ✅ Current — CB-20260419b |
+| `CROSSBOW_DOCUMENT_REGISTER.md` (IPGD-0001) | 1.7.0 | ✅ Current — CB-20260419b |
+| `CROSSBOW_UG_ENG_GUI_draft.md` (IPGD-0014) | 1.4.0 | ✅ Current — §4.7 TRC complete |
+| `JETSON_SETUP.md` (IPGD-0020) | 2.2.1 | ✅ Current |
+| `CROSSBOW_GNSS_CONFIG.md` (IPGD-0018) | 1.0.0 | ✅ Current |
+| `defines.hpp` | 4.0.0 | ✅ Canonical |
+| `defines.cs` | 4.0.0 | ✅ Canonical — CB-20260419b |
+| `MSG_MCC.cs` | — | ✅ Deployed — HW verified |
+| `MSG_BDC.cs` | — | ✅ Deployed — HW verified |
+| `MSG_TMC.cs` | — | ✅ V1/V2 abstraction — HW verified |
+| `MSG_FMC.cs` | — | ✅ V1/V2 abstraction — HW verified |
+| `MSG_TRC.cs` | — | ✅ A2 framed Parse() + jetsonGpuLoad — CB-20260419b |
+| `trc.cs` | — | ✅ Port 10018, GUI-8 compliant — verified CB-20260419b |
+| `frmTRC.cs` | — | ✅ LatestMSG pattern, TMC-parallel — CB-20260419b |
 
 ---
 
@@ -249,35 +229,10 @@ definitions, and prose updated.
 
 | ID | Item | Priority |
 |----|------|----------|
-| NEW-9 | `MSG_MCC.cs` — HW verify | ⏳ Deployed — HW verify pending |
-| NEW-10 | `MSG_BDC.cs` — HW verify | ⏳ Deployed — HW verify pending |
 | NEW-18 | CRC cross-platform verification | ⏳ Pre-HW test |
-| ~~NEW-20~~ | ~~Verify UI version string — no double `v` prefix~~ | ✅ Done |
-| ~~NEW-21~~ | ~~Migrate `isFMCEnabled` → `isFSMEnabled` in THEIA~~ | ✅ Done |
-| ~~NEW-22~~ | ~~Update `SESSION_ACTION_ITEMS.md`~~ | ✅ Done — session 18 |
-| ~~NEW-23~~ | ~~THEIA — EXT_OPS frame parser~~ | ✅ Done — `CueReceiver.cs` |
-| ~~NEW-24~~ | ~~THEIA — `0xAF` status response~~ | ✅ Done — `CueReceiver.SendStatusResponse()` |
-| ~~NEW-25~~ | ~~THEIA — `0xAB` POS/ATT response~~ | ✅ Done — `CueReceiver.SendPosAttReport()` |
-| ~~NEW-26~~ | ~~HYPERION — EXT_OPS CUE sender~~ | ✅ Done — `CueSender.cs` |
-| ~~NEW-27~~ | ~~HYPERION — `0xAF` parser~~ | ✅ Done — `TheiaStatus` with `IsFireReady` |
-| ~~NEW-28~~ | ~~HYPERION — `0xAB` parser~~ | ✅ Done — `TheiaPosAtt` in `CueSender.cs` |
-| NEW-29 | `EMPLACEMENT_GUI_USER_GUIDE.md` | ✅ Complete — session 19 |
-| NEW-31 | `frmMain.cs` lines 3356/3376 — `SET_LCH_VOTE` arg swap | ⏳ Fix before HW test |
-| NEW-33 | MCC VOTE BITS byte [3] bit 0: replace `isLaserTotalHW_Vote_rb` with `isNotBatLowVoltage()` — affects all three ICDs | ⏳ Pending FW change |
-| NEW-35 | FW verify: all firmware targets NTP `.33` directly | ⏳ Pre-HW verify |
+| NEW-31 | `frmMain.cs` — `SET_LCH_VOTE` arg swap | ⏳ Fix before HW test |
 | NEW-32 | `lch.cs` longitude `% 180.0` before negation | ⏳ Low |
-| S19-33 | Word ICD version realignment 1.x → 3.x.y | ⏳ Queued |
-| S19-34 | Build spec three-document split + integrator tier model | ⏳ Design resolved session 19 |
-| S19-35 | Build spec scope labels + new commands | ⏳ Queued |
-| S19-36 | User guide Word build spec | ⏳ Queued |
-| S19-37 | Merge with CROSSBOW MINI USER MANUAL v20260205 | ⏳ Queued |
-| ~~NEW-30~~ | ~~`MSG_GNSS.cs` HAE fix~~ | ✅ Done — `Altitude_HAE` / `Altitude_MSL` properties added |
-| ~~NEW-3~~ | ~~VERSION_PACK unpack verify~~ | ✅ Done |
-| ~~NEW-12~~ | ~~TransportPath enum + constructor~~ | ✅ Done |
-| ~~NEW-13~~ | ~~ICD scope label rename~~ | ✅ Done — ICD v3.0.2 |
-| ~~NEW-15~~ | ~~`ICD_EXTERNAL_OPS_v3.0.1.md`~~ | ✅ Done — session 17 |
-| ~~NEW-16~~ | ~~`ICD_EXTERNAL_INT_v3.0.2.md`~~ | ✅ Done — session 17 |
-| ~~NEW-17~~ | ~~Three user guides (THEIA, ENG GUI, HYPERION)~~ | ✅ Done — session 18 |
+| S19-33–37 | Word ICD / user guide build spec updates | ⏳ Queued |
 
 ---
 
@@ -285,16 +240,8 @@ definitions, and prose updated.
 
 | ID | Item | Priority |
 |----|------|----------|
-| ~~TRC-M1~~ | ~~Rewrite `TelemetryPacket` struct~~ | ✅ Done |
-| ~~TRC-M5~~ | ~~Create `trc_frame.hpp`~~ | ✅ Done |
-| ~~TRC-M6~~ | ~~`trc_a1.cpp` A1 TX/RX upgrade~~ | ✅ Done |
-| ~~TRC-M7~~ | ~~`udp_listener.cpp` A2 framing~~ | ✅ Done — full frame parse, SEQ replay, client registry, unsolicited thread |
-| ~~#5~~ | ~~`0xB7` to `EXT_CMDS_BDC[]`~~ | ✅ Done — already present in `bdc.hpp` EXT_CMDS_BDC[] |
-| ~~#6~~ | ~~Fix `telemetry.h` camid comment~~ | ✅ Done — `BDC_CAM_IDS: VIS=0, MWIR=1` correct |
-| ~~#7~~ | ~~FSM position reconciliation (int16 vs int32)~~ | ✅ Closed — int16 commanded (DAC range fits) and int32 readback (ADC with sign inversion) are correct distinct types. Not a bug. |
-| #14 | GNSS bug — `RUNONCE` case 6 and `EXEC_UDP` use wrong socket | ⏳ HW-present — two bugs confirmed in source: case 6 uses `udpRxClient`/`PortRx` instead of `udpTxClient`/`PortTx`; `EXEC_UDP` uses `udpRxClient` instead of `udpTxClient`. Fix when in front of HW. Cosmetic: `START` error string line 36 also misnames socket. |
-| ~~#37~~ | ~~`fmc.cpp` a2_seq_init=false on re-registration~~ | ✅ Done — applied in `udp_listener.cpp` SET_UNSOLICITED handler |
-| ~~TRC-M8~~ | ~~`udp_listener.cpp` binary handlers for `OFFSETX`, `OFFSETY`, `AUTOMODEREGION`~~ | ⚠ Deprecated — commands require camera stop/restart, incompatible with streaming. ASCII port 5012 access retained. Binary handlers will not be implemented. |
-| — | Mutex on `buildTelemetry()` race condition | Low |
-| TRC-M9 | Deprecate TRC port 5010 | Low |
-| ~~—~~ | ~~Old MCC bench unit HW issue (`voteBitsMcc=0x10`)~~ | ✅ Closed |
+| TRC-M9 | Deprecate TRC port 5010 | Low — after sustained HW validation of port 10018 |
+| FW-14 | GNSS socket bug — `RUNONCE` case 6 / `EXEC_UDP` socket | 🟡 Verify on HW |
+| NEW-38d | TRC PTP integration — `ptp4l`, `TIME_BITS`, `MSG_TRC.cs` | ⏳ Pending |
+| TRC-COCO-MODE1 | COCO ambient scan binary handler `0xD1` | 🟡 Medium |
+| TRC-LK-UPGRADE | LK-guided MOSSE reseed | 🟡 Medium |

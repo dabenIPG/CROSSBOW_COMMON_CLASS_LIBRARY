@@ -6,8 +6,8 @@ using System.Threading.Tasks;
 
 // ─── CROSSBOW ICD defines.cs ──────────────────────────────────────────────────
 // Authoritative shared enum and command byte definitions for all CROSSBOW C#
-// applications (THEIA HMI, TRC3_ENG_GUI). Canonical source of truth — matches
-// ICD v3.6.0 and defines.hpp v3.X.Y.
+// applications (THEIA HMI, CROSSBOW_ENG_GUIS). Canonical source of truth — matches
+// ICD v3.6.0 and defines.hpp v4.0.0.
 // Do not edit per-application. All changes must be reflected in the ICD document
 // and kept in sync with defines.hpp.
 // Version: 4.0.0 | Date: 2026-04-12 | CB-20260412
@@ -118,6 +118,7 @@ namespace CROSSBOW
         MOSSE = 1,  // TrackB — primary operational tracker
         CENT = 2,
         KALMAN = 3,  // not implemented
+        LK = 4,      // Lucas-Kanade optical flow — fully implemented (CB-20260419)
     };
 
     public enum AF_MODES
@@ -125,6 +126,21 @@ namespace CROSSBOW
         OFF = 0,
         CONT = 1,
         ONCE = 2,
+    }
+    // 0xD1 ORIN_ACAM_COCO_ENABLE sub-op byte — dual-mode COCO control (ICD v4.1.0 CB-20260419)
+    // uint8 op [, uint8 param (op-dependent)]
+    // Binary handler pending TRC firmware (TRC-COCO-MODE1). ASCII COCO commands fully implemented.
+    public enum COCO_ENABLE_OPS : byte
+    {
+        OFF = 0x00,  // COCO OFF (all modes)
+        ON = 0x01,  // COCO ON (ambient + track both)
+        AMBIENT = 0x02,  // ambient full-frame scan only; param: 0=off 1=on
+        TRACK = 0x03,  // intra-box track drift indicator only; param: 0=off 1=on
+        NEXT = 0x04,  // cycle to next ambient detection (no param)
+        PREV = 0x05,  // cycle to previous ambient detection (no param)
+        RESET = 0x06,  // clear cycle selection, return trackgate to centre (no param)
+        DRIFT = 0x07,  // set drift threshold; param: encoded float (see ICD)
+        INTERVAL = 0x08,  // set inference interval divisor; param: uint8 [1–N]
     }
     // 0xE8 TMS_SET_DAC_VALUE — dac payload byte 0
     // Also used by ENG GUI to send direct DAC channel commands.
@@ -208,7 +224,7 @@ namespace CROSSBOW
     {
         UNKNOWN = 0x00,
         YLM_3K = 0x01,   // bit 0 — YLM-3000-SM-VV
-        YLM_6K = 0x02,   // bit 1 — YLR-6000
+        YLM_6K = 0x02,   // bit 1 — YLM-6000-U3-SM
     }
 
     public static class LaserModelExt
@@ -253,7 +269,7 @@ namespace CROSSBOW
         SET_BDC_HORIZ = 0xAC,  //	VECTOR OF FLOATS HORIZ ELEVATION	float[360]
         SET_HEL_POWER = 0xAD, // SETS LASER POWER    uint8 [0 100]
         CLEAR_HEL_ERROR = 0xAE, // CLEAR LASER ERROR None
-        SET_CHARGER = 0xAF,  // Assigned v3.6.0. Merges 0xE3 (PMS_CHARGER_ENABLE) and 0xED (PMS_SET_CHARGER_LEVEL). Level required on every call. V1 only — V2 returns STATUS_CMD_REJECTED (no charger I2C). uint8 level: 0=disable 10=low 30=med 55=high
+        SET_CHARGER = 0xAF,  // Assigned v3.6.0. Merges 0xE3 (PMS_CHARGER_ENABLE) and 0xED (PMS_SET_CHARGER_LEVEL). Level required on every call. V1: GPIO+I2C level control. V2: GPIO enable only — level 0=disable, non-zero=enable (no I2C on V2). uint8 level: 0=disable 10=low 30=med 55=high
 
         // RESERVING 0xB FOR BDC COMMAND
         RES_B0 = 0xB0,  // ⚠ RETIRED v3.6.0 — SET_BDC_REINIT superseded by SET_REINIT (0xA9). Returns STATUS_CMD_REJECTED pending FW-C8.
@@ -293,7 +309,7 @@ namespace CROSSBOW
 
         // RESERVING 0xD FOR ORIN/TRACKER COMMANDS
         ORIN_CAM_SET_ACTIVE = 0xD0,  // ACTIVE CAMERA
-        ORIN_ACAM_COCO_ENABLE = 0xD1,  // Moved from 0xDF (v3.6.0). Enable/disable COCO inference. uint8 op [, uint8 param]
+        ORIN_ACAM_COCO_ENABLE = 0xD1,  // Moved from 0xDF (v3.6.0). Dual-mode COCO control — ambient full-frame scan + intra-box track drift indicator. uint8 op (COCO_ENABLE_OPS); uint8 param (op-dependent). TRC binary handler pending (TRC-COCO-MODE1). ASCII fully implemented.
         RES_D2 = 0xD2,  // ⚠ RETIRED v3.6.0 — ORIN_SET_STREAM_60FPS retired; framerate is compile/launch time only. ASCII FRAMERATE covers ENG use.
         ORIN_SET_STREAM_OVERLAYS = 0xD3,  // STREAM OVERLAY BITMASK — see HUD_OVERLAY_FLAGS enum
         ORIN_ACAM_SET_CUE_FLAG = 0xD4,  // byte 0/1
@@ -303,7 +319,7 @@ namespace CROSSBOW
         RES_D8 = 0xD8,  // ⚠ RETIRED v3.6.0 — ORIN_SET_TESTPATTERNS retired; ASCII TESTSRC covers ENG use; TRC binary handler never implemented.
         ORIN_ACAM_COCO_CLASS_FILTER = 0xD9,  // filter COCO inference to class ID  uint8 (0-79; 0xFF=all) //
         ORIN_ACAM_RESET_TRACKB = 0xDA, //  	RESET TRACK B TO CURRENT TRACK BOX  none
-        ORIN_ACAM_ENABLE_TRACKERS = 0xDB,  // ENABLE TRACKERS FOR ACTIVE CAMERA
+        ORIN_ACAM_ENABLE_TRACKERS = 0xDB,  // uint8 tracker_id (BDC_TRACKERS); uint8 0/1 enable; [uint8 mosseReseed 0x01/0x00] — 3rd byte enables NCC-gated MOSSE template reseed from LK bbox (ICD v4.1.0). ASCII: LK MOSSE ON|OFF.
         ORIN_ACAM_SET_ATOFFSET = 0xDC,  // SET AT OFFSET FOR ACTIVE CAMERA
         ORIN_ACAM_SET_FTOFFSET = 0xDD,  // SET FT OFFSET FOR ACTIVE CAMERA
         ORIN_SET_VIEW_MODE = 0xDE,  // VIEW MODE — 0=CAM1, 1=CAM2, 2=PIP4, 3=PIP8
@@ -340,10 +356,10 @@ namespace CROSSBOW
         RES_F9 = 0xF9,  //
         BDC_SET_STAGE_HOME = 0xFA,  //	FOCUS STAGE WAIST HOME	uint32 pos
         FMC_SET_STAGE_POS = 0xFB,  // FOCUS STAGE POSITION	uint32 pos	
-        FMC_STAGE_CALIB = 0xFC, // FOCUS STAGE CALIBRATE	None
-        FMC_SET_STAGE_ENABLE = 0xFE, // FOCUS STAGE ENABLE	byte 0/1
-        RES_FD = 0xFD,  //
-        RES_FF = 0xFF,	// FSM REGISTER RESPONSE 
+        FMC_STAGE_CALIB = 0xFC,  // FOCUS STAGE CALIBRATE — none
+        RES_FD = 0xFD,
+        FMC_SET_STAGE_ENABLE = 0xFE,  // FOCUS STAGE ENABLE — byte 0/1
+        RES_FF = 0xFF,  // FSM register response
 
     }
 

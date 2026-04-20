@@ -2,12 +2,12 @@
 
 **Document:** `CROSSBOW_UG_ENG_GUI.md`
 **Doc #:** IPGD-0014
-**Version:** 1.3.0
-**Date:** 2026-04-08
+**Version:** 1.4.0
+**Date:** 2026-04-19
 **Classification:** CONFIDENTIAL — IPG Internal Use Only
 **Audience:** IPG engineering staff, integration engineers
-**ICD Reference:** `CROSSBOW_ICD_INT_ENG` (IPGD-0003) v3.4.0 — full INT_ENG and INT_OPS command set
-**Architecture Reference:** `ARCHITECTURE.md` (IPGD-0006) v3.3.4 — network topology, framing protocol, port reference
+**ICD Reference:** `CROSSBOW_ICD_INT_ENG` (IPGD-0003) v4.1.0 — full INT_ENG and INT_OPS command set
+**Architecture Reference:** `ARCHITECTURE.md` (IPGD-0006) v4.0.4 — network topology, framing protocol, port reference
 
 ---
 
@@ -36,7 +36,7 @@
 > | MCC-5 | All forms + THEIA | 🔲 Open | Audit device status / readiness / HB field parity across all windows and THEIA |
 > | MCC-6 | `mcc.cs` | ✅ Done | CMD_BYTE gate on A2 receive path — `lastMsgRx`, `HB_RX_ms`, `Parse()` now gated on `0xA1` only |
 > | MCC-7 | `frmMCC.cs` | ✅ Done | Auto-check `chk_MCC_UnSolEnable` on connect |
-> | MCC-8 | `bdc.cs`, `tmc.cs` | ✅ Done | CMD_BYTE gate applied to BDC and TMC A2 receive paths. FMC and TRC pending when those forms are built. |
+> | MCC-8 | `bdc.cs`, `tmc.cs`, `trc.cs` | ✅ Done | CMD_BYTE gate applied to BDC, TMC, and TRC A2 receive paths. FMC pending. |
 > | MCC-9 | `frmMCC.cs` | 🔲 Open | NTP config button hardcoded to `.8` primary — replace with text inputs (NTP-1) |
 >
 > **BDC form action items:**
@@ -60,14 +60,14 @@
 > | CONN-1 | `bdc.cs` | ✅ Done | Connection tracking — established/lost/restored logging with uptime and drop time |
 > | CONN-2 | `frmBDC.cs`, `frmBDC_Designer.cs` | ✅ Done | CONN uptime + DROPS counter in TIMING panel |
 > | CONN-3 | `mcc.cs`, `frmMCC.cs`, `frmMCC_Designer.cs` | ✅ Done | MCC parity with BDC connection tracking |
-> | CONN-4 | `tmc.cs`, `frmTMC.cs`, `frmTMC_Designer.cs` | ✅ Done | TMC parity with BDC connection tracking. FMC/TRC pending when those forms are built. |
+> | CONN-4 | `trc.cs`, `frmTRC.cs`, `frmTRC_Designer.cs` | ✅ Done | TRC parity with BDC connection tracking — complete CB-20260419b. All five controllers now have standardised connection model. |
 > | CONN-5 | `bdc.cs` | 🔲 Open | Investigate BDC 660s drop — monitor MCC/TMC for same pattern. Possible: firmware slot eviction, network blip, BDC watchdog. Check whether `SET_UNSOLICITED` needs resending on reconnect. |
 >
 > **Form layout action items:**
 >
 > | ID | File | Status | Action |
 > |----|------|--------|--------|
-> | FORM-1 | All controller forms | 🔄 Partial | 3-column standard applied to MCC, BDC, TMC. FMC, HEL, TRC pending. |
+> | FORM-1 | All controller forms | 🔄 Partial | 3-column standard applied to MCC, BDC, TMC, TRC. FMC and HEL pending. |
 > | FORM-2 | All controller forms | 🔲 Open | Add MODE set controls to Col 1 on all windows |
 > | FORM-3 | All controller forms | 🔲 Open | Promote FW VERSION from status strip into dedicated Col 1 panel |
 > | FORM-4 | `frmMCC.cs`, `frmBDC.cs` | 🔲 Open | Move ReInit control from TIMING into DEVICE STATUS panel |
@@ -119,7 +119,7 @@ The application hosts the following child windows:
 | BDC | Controller view | 192.168.1.20 | ✅ Current | Beam director — gimbal, cameras, FSM, TRC / FMC pass-through |
 | FMC | Controller view | 192.168.1.23 | ✅ Current | FSM DAC/ADC, focus stage — direct A2 |
 | HEL | Controller view | 192.168.1.13 | ✅ Current | IPG laser — direct TCP port 10001 (independent of MCC pass-through) |
-| TRC | Controller view | 192.168.1.22 | ✅ Current | Jetson tracker — telemetry, ASCII commands via port 5012 |
+| TRC | Controller view | 192.168.1.22 | ✅ Current | Jetson tracker — A2 port 10018, telemetry, ASCII commands via port 5012 |
 | GNSS | Controller view | 192.168.1.30 | 🔵 Planned | NovAtel receiver — direct UDP interface (merge from existing VS project) |
 | Gimbal | Controller view | 192.168.1.21 | 🔵 Planned | Galil pan/tilt drive — direct interface (merge from existing VS project) |
 | Upload FW | Tool | — | ✅ Current | STM32 / SAMD flash, Jetson binary deployment |
@@ -1295,25 +1295,129 @@ All responses routed to `MSG_IPG.ParseDirect(cmd, payload)`.
 
 ### 4.7 TRC — Tracking and Range Computer
 
-**Target:** 192.168.1.22 · A2 port 10018 (ICD) + port 5012 (ASCII)
+**Target:** 192.168.1.22 · A2 port 10018 (binary ICD) · ASCII port 5012
 
-> 🔲 **Section pending** — TRC form not yet built. TRC telemetry currently accessible via BDC pass-through (§4.4 Col 4). Direct A2 + ASCII window planned.
+TRC runs on Jetson Orin NX (Linux 6.1). The ENG GUI connects directly on A2 port 10018 using the standardised INT framing (magic `0xCB 0x49`, CRC-16/CCITT, rolling SEQ). Connection model follows the TMC/BDC/MCC pattern — single `0xA4 FRAME_KEEPALIVE` registration on connect, 30s keepalive loop, `isConnected` driven by received frames.
 
-Key content when built:
-- Camera status: VIS and MWIR — Started / Active / Capturing / Tracking / TrackValid
-- Tracker state: TX/TY centre position, AT/FT offsets, focus score, NCC score
-- Active camera selection, FPS, device temp, Jetson temp / CPU load
-- Overlay mask bits (Reticle, TrackPreview, TrackBox, CueChevrons, AC_Proj, AC_Leaders, FocusScore, OSD)
-- Vote bits readbacks: `voteBitsMcc`, `voteBitsBdc`
-- ASCII command reference — port 5012, session 33:
+#### Layout
+
+**Left panel (panel2, DockStyle.Left):**
+
+**grpSystemState (top):** System state radio buttons (STANDBY / ISR / COMBAT), Connect checkbox (`chk_TRC_Connect`), UnSolicited checkbox (`chk_TRC_UnSolEnable`). Inner status strip shows firmware version, system state, gimbal mode.
+
+**groupBox3 — TIMING:** Matches TMC pattern exactly.
+
+| Label | Content |
+|-------|---------|
+| `lbl_TRC_dt_us` | `TRC dt: 000.00 <avg> [max] us` — EMA α=0.10 |
+| `lbl_TRC_HB_ms` | `TRC HB: 000.00 <avg> [max] ms` |
+| `lbl_TRC_lastRx` | `TRC RX: 000.00 <avg> [max] ms` — red when stale >500ms |
+| `lbl_TRC_connUptime` | `CONN: hh:mm:ss` |
+| `lbl_TRC_drops` | `DROPS: N` — orange when >0 |
+| `lbl_TRC_rxGap` | `TRC GAPS: N` — orange when >0 |
+| `mb_TRC_connStatus` | StatusLabel meatball: `RX OK` (Green) / `WAITING` (Grey) / `RX FROZEN` (Red) |
+| `btn_TRC_resetMaxStats` | Resets all rolling max and avg accumulators |
+| `btn_SetNTP_Servers` | Sends `0xA2 SET_NTP_CONFIG` — primary `.33`, fallback `.208` |
+
+**groupBox14 — TIME:** NTP only (PTP not implemented on TRC — NEW-38d pending). PTP meatballs shown but hardcoded Grey. NTP ENABLED/SYNCHED green when connected (TRC uses OS-level `systemd-timesyncd` — no register bit for NTP sync state). `lbl_TMC_deltaTime` shows wall-clock vs TRC epoch time delta.
+
+**groupBox13 — JETSON HEALTH (bottom):**
+
+| Label | Content |
+|-------|---------|
+| `lbl_TMC_tph` | Camera sensor temp °C · SOM serial number |
+| `lbl_TMC_mcuTemp` | Jetson CPU temp °C · GPU load % |
+| `lbl_ta1` | NCC score (tracker template quality 0.0–1.0) |
+
+**Right panel (panel1/panel3, DockStyle.Fill):**
+
+**grpGimbalMode:** OFF / POSITION / RATE / CUE / TRACK — sends `0xA6 SET_GIMBAL_MODE`.
+
+**groupBox2 — TRC TRACKER:**
+- `chkTrackerEnabled` — MOSSE tracker enable (`0xDB`, tracker_id=1)
+- `chk_TrackEnable_AI` — AI tracker enable (`0xDB`, tracker_id=0)
+
+**grpCAMS — CAMERAS:** VIS / MWIR radio buttons — sends `0xD0 ORIN_CAM_SET_ACTIVE`. CAM0/CAM1 status and tracker bits displayed as 8-bit binary readbacks from `LatestMSG.Cameras[].StatusBits/.TrackBits`.
+
+**grpStreamOptions — STREAM STATUS:** Overlay mask bitmask displayed in group title. `chk_StreamHUD_OverlayEnable` — sends `0xD3 ORIN_SET_STREAM_OVERLAYS` with `HUD_OVERLAY_FLAGS.All` (0xFF) or `None` (0x00).
+
+**chkFire / chkCueFlag:** Engineering test controls — `0xE0 SET_BCAST_FIRECONTROL_STATUS` and `0xD4 ORIN_ACAM_SET_CUE_FLAG`.
+
+**statusStrip2 (inside panel):** Mouse coords, stream size, FPS.
+
+**statusStrip1 (bottom):** `tss_HW_REV` — `TRC: vX.Y.Z | SN: <som_serial>`. `tssCPUTemp` — `CPU Xm°C  GPU Y%`. `tssDateTime` — NTP time from TRC.
+
+#### Status Bits Reference
+
+**CamStatus bits** (`status_cam0` / `status_cam1`):
+
+| Bit | Name | Meaning |
+|-----|------|---------|
+| 0 | STARTED | Camera thread started |
+| 1 | ACTIVE | Camera active |
+| 2 | CAPTURING | Frame capture running |
+| 3 | TRACKING | Tracker enabled |
+| 4 | TRACK_VALID | Tracker has valid lock |
+| 5 | FOCUS_SCORE_ENABLED | Laplacian focus score computing |
+| 6 | OSD_ENABLED | OSD overlay active |
+| 7 | CUE_FLAG | CUE flag set |
+
+**TrackStatus bits** (`status_track_cam0` / `status_track_cam1`):
+
+| Bit | Name | Meaning |
+|-----|------|---------|
+| 2 | TrackB_Enabled | MOSSE tracker enabled |
+| 3 | TrackB_Valid | MOSSE tracker has valid lock |
+| 4 | TrackB_Init | MOSSE tracker initialising |
+
+#### ASCII Commands (port 5012)
+
+ASCII commands are sent via `socat` or `nc` to port 5012. TRC echoes all `dlog()` output back to the ASCII sender. Full command reference in ICD INT_ENG §TRC ASCII-Only Commands.
 
 | Command | Function |
 |---------|----------|
-| `TESTSRC CAM1\|CAM2 TEST\|LIVE` | Enable/disable test pattern |
-| `TIMESRC NTP\|PTP\|SYS` | Set time source |
-| `A1 ON\|OFF` | Enable/disable A1 stream to BDC |
-| `TRACKER EN\|DIS` | Enable/disable tracker |
-| `CAMSEL VIS\|MWIR` | Select active camera |
+| `STATUS` | Full system state dump + one-shot telemetry to sender |
+| `REPORT START [ms]` | Start unsolicited telemetry at interval (min 10ms) |
+| `REPORT STOP` | Stop unsolicited telemetry |
+| `SELECT CAM1\|CAM2` | Switch active camera |
+| `TRACKER ON\|OFF\|RESET` | MOSSE tracker control |
+| `LK ON\|OFF` | LK optical flow tracker control |
+| `LK MOSSE ON\|OFF` | Enable NCC-gated MOSSE reseed from LK bbox |
+| `COCO LOAD\|UNLOAD` | Load/unload SSD MobileNet model |
+| `COCO AMBIENT ON\|OFF` | Enable ambient full-frame COCO scan |
+| `COCO TRACK ON\|OFF` | Enable intra-box COCO drift indicator |
+| `COCO STATUS` | COCO inference status |
+| `AWB` | Trigger auto white balance once |
+| `OSD ON\|OFF` | Toggle OSD overlay |
+| `DEBUG ON\|OFF` | Enable/disable debug logging |
+| `QUIT` | Graceful TRC shutdown |
+
+#### Key Properties (MSG_TRC)
+
+All telemetry is accessed via `aTRC.LatestMSG.*`:
+
+| Property | Type | Source |
+|----------|------|--------|
+| `FW_VERSION_STRING` | string | REG1 [1–4] VERSION_PACK |
+| `System_State` | SYSTEM_STATES | REG1 [5] |
+| `BDC_Mode` | BDC_MODES | REG1 [6] |
+| `HB_ms` / `HB_TX_ms` | uint16 / double | REG1 [7–8] |
+| `dt_us` | uint16 | REG1 [9–10] |
+| `overlayMask` | byte | REG1 [11] HUD_OVERLAY_FLAGS |
+| `streamFPS` | double | REG1 [12–13] ×100 |
+| `deviceTemperature` | int16 | REG1 [14–15] VIS sensor °C |
+| `Active_CAM` | BDC_CAM_IDS | REG1 [16] |
+| `Cameras[0/1].StatusBits` | byte | REG1 [17/19] |
+| `Cameras[0/1].TrackBits` | byte | REG1 [18/20] |
+| `TrackPoint` | Point | REG1 [21–24] tx/ty |
+| `VIS_FOCUS_SCORE` | float | REG1 [29–32] Laplacian |
+| `ntpTime` / `epochTime` | DateTime | REG1 [33–40] ms epoch |
+| `voteBitsMcc` / `voteBitsBdc` | byte | REG1 [41–42] |
+| `nccScore` | float | REG1 [43–44] ×10000 |
+| `jetsonTemp` | int16 | REG1 [45–46] CPU °C |
+| `jetsonCpuLoad` | int16 | REG1 [47–48] CPU % |
+| `SomSerial` / `SomSerialLabel` | uint64 / string | REG1 [49–56] |
+| `jetsonGpuLoad` | int16 | REG1 [57–58] GPU % — v4.0.3 |
 
 ---
 
@@ -1356,5 +1460,6 @@ Planned content:
 | 1.0.0 | 2026-03-01 | IPG | Initial draft — §1–3 complete |
 | 1.1.0 | 2026-04-06 | IPG | §4.1–4.4 added; placeholder §4.5–4.9, §5–6; action item table restructured with status tracking |
 | 1.2.0 | 2026-04-07 | IPG | §4.3 TMC updated for V1/V2 hardware abstraction — description, temperature table (COMP1/2 added, VIC3/4 V1-only noted), AUX control table (PUMP2 V2, heater/speed V1-only). TMC-HW1–4 action items added (all closed). ICD ref updated to v3.3.9, ARCH ref to v3.3.3. |
+| 1.4.0 | 2026-04-19 | IPG | §4.7 TRC written — full section covering layout, status bits, ASCII commands, MSG_TRC property reference. ICD ref updated to v4.1.0, ARCH ref to v4.0.4. CONN-4/MCC-8/FORM-1 TRC items closed. Overview table TRC row updated to A2 port 10018. |
 | 1.3.0 | 2026-04-08 | IPG | MCC-HW1–4 action items added. MCC-HW1–3 closed (MSG_MCC.cs, mcc.cs, defines.cs). MCC-HW4 partial (compile errors fixed, ApplyHwRevLayout pending). ICD ref updated to v3.4.0, ARCH ref to v3.3.4. |
 

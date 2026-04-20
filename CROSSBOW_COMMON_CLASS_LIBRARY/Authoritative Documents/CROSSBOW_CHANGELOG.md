@@ -2,8 +2,8 @@
 
 **Document:** `CROSSBOW_CHANGELOG.md`
 **Doc #:** IPGD-0019
-**Version:** 4.2.0
-**Date:** 2026-04-16
+**Version:** 4.5.0
+**Date:** 2026-04-19
 **Status:** Current
 **Supersedes:** `Embedded_Controllers_ACTION_ITEMS.md` (unregistered, retired), `Embedded_Controllers_CLOSED_ACTION_ITEMS.md` (unregistered, retired)
 
@@ -24,7 +24,122 @@ Session numbers marked `~` are approximate where the exact session number is unc
 
 ---
 
-## CB-20260416f — Document sweep + item register reconciliation
+## CB-20260419c — TRC Jetson health telemetry compaction + GPU temp + OSD colour coding
+**Files:** `telemetry.h`, `compositor.h`, `udp_listener.h`, `main.cpp`, `udp_listener.cpp`, `osd.cpp`, `osd.h`, `compositor.cpp`, `MSG_TRC.cs`, `frmTRC.cs`
+**ICD:** v4.1.0 → v4.2.0
+
+**Root cause fix — `readJetsonGpuLoad()` sysfs path:**
+Path was `/sys/devices/gpu.0/load` (missing `platform/`). Corrected to `/sys/devices/platform/gpu.0/load`. Verified returning 196–197 (÷10 = ~19.6–19.7%) on live hardware. Silent failure mode (returns 0) confirmed benign for downstream consumers.
+
+**Jetson health fields compacted int16 → uint8 (ICD v4.2.0):**
+All four Jetson health values fit in uint8 (temps 0–95°C, loads 0–100%). Saves 4 bytes, frees space for `jetsonGpuTemp`. New layout:
+- `jetsonTemp`    int16 [45–46] → uint8 [45]
+- `jetsonCpuLoad` int16 [47–48] → uint8 [46]
+- `jetsonGpuLoad` int16 [57–58] → uint8 [47] (moved adjacent to other health fields)
+- `jetsonGpuTemp` uint8 [48] — **NEW** — GPU temp °C from `thermal_zone1` (millidegrees ÷ 1000)
+- `som_serial`    uint64 [49–56] — unchanged
+- RESERVED expands [5] → [7] bytes at [57–63]
+Static asserts updated and verified. `make clean && make` required on TRC binary.
+
+**`main.cpp`:**
+- `readJetsonGpuLoad()`: sysfs path corrected to `/sys/devices/platform/gpu.0/load`
+- `readJetsonGpuTemp()` added: reads `/sys/devices/virtual/thermal/thermal_zone1/temp`, millidegrees ÷ 1000
+- `statsThreadFunc`: `jetsonGpuTemp` stored every 5s alongside GPU load
+- `udp.jetsonGpuTemp` wired to `compositor.jetsonGpuTemp`
+
+**`udp_listener.cpp` — `buildTelemetry()`:**
+- All three existing casts updated `(int16_t)` → `(uint8_t)`
+- `jetsonGpuTemp` pack added with null guard
+
+**`osd.cpp` / `osd.h`:**
+- `render()` and `drawText()` signatures gain `int jetsonGpuTemp`
+- Bottom-right OSD block restructured from 2 rows → 3 rows:
+  - Row 1 (SN, DIM_GREY) — moved up to `frame.rows - MARGIN_X - LINE_H * 2`
+  - Row 2: `CPU: XXX%  XX°C`
+  - Row 3: `GPU: XXX%  XX°C`
+- Each row drawn as 3 separate `drawOutlinedText` calls for per-value colour:
+  - Load colour: GREEN <60% / YELLOW 60–84% / RED ≥85%
+  - Temp colour: GREEN <60°C / YELLOW 60–79°C / RED ≥80°C
+  - Label always WHITE
+- Right-alignment anchored on fixed-width format string; segments advance by `getTextSize`
+
+**`compositor.cpp`:** `OSD::render()` call passes `jetsonGpuTemp.load()`
+
+**`MSG_TRC.cs`:**
+- `jetsonTemp`/`jetsonCpuLoad`/`jetsonGpuLoad` `Int16` → `byte`
+- `jetsonGpuTemp` byte property added
+- `ParseMsg`: three `BitConverter.ToInt16` reads → single-byte `rxBuff[ndx]` reads; `ndx += 5` → `ndx += 7` for RESERVED
+- Header layout comment updated
+
+**`frmTRC.cs`:** `lbl_TMC_mcuTemp` now shows `CPU 000°C   GPU 000°C` on one line
+
+**Items closed:** none
+**Items opened:** none
+
+---
+
+
+**Files:** `trc.cs`, `MSG_TRC.cs`, `frmTRC.cs`, `defines.cs`, `ARCHITECTURE.md`, `CROSSBOW_ICD_INT_ENG.md`
+**ICD:** v4.1.0 (no change) | **ARCH:** v4.0.1 → v4.0.2
+
+**`trc.cs` — full rewrite to A2 standardised client model (GUI-8):**
+- Port `5010` (legacy raw) → `10018` (A2 engineering port)
+- Full INT framing: `BuildA2Frame()` with `CrcHelper.Crc16()`, magic `0xCB 0x49`, rolling SEQ
+- `CrossbowNic.GetInternalIP()` NIC binding — pins to internal NIC so TRC firmware accepts source address
+- Single `0xA4 FRAME_KEEPALIVE` registration on connect (replaces raw `0xA0` send)
+- `KeepaliveLoop()` — `PeriodicTimer` 30s, stale detection 2s, drop counting
+- `isConnected` now driven from received frames (not socket open)
+- `_wasConnected`, `_connectedSince`, `ConnectedSince`, `DropCount`, `HB_RX_ms` added — matches `tmc.cs` pattern
+- `LatestMSG` (`MSG_TRC`) added — all telemetry reads from here; `System_State`/`BDC_Mode` forwarded
+- All command methods now use `BuildA2Frame()`: `SetSystemState`, `SetGimbalMode`, `SetActiveCamera`, `SetTrackerEnable`, `SetFireStatus`, `SetOverlayMask`, `setTrackBox`, `SetTrackGateSize`, `TriggerAWB`, `CueFlag`, `UnsolicitedMode`, `SetNtpConfig`
+- `SetTrackerEnable` overload with `mosseReseed` 3rd byte (ICD v4.1.0 `0xDB`)
+- `SetFireStatus(byte voteBitsMcc, byte voteBitsBdc=0)` — corrected to two-byte payload per ICD `0xE0`
+- `setTrackBox` restored using `0xD7 ORIN_ACAM_SET_TRACKGATE_CENTER` (was dead/commented with stale enum)
+- `HUD_Overlays` bool removed; `SetOverlayMask(byte mask)` is now the sole overlay interface
+- `VERSION` stale class removed; `ipEndPoint` dead field removed
+- **GUI-8 verified on live HW CB-20260419**
+
+**`MSG_TRC.cs` — A2 framed entry point + ICD v4.0.3 additions:**
+- Frame constants added: `MAGIC_HI/LO`, `FRAME_RESPONSE_LEN=521`, `PAYLOAD_OFFSET=7`, `STATUS_OK`
+- `Parse(byte[] frame)` added — validates magic, length, CRC-16/CCITT, STATUS byte, CMD_BYTE routing; calls `ParseMsg` internally. Matches `MSG_TMC.Parse()` pattern.
+- `LastFrameStatus` property added
+- `jetsonGpuLoad` int16 field added at [57–58] — ICD v4.0.3 (CB-20260419). `ParseMsg` updated: RESERVED skip corrected 7→5, `jetsonGpuLoad` parsed at [57–58]
+- `FW_VERSION_STRING` alias added (matches `frmTMC` binding pattern)
+- `HW_REV_Label` returns `"--"` (TRC has no hardware revision variants)
+- `epochTime` → `ntpTime` alias; `activeTimeSourceLabel` → `"NTP"` fixed (PTP pending NEW-38d)
+- `SomSerialLabel` display helper — `"N/A"` on parse failure
+
+**`frmTRC.cs` — full update to `LatestMSG` pattern:**
+- All telemetry reads migrated from direct `aTRC.*` fields to `aTRC.LatestMSG.*`
+- Full TMC-pattern timing display: dt/HB rolling stats (EMA α=0.10), RX staleness (500ms threshold), gap counter, uptime, drop counter — all matching `frmTMC.cs`
+- Connect/disconnect handler corrected: `timer1.Enabled` now toggled, state reset on disconnect
+- `btn_TRC_resetMaxStats_Click` and `btn_SetNTP_Servers_Click` handlers added (were missing)
+- TIME group populated: NTP time, delta UTC, PTP meatballs hardcoded Grey (no PTP on TRC)
+- `tss_HW_REV` shows version + SOM serial (replaces stale `"--"` HW_REV)
+- `tssCPUTemp` shows Jetson CPU temp + GPU load from `LatestMSG.jetsonTemp`/`jetsonGpuLoad`
+- Overlay toggle uses `HUD_OVERLAY_FLAGS.All`/`None`
+- `chkFire` sends `0xFF`/`0x00` (was `255`/`0` — same value, now explicit)
+
+**`defines.cs` — 8 surgical changes:**
+- Header: app name `TRC3_ENG_GUI` → `CROSSBOW_ENG_GUIS`; hpp version ref `v3.X.Y` → `v4.0.0`
+- `BDC_TRACKERS`: `LK = 4` added — fully implemented per ICD v4.1.0 (CB-20260419)
+- `COCO_ENABLE_OPS` enum added (8 sub-ops: OFF/ON/AMBIENT/TRACK/NEXT/PREV/RESET/DRIFT/INTERVAL)
+- `LASER_MODEL.YLM_6K` comment corrected: `YLR-6000` → `YLM-6000-U3-SM`
+- `SET_CHARGER (0xAF)` comment: V2 GPIO enable now supported (FW-CRG-V2 CB-20260416)
+- `ORIN_ACAM_COCO_ENABLE (0xD1)` comment: updated with dual-mode description and `COCO_ENABLE_OPS` reference
+- `ORIN_ACAM_ENABLE_TRACKERS (0xDB)` comment: updated with 3rd byte `mosseReseed` description
+- `RES_FD`/`FMC_SET_STAGE_ENABLE` ordering: corrected to match `defines.hpp` (0xFD before 0xFE)
+
+**ARCHITECTURE.md + CROSSBOW_ICD_INT_ENG.md — naming sweep:**
+- `TRC_ENG_GUI_PRESERVE` → `CROSSBOW_ENG_GUIS` throughout both documents (6 occurrences ARCH, 1 ICD)
+- ARCH §3 codebase inventory row expanded with full child form inventory
+
+**Items closed this session:** GUI-6, GUI-8, TRC-CS-DEAD-IPENDPOINT
+**Items opened this session:** none
+
+---
+
+
 **Files:** `CROSSBOW_ICD_INT_ENG.md`, `CROSSBOW_ICD_INT_OPS.md`, `ARCHITECTURE.md`, `CROSSBOW_DOCUMENT_REGISTER.md`, `CROSSBOW_CHANGELOG.md`
 
 **Item register closures and deletions:**
@@ -726,7 +841,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | ICD-1 | ICD INT_ENG update pass — CB-20260412 + BDC HB bytes | ⏳ Pending | Bump ICD to v3.6.0. Full list of changes: **(New)** `0xA1` SET_HEL_TRAINING_MODE, `0xA3` SET_TIMESRC, `0xA9` SET_REINIT, `0xAA` SET_DEVICES_ENABLE, `0xAB` SET_FIRE_VOTE, `0xAF` SET_CHARGER, `0xD1` ORIN_COCO_ENABLE, `0xE0` SET_BCAST_FIRECONTROL_STATUS, `0xB1` SET_BDC_VOTE_OVERRIDE. **(Retired)** `0xA9`, `0xB0`, `0xB1` (old), `0xBE`, `0xD1` (old), `0xD2`, `0xD8`, `0xDF`, `0xE0` (old), `0xE1`, `0xE3`, `0xE6`, `0xED`. **(Scope to INT_OPS)** `0xA2`, `0xA3`, `0xA1`, `0xAB`. **(INT_ENG)** `0xE0` BCAST_FC, `0xB1` VOTE_OVR. Update version history section. Bump ICD document register entry. | `CROSSBOW_ICD_INT_ENG.md`, IPGD-0003 register entry |
 | ~~DEF-1~~ | ~~defines.hpp / defines.cs update pass — CB-20260412 enum changes~~ | ✅ **CLOSED** | **Verified CB-20260413.** Both files contain all CB-20260412 enum changes — `SET_TIMESRC=0xA3`, `SET_REINIT=0xA9`, `SET_DEVICES_ENABLE=0xAA`, `SET_CHARGER=0xAF` all added; `SET_HEL_TRAINING_MODE=0xA1`, `ORIN_ACAM_COCO_ENABLE=0xD1`, `SET_BCAST_FIRECONTROL_STATUS=0xE0`, `SET_BDC_VOTE_OVERRIDE=0xB1` all reassigned; all retired names removed (replaced by `RES_xx` rejection markers, both files in lockstep). **Naming note:** slot `0xAB` retains the legacy name `SET_FIRE_REQUESTED_VOTE` from its `0xE6` origin — slot-only move, name preserved to avoid C# call-site churn. ICD-1 to use canonical name `SET_FIRE_REQUESTED_VOTE` in v4.0.0 entries (not the `SET_FIRE_VOTE` shorthand used in the original CB-20260412 spec). | `defines.hpp` ✅ `defines.cs` ✅ |
 | ARCH-1 | ARCHITECTURE.md update pass — CB-20260412 | ⏳ Pending | Update: §5 Port reference — note `0xA9`/`0xAA` as new unified fleet commands. §17 Open items — add ICD-1, DEF-1, FW-C8 through FW-C13, FW-C10. Note 0xA1 REG1 CMD_BYTE legacy status. ICD reference bump to v3.6.0 in ARCH header. All controller FW versions → 4.0.0. IsV4 gate documented. **Hardware revision sections:** Each controller section (MCC §9, BDC §10, TMC §?, FMC §12) needs V1/V2 subsections noting platform differences — MCC HW rev (laser/no-laser), BDC V1/V2 (Vicor/TRACO, IP175, new thermistors), TMC V1/V2 (single Vicor/two TRACOs, heater removed, ADS1015 removed), FMC V1/V2 (SAMD21/STM32F7). **CROSSBOW_FW_PATTERNS.md updates to incorporate into ARCH patterns appendix:** (1) platform table FMC row → V1 SAMD21 / V2 STM32F7; (2) line 19 warning update — FMC V2 follows OpenCR pattern; (3) `buildReg01()` example `ICD::GET_REGISTER1` → `0x00`; (4) HPP template `isUnSolicitedEnabled` → retired, replaced by per-client `wantsUnsolicited`. | `ARCHITECTURE.md` |
-| UG-1 | CROSSBOW_UG_ENG_GUI_draft.md update pass | ⏳ Pending | Update following all unification sessions: ICD/ARCH version refs; MCC section (LASER_MODEL, HEL training mode, IsV4 gate, charger UI); BDC section (V1/V2 hardware table, IP175, HEALTH_BITS/POWER_BITS rename, new temps, IsV2 layout switching); TMC section (V1/V2 hardware table, PUMP/PIDGAIN serial commands, isSingleLoop); FMC section (V1 SAMD21 / V2 STM32F7 platform note); TRC section (frame port 10019/10018 vs legacy 5010, retired stream controls). Add IsV4 gating strategy note. Bump document version and revision history. | `CROSSBOW_UG_ENG_GUI_draft.md` |
+| UG-1 | CROSSBOW_UG_ENG_GUI_draft.md update pass | 🟡 Partial | TRC section (§4.7) now written CB-20260419b. Remaining: ICD/ARCH version refs; MCC section (LASER_MODEL, HEL training mode, IsV4 gate, charger UI); BDC section (V1/V2 hardware table, IP175, HEALTH_BITS/POWER_BITS rename, new temps, IsV2 layout switching); TMC section (V1/V2 hardware table, PUMP/PIDGAIN serial commands, isSingleLoop); FMC section (V1 SAMD21 / V2 STM32F7 platform note); retired stream controls. | `CROSSBOW_UG_ENG_GUI_draft.md` |
 | DOC-REG-1 | CROSSBOW_DOCUMENT_REGISTER.md version bumps | ⏳ Pending | Bump version entries for all documents updated during CB-20260412 and unification sessions: ICD INT_ENG, ICD INT_OPS, ARCHITECTURE.md, UG_ENG_GUI, BDC_HW_DELTA.md, TMC_HW_DELTA.md, FMC_STM32_MIGRATION_FINAL.md. Add new entries for CROSSBOW_CHANGELOG.md v1.2.0 and CROSSBOW_FW_PATTERNS.md v1.7. | `CROSSBOW_DOCUMENT_REGISTER.md` |
 | ~~PMC-1~~ | ~~PMC hardware unification session~~ | ✅ **CLOSED CB-20260416** | Completed. | PMC firmware ✅ |
 | BIT-CLEANUP | Status bits audit — defines.cs bitmask enums | ⏳ Pending | `HUD_OVERLAY_BITS`, `VOTE_BITS_MCC`, `VOTE_BITS_BDC` use different C# bitmask enum pattern vs `defines.hpp`. Walk through to confirm intentional or align. Related to TMC `tb_*` prefix inconsistency in TIME_BITS. | `defines.cs`, `defines.hpp` |
@@ -789,6 +904,9 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | NEW-38d | TRC PTP integration | ⏳ Pending | TRC uses `systemd-timesyncd` NTP only — no PTP path, no TIME_BITS in REG1. Scope: (1) Linux: install/configure `ptp4l` as PTP slave to NovAtel `.30`; (2) TRC firmware: add TIME_BITS equivalent to REG1; (3) `MSG_TRC.cs`: add `epochTime`, `activeTimeSource`, `activeTimeSourceLabel`. | TRC `udp_listener.cpp`, `MSG_TRC.cs` |
 | ~~TRC-SOM-SN~~ | ~~TRC SOM serial number — read and pack into REG1~~ | ✅ **CLOSED** | **Bench-verified CB-20260413.** Format: `uint64 LE` at TelemetryPacket bytes [49-56] (user-specified, supersedes any prior ASCII-string suggestion). Bytes [57-63] remain RESERVED (7 bytes). 8 edits applied across 5 files: `telemetry.h` (struct field + 2 static_asserts for offset 49 and 57), `types.h` (`uint64_t somSerial{0}` added to `GlobalState` after `version_word`), `main.cpp` (read `/proc/device-tree/serial-number` once at startup right after version_word print, parse via `std::stoull` with try/catch fallback to 0, log `"SOM Serial: <n> (raw: \"...\")"` to stderr), `udp_listener.cpp` (`telemetry.som_serial = state_.somSerial` packed in `buildTelemetry()` after Jetson stats), `MSG_TRC.cs` (`SomSerial` UInt64 property added near Jetson health properties; `ParseMsg()` reads 8 bytes via `BitConverter.ToUInt64` then skips 7 RESERVED; layout doc comment updated). User additionally wired `SomSerial` to the TRC on-screen display (OSD overlay) so the SN is visible on the live video stream — bonus addition beyond the surgical change set. ICD INT_ENG TRC REG1 update **held** per user request — tracked separately as TRC-SOM-SN-ICD (low, deferred). | `telemetry.h` ✅ `types.h` ✅ `main.cpp` ✅ `udp_listener.cpp` ✅ `MSG_TRC.cs` ✅ TRC OSD ✅ |
 | TRC-A1-CHK | A1 fire control packet byte [3] — checksum not validated | 🟢 Low | `trc_a1.hpp` line 26 + `trc_a1.cpp` line 191: byte [3] of the raw 4-byte `SET_BCAST_FIRECONTROL_STATUS` packet is documented as "reserved / checksum (not validated)" and currently ignored. Define checksum scheme (e.g. XOR of bytes [0-2]) and add validation in `rxThreadFunc` — discard packet and log on mismatch. Coordinate with BDC `SEND_FIRE_STATUS_TO_TRC()` to pack the same checksum at byte [3]. | `trc_a1.cpp` — `rxThreadFunc()`; `bdc.cpp` — `SEND_FIRE_STATUS_TO_TRC()` |
+| TRC-COCO-PROD | `--coco-ambient` in production launch | 🟡 Medium | Add `--coco-ambient` flag to `trc_start.sh` once ambient scan validated on live hardware. Confirm COCO model path present in production deployment. Opened CB-20260419. | `trc_start.sh` |
+| TRC-COCO-PERF | COCO inference performance exploration | 🟡 Medium | Current baseline: SSD MobileNet V3 Large FP16, 320×320 input, ~20Hz ambient at interval=3. Confirmed CUDA FP16 active on Orin NX. Observed: good detection on live Alvium; degraded on compressed/recorded video (expected — model trained on natural images). `SCORE_THRESHOLD=0.40` and `CONF_THRESHOLD=0.50` hardcoded in `coco_detector.h` — not runtime-tunable. Explore: (1) TensorRT engine conversion for lower inference latency; (2) YOLOv8n/YOLOv8s as drop-in replacement (better aerial/vehicle performance); (3) expose `SCORE_THRESHOLD` via ASCII for live tuning; (4) measure actual `detect()` ms on Orin to confirm inference time vs frame-drop rate. Opened CB-20260419. | `coco_detector.h`, `coco_detector.cpp` |
+| COCO-04 | COCO telemetry fields in TRC REG1 | 🟡 Medium | No COCO state currently in the 64-byte TRC REG1 packet — monitoring inference results requires ASCII `COCO STATUS` poll. 5 bytes RESERVED at [59–63]. Proposed: `cocoConfidence uint16` × 10000 at [59–60] (2 bytes), `cocoClassId uint8` at [61] (1 byte), `ambientDetCount uint8` at [62] (1 byte) — uses 4 of 5 reserved bytes, leaves 1 at [63]. Coordinate with `MSG_TRC.cs` parser and ICD TRC REG1 table. Opened CB-20260419. | `telemetry.h`, `udp_listener.cpp`, `MSG_TRC.cs` |
 | TRC-COCO-UDP | ORIN_ACAM_COCO_ENABLE via UDP — not yet implemented | 🟢 Low | After CB-20260412, `ORIN_ACAM_COCO_ENABLE = 0xD1`. TRC never had a UDP handler for this command (was at 0xDF, never implemented). Add `case ICD_CMDS::ORIN_ACAM_COCO_ENABLE:` at 0xD1 in `udp_listener.cpp` dispatch when COCO UDP control is needed. Coordinate with `coco_detector.cpp` enable/disable interface. | `udp_listener.cpp` — binary dispatch; `coco_detector.cpp` |
 | TRC-MUTEX | `buildTelemetry()` race condition — A1 TX vs A2 binary threads | 🟢 Low | `buildTelemetry()` is called from both `trc_a1.cpp` txThreadFunc (100 Hz) and `udp_listener.cpp` binaryThreadFunc (on solicited request). No mutex guards the shared `telemetry` struct. Benign at current rates — add mutex when threading issues surface. Consider moving to lock-free double-buffer. | `udp_listener.cpp` — `buildTelemetry()`; `trc_a1.hpp` |
 | ~~TRC-TRAINING~~ | ~~Training mode visibility — review VOTE_BITS_MCC~~ | ✅ **CLOSED CB-20260416** | Resolved via THEIA-HUD-FIRECONTROL — training mode displayed on THEIA HMI via `mb_isTrainingModeEnabled_rb` and `jtoggle_TRAIN`. OSD overlay deferred to THEIA-HUD-FIRECONTROL session. | `frmMain.cs` ✅ |
@@ -809,9 +927,9 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | CLEANUP-4 | Confirm ping stops correctly at STANDBY transition | ⏳ Pending | `PING_STATUS_*` bools stay at last value when ping loop stops. Verify `CB.MCC_STATUS`/`CB.BDC_STATUS` do not use stale ping state after STANDBY transition. Confirm on HW. | `frmMain.cs` — `PingHB()`, `crossbow.cs` |
 | GUI-3 | MSG_BDC.cs activeTimeSource reads from correct bits | ⏳ Open | Verify `activeTimeSource` reads from `TimeBits` (`tb_usingPTP`/`tb_isNTP_Synched`), not `DeviceReadyBits`. `MSG_TMC.cs` — align to `tb_*` prefix naming (cosmetic). | `MSG_BDC.cs`, `MSG_TMC.cs` |
 | GUI-5 | lbl_gimbal_hb — gimbalMSG.HB_TX_ms missing | ⏳ Open | `gimbalMSG.HB_TX_ms` property does not exist on `MSG_GIMBAL`. Find correct HB property name and fix binding in `frmBDC`. | `frmBDC.cs`, `MSG_GIMBAL.cs` |
-| GUI-6 | Rolling max stats to TRC tab | ⏳ Open | Extend dt/HB rolling max stats to TRC controller tab in ENG GUI — consistent with BDC and FMC tabs. | ENG GUI TRC tab form |
+| ~~GUI-6~~ | ~~Rolling max stats to TRC tab~~ | ✅ **CLOSED CB-20260419b** | dt/HB rolling max stats with EMA α=0.10, RX staleness, gap counter, uptime, drop counter — all applied to `frmTRC.cs` matching `frmTMC` pattern. | `frmTRC.cs` ✅ |
 | ~~GUI-7~~ | ~~HB and status timing audit — all child devices~~ | ✅ **CLOSED CB-20260416** | Audit complete and verified on live HW. All HB bindings confirmed correct. | `frmBDC.cs`, `frmMCC.cs` ✅ |
-| GUI-8 | C# client model — apply to TRC | ⏳ Open | TRC C# client not yet updated to standardised model (S29). Apply: single `0xA4` registration, `_lastKeepalive` only in `SendKeepalive()`, any-frame liveness, `connection established` in receive loop, remove redundant elapsed check. TRC has no A3 — A2 only. | `trc.cs`, `frmTRC.cs` |
+| ~~GUI-8~~ | ~~C# client model — apply to TRC~~ | ✅ **CLOSED CB-20260419b** | `trc.cs` fully rewritten: port 10018, INT framing, `BuildA2Frame`/`CrcHelper`, `CrossbowNic` NIC binding, single `0xA4` registration, `KeepaliveLoop`, `isConnected` frame-driven, `DropCount`, `ConnectedSince`, `HB_RX_ms`, `LatestMSG`. **Verified on live HW.** | `trc.cs` ✅ `frmTRC.cs` ✅ |
 | NEW-32 | `lch.cs` longitude `% 180.0` before negation | 🟢 Low | Longitude sign negation applied before `% 180.0` modulo — order should be reversed. Fix before operational LCH use. | `lch.cs` — longitude calculation |
 | S19-33 | Word ICD version realignment 1.x → 3.x.y | 🟢 Low | Word/docx ICD versions still carry 1.x numbering from early builds. Realign to match .md versions (3.x.y). Part of build spec three-document split (S19-34). | IPGD-0003/0004/0005 .docx |
 | S19-34 | Build spec three-document split + integrator tier model | 🟢 Low | Design resolved session 19. Implementation queued. Split build spec into: (1) INT_ENG full, (2) INT_OPS integrator, (3) EXT_OPS external. | Build spec docs |
@@ -852,7 +970,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | ~~DEPLOY-6~~ | ~~IGMP snooping — verify switch compatibility for PTP multicast~~ | ✅ **CLOSED CB-20260416** | Verified on production switch. No issues with PTP multicast. |
 | ARCH-FMC-HW | ARCH §12.1 FMC Hardware table — V1/V2 column refactor | 🟢 Low | Opened CB-20260413. ARCH §12.1 FMC Hardware table currently has a single column. Refactor to V1/V2 columns parallel to the TMC §11.3 pattern, with a BME280 V2 row added (now that FMC-TPH is closed and the BME280 is part of the V2 build). Documentation cleanup, no functional impact. Pairs naturally with ARCH-1 if that's the next ARCH pass. | `ARCHITECTURE.md` §12.1 |
 | FW-C5-FRAME-CLEANUP | Retire dead `A1_DEST_*_IP` defines from `frame.hpp` | 🟢 Low | Opened CB-20260413. After FW-C5's TMC pass, `A1_DEST_MCC_IP` (line 97) and `A1_DEST_BDC_IP` (line 98) in `frame.hpp` are both unreferenced. `A1_DEST_MCC_IP` had exactly one consumer (the `_mcc[]` temp-array dance in `tmc.cpp:21–22`, now cleaned up to `IPAddress(IP_MCC_BYTES)`); `A1_DEST_BDC_IP` was already unreferenced before this session. Both were left in place per FW-C5 option (a) "leave frame.hpp alone" rule. One-line cleanup: delete both `#define` lines and the surrounding "Fixed destinations for A1 TX" comment block. While in there, also refresh the now-stale comment at `tmc.hpp:235` ("`A1_DEST_MCC_IP from frame.hpp`") and the stale TODO at `fmc.hpp:188` ("NOTE: add `A1_DEST_BDC_IP = {192,168,1,20}` to frame.hpp if not already defined"). Dead code, harmless to leave but cleaner to remove. | `frame.hpp` lines 96–98; `tmc.hpp:235`; `fmc.hpp:188` |
-| TRC-CS-DEAD-IPENDPOINT | Retire dead `ipEndPoint` field in `trc.cs` | 🟢 Low | Opened CB-20260413. In `trc.cs`, the `IPEndPoint ipEndPoint` field is dead. Field declaration at line 24, assignment at line 106 (was hardcoded literal — overwritten by FW-C5 to `new IPEndPoint(IPAddress.Parse(IP), Port)` but the value is still never read), commented-out reference at line 127 (`//byte[] rxBuff = udpClient.Receive(ref ipEndPoint);`). The active receive path uses `udpClient.ReceiveAsync()` which doesn't take an endpoint. Three-line cleanup: delete field declaration, delete the assignment, delete the commented-out line. Pairs naturally with TRC-M9 (port 5010 deprecation) — both are receive-path cleanups owed to TRC. | `trc.cs` lines 24, 106, 127 |
+| ~~TRC-CS-DEAD-IPENDPOINT~~ | ~~Retire dead `ipEndPoint` field in `trc.cs`~~ | ✅ **CLOSED CB-20260419b** | Removed in full `trc.cs` rewrite — field, assignment, and commented reference all gone. | `trc.cs` ✅ |
 | ~~TRC-SOM-SN-ICD~~ | ~~TRC REG1 ICD entry for `som_serial` field~~ | ✅ **CLOSED** | **Closed CB-20260413.** TRC REG1 row added to `CROSSBOW_ICD_INT_ENG.md`: split `[49-63] RESERVED 15 bytes` into `[49-56] som_serial uint64 LE` (tagged `v4.0.0 (TRC-SOM-SN)`, with note about `/proc/device-tree/serial-number` source and `std::stoull` parse) + `[57-63] RESERVED 7 bytes`. Defined / Reserved totals: 49 / 15 → 57 / 7. ICD INT_ENG header version held at 3.6.0 (ICD-1 will do the v4.0.0 rename pass for the whole document). | `CROSSBOW_ICD_INT_ENG.md` ✅ |
 
 ---
@@ -916,7 +1034,93 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 
 ---
 
-## CB-20260416e — AWB implementation (AWB-ENG) + ICD_CMDS alias cleanup
+## CB-20260419 — TRC COCO ambient, OSD redesign, GPU telemetry, NMS/area filter
+**ARCH:** v4.0.3 | **ICD:** v4.0.3 (TRC REG1 [57–58] jetsonGpuLoad; COCO/ENG ASCII commands)
+**Files:** `compositor.cpp`, `osd.cpp`, `osd.h`, `camera_base.h`, `coco_detector.h`, `coco_detector.cpp`, `alvium_camera.h`, `mwir_camera.h`, `udp_listener.cpp`, `udp_listener.h`, `main.cpp`, `compositor.h`, `telemetry.h`
+
+### Compositor — COCO push/poll outside tracker block (bug fix)
+
+COCO push/poll and ambient draw were inside `if (camera->isTrackerEnabled())` — ambient inference never fired when tracker was off. Moved COCO push/poll block and `drawCocoAmbientBoxes()` call to after the tracker block. Track-specific draws (bbox, COCO detbox, LK overlay, reticle, cue chevrons) remain inside tracker block. `trackerActive` and `trackerBbox` remain in scope at the new location. **Root cause of ambient scan producing zero detections on live camera.**
+
+### Compositor — ambient detection hold on no-detection frame
+
+Previously, a no-detection inference result cleared `ambientDetections_` immediately. Changed to hold the last known list on ambient no-detection — avoids OSD flicker in busy scenes where the model briefly misses between good frames. Track mode (non-ambient) still clears drift/detbox on no-detection as before.
+
+### OSD — layout redesign
+
+**Top-right fixed-width block (4 rows, new):**
+- `STATE: %-6s` — WHITE/DIM_GREY/BLUE/GREEN/YELLOW/RED for OFF/STNDBY/ISR/COMBAT/MAINT/FAULT
+- `MODE:  %-6s` — WHITE/BLUE/BLUE/YELLOW/GREEN/GREEN for OFF/POS/RATE/CUE/ATRACK/FTRACK
+- `MCC:   0xAA` — DIM_GREY/RED/WHITE/ORANGE/YELLOW/GREEN by priority: zero/FIRING/TRIGGER/ARMED/ABORT/idle
+- `BDC:   0xBB` — DIM_GREY/RED/YELLOW/GREEN by FSM+geometry state
+- Anchor computed from `getTextSize("STATE: COMBAT ")` — column never shifts as values change
+- Bit checks inline (FC namespace not yet declared at drawText call site)
+- BLUE defined as `cv::Scalar(255, 128, 0)` BGR — verify on hardware
+
+**Removed** STATE/MODE/FC from left column.
+
+**3 COCO rows below TRACK (new, only shown when model loaded):**
+- `COCO AMB: N dets  [idx]` (WHITE) / `scanning...` (YELLOW) / `off` (DIM_GREY)
+- `COCO SEL: classname conf` (GREEN) / `none` (DIM_GREY)
+- `COCO TRK: OK/DRIFT/off` (GREEN/ORANGE/DIM_GREY)
+
+**Bottom-right row updated:** `JTEMP: 45C  JCPU: 23%  JGPU: 67%` — added JGPU.
+
+`OSD::render()` and `OSD::drawText()` signatures updated: added `int jetsonGpuLoad` parameter (6th arg). `osd.h` declarations updated to match.
+
+### camera_base.h — trackbox reset fixes
+
+`requestTrackerOff()`: added `trackBoxW_.store(256); trackBoxH_.store(256)` — resets gate size to default on track exit. Previously only cx/cy were reset.
+
+`resetAmbientCycle()`: added W/H/Cx/Cy reset to defaults — fixes disappearing/tiny gate after COCO NEXT + RESET (NEXT sets gate to detection box size which may be small).
+
+### COCO NMS + area filter
+
+**New runtime tunables** on `CocoDetector` with `std::atomic<float>` backing:
+- `nmsThreshold_` — default `0.35` (NMS was effectively disabled before; `detect()` was called with default `nmsThreshold=0.0` which passes all overlapping boxes)
+- `minAreaFrac_` — default `0.002` (~1850 px² on 1280×720)
+- `maxAreaFrac_` — default `0.50` (half frame)
+
+`net_->detect()` now passes `nmsThreshold_.load()` explicitly. Area filter applied post-detect before building `result->detections` — filtered list used for both best-detection selection and ambient detections vector. Filter is resolution-independent (fraction of frame area) so applies equally to full-frame ambient and intra-box track crops.
+
+**ASCII commands:** `COCO NMS`, `COCO MINAREA`, `COCO MAXAREA` — all range-clamped 0.0–1.0, logged to dlog.
+
+**Implementation:** tunables stored as atomics in `CocoDetector`. Camera-base has non-pure-virtual setters (default stores to `camera_base` atomics). `AlviumCamera` and `MwirCamera` override to also forward to `cocoDetector_` — same pattern as `setCocoDriftThreshold`. Getters read from camera_base atomics (reflected in `COCO STATUS` output).
+
+`COCO STATUS` updated to include: `nms=X  minArea=X  maxArea=X`.
+
+### GPU telemetry
+
+**Sysfs source:** `/sys/devices/platform/gpu.0/load` — returns 0–1000, divide by 10 for %. Path confirmed on JetPack 6.2.2 / Orin NX (note: `/sys/devices/gpu.0/load` does not exist on this platform).
+
+**Stats thread:** `readJetsonGpuLoad()` added alongside existing `readJetsonCpuLoad()`. Both now polled every 1s (previously CPU was every 5s). **Complementary filter** applied to both: `filtered = 0.3 × new + 0.7 × previous` — ~3s time constant, smooths jitter without masking load spikes. Temperature remains on 30s cycle.
+
+**Chain:** sysfs → `compositor.jetsonGpuLoad` atomic → `OSD::render()` → `JGPU: N%` display, and → `udp_listener.buildTelemetry()` → `telemetry.jetsonGpuLoad` at REG1 bytes [57–58].
+
+**TelemetryPacket:** `RESERVED[7]` at [57–63] split to `jetsonGpuLoad int16` at [57–58] + `RESERVED[5]` at [59–63]. `static_assert` for RESERVED updated: 57 → 59. New `static_assert(offsetof(TelemetryPacket, jetsonGpuLoad) == 57)` added. **`make clean && make` required.**
+
+### `--coco-ambient` launch flag
+
+`Args::cocoAmbient` flag added to `main.cpp`. Triggers `cocoLoadModel()` + `setCocoAmbientEnabled(true)` on boot. Block moved to **after** `compositor.start()` with 500ms settle delay — ensures camera frames are flowing before first ambient push fires. Non-fatal on model load failure (warning logged, TRC continues). Default: off.
+
+### ICD updates (CB-20260419)
+
+- **TRC REG1:** `jetsonGpuLoad int16` at [57–58] tagged `v4.0.3 (CB-20260419)`. RESERVED shrinks [7] → [5] at [59–63]. Defined: 57 → 59. Reserved: 7 → 5.
+- **COCO ASCII table:** Full rewrite — AMBIENT ON/OFF, TRACK ON/OFF, NEXT, PREV, RESET, NMS, MINAREA, MAXAREA, updated STATUS fields. FILTER no longer marked "not yet implemented".
+- **ENG Debug Injection section** (new): STATE, MODE, FCVOTES commands documented.
+- **Example Bash Usage:** Full rewrite — COCO ambient workflow, NMS/area tuning, correct telemetry byte map, FC symbology checkout sequence, OSD colour reference table.
+
+### Open items from this session
+
+| ID | Item | Priority |
+|----|------|----------|
+| TRC-COCO-PROD | Add `--coco-ambient` to `trc_start.sh` production launch once validated | 🟡 Medium |
+| TRC-COCO-PERF | COCO inference performance exploration. Current: SSD MobileNet V3 Large FP16, ~20Hz ambient at interval=3. Observed: good detection on live Alvium; degraded on compressed/recorded video (expected — model trained on natural images). `SCORE_THRESHOLD=0.40` and `CONF_THRESHOLD=0.50` hardcoded in `coco_detector.h` — not yet runtime-tunable. Explore: (1) TensorRT engine conversion for lower latency; (2) YOLOv8n/YOLOv8s as drop-in replacement; (3) expose `SCORE_THRESHOLD` via ASCII; (4) measure actual `detect()` ms on Orin to confirm inference time vs frame-drop rate. | 🟡 Medium |
+| COCO-04 | COCO telemetry in TRC REG1 — no COCO fields currently in the 64-byte packet. 5 bytes RESERVED at [59–63]. Candidates: `cocoConfidence uint16` × 10000 (2 bytes), `cocoClassId uint8` (1 byte), `ambientDetCount uint8` (1 byte) — uses 4 of 5 reserved bytes. Useful for ground station monitoring without ASCII STATUS poll. Coordinate with C# `MSG_TRC.cs` parser. | 🟡 Medium |
+| ICD-1 | ICD v4.0.0 rename pass — full document version bump, all session tags aligned | 🟡 Medium |
+| ARCH-TRC-19 | ARCHITECTURE.md §8 TRC — update for GPU telemetry, COCO NMS/area filter, OSD layout | ✅ Closed CB-20260419 |
+| TRC-ASCII-SEC | Subnet allowlist `192.168.1.0/24` at top of `processAsciiCommand()` | 🟡 Medium |
+| TRC-CMD-COMMENT | Fix `0xB8`/`0xB9` comments in `udp_listener.cpp` → `0xA5`/`0xA6` | 🟢 Low |
 **Files:** `defines.hpp`, `bdc.hpp`, `trc.hpp`, `trc.cpp`, `bdc.cpp`, `udp_listener.cpp`, `types.h`, `defines.cs`, `bdc.cs`
 
 **AWB-ENG complete.** `CMD_VIS_AWB` assigned to `0xC4` (reserved slot — was `RES_C4`). Full implementation across all seven files:
