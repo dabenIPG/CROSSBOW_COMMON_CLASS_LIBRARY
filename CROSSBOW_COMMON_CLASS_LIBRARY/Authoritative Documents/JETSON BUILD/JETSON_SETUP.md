@@ -1,7 +1,7 @@
 # JETSON_SETUP.md — TRC Jetson Orin NX Setup Procedure
 **Document:** JETSON_SETUP.md (DOC-2)  
-**Version:** 2.2.2  
-**Date:** 2026-04-13  
+**Version:** 2.3.1  
+**Date:** 2026-04-19  
 **Confirmed on:** Unit 1 (2026-04-09), Unit 2 (2026-04-09), Unit 3 (2026-04-10) — all 54 PASS, 0 FAIL  
 **Platform:** Seeed Studio reComputer J4012 **(non-Super, J401 carrier)** — see hardware note below  
 **JetPack:** 6.2.2 (L4T 36.5, Ubuntu 22.04, CUDA 12.6, cuDNN 9.3)  
@@ -54,7 +54,7 @@ The resulting image can then be used for Path C replication.
 
 **Use when:**
 - Deploying a new non-Super J4012 unit from a validated image produced by Path A.
-- **Upgrading an existing non-Super J4012 unit** — wipe and restore from the current gold image. This is the only supported upgrade path. In-place upgrades (former Path C) are retired.
+- **Replacing an existing unit** with a clean gold image when Path C (apt upgrade) is not applicable or the unit is too far out of state.
 
 ```bash
 # Boot target unit from USB recovery drive, then:
@@ -82,12 +82,224 @@ a non-Super image to a Super J4012 or vice versa — mechanically incompatible.
 
 ---
 
-### Deployment Path C — NOT USED
+### Deployment Path C — In-place apt upgrade (6.2.1 → 6.2.2)
 
-> ⛔ **Path C (in-place upgrade) is retired for this fleet.**
-> All upgrades to existing non-Super units use **Path B** — wipe and restore from the
-> current gold image. In-place upgrades introduce drift risk and are not supported.
-> If a unit is too far out of state to restore from image, use Path A to rebuild it.
+**Use when:** Unit is running JetPack 6.2.x (L4T 36.4.x) and needs upgrading to 6.2.2
+(L4T 36.5) without a full reflash. Preserves existing data, applications, and
+configurations. Validated 2026-04-13 through 2026-04-18 on REVISION 4.3, 4.4, and 4.7.
+
+> ⛔ **R35 (JetPack 5.x) units cannot use Path C.** The gap between JetPack 5.x (L4T 35.x,
+> Ubuntu 20.04) and 6.2.2 (L4T 36.x, Ubuntu 22.04) is a major version jump — different
+> kernel, different OS, different CUDA stack. Use **Path A** (full reflash) for any unit
+> showing `R35` in `/etc/nv_tegra_release`.
+
+> **What this upgrades:** CUDA compute stack + L4T kernel. Does not change the
+> bootloader. Unit stays fully operational throughout.
+>
+> **What still needs manual push after:** VimbaX 2026-1, OpenCV 4.13.0 (rebuild),
+> TRC binary, hostname, NTP, crontab — follow relevant phases below.
+
+**Prerequisites:**
+- Internet access on the Jetson (Windows ICS or direct)
+- Gateway must be set correctly and survive reboot — fix permanently via nmtui before starting
+- L4T packages must be held before touching apt
+- **Clock must be correct** — apt will fail with "not valid yet" errors if the system clock is wrong
+
+**Step 1 — Verify and sync clock:**
+
+The system clock must be correct before running apt. Old units with a dead RTC battery
+will have a stale clock that causes apt repo validation failures.
+
+```bash
+# Check current time
+date
+
+# Set temporary NTP to your internet gateway (e.g. 192.168.1.8 or 192.168.1.208)
+sudo tee /etc/systemd/timesyncd.conf > /dev/null << 'EOF'
+[Time]
+NTP=192.168.1.8
+EOF
+sudo systemctl restart systemd-timesyncd
+sleep 15
+timedatectl timesync-status
+# Must show Packet count > 0
+```
+
+If NTP sync fails, force the time manually:
+```bash
+sudo timedatectl set-ntp false
+sudo timedatectl set-time "YYYY-MM-DD HH:MM:SS"   # use current local time
+sudo timedatectl set-ntp true
+date
+```
+
+> **At the end of Path C** — restore NTP to gold standard:
+> ```bash
+> sudo tee /etc/systemd/timesyncd.conf > /dev/null << 'EOF'
+> [Time]
+> NTP=192.168.1.33
+> FallbackNTP=192.168.1.208
+> EOF
+> sudo systemctl restart systemd-timesyncd
+> ```
+
+**Step 1b — Set gateway and verify internet:**
+
+> ⚠️ Always set the gateway before testing internet — the default gateway on old units
+> typically points to `.1` which has no internet access.
+
+```bash
+# Set gateway to your internet source
+sudo ip route replace default via 192.168.1.208   # or .8 depending on your setup
+echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf
+ping 8.8.8.8 -c 3
+# Must succeed before continuing
+```
+
+**Step 1c — Passwordless sudo:**
+
+```bash
+sudo grep -q "ipg ALL=(ALL) NOPASSWD" /etc/sudoers || \
+    echo "ipg ALL=(ALL) NOPASSWD: ALL" | sudo tee -a /etc/sudoers
+sudo echo "sudo works"
+```
+
+**Step 1d — Clean CV directory:**
+
+Old units may have stale TRC source, old VimbaX references, and legacy scripts in `~/CV/`.
+Remove and recreate clean:
+
+```bash
+rm -rf ~/CV/
+mkdir -p ~/CV/SETUP
+mkdir -p ~/CV/TRC
+ls ~/CV/
+# Expect: SETUP  TRC
+```
+
+**Step 2 — Hold L4T packages:**
+```bash
+sudo apt-mark hold \
+    nvidia-l4t-bootloader \
+    nvidia-l4t-kernel \
+    nvidia-l4t-kernel-dtbs \
+    nvidia-l4t-kernel-headers \
+    nvidia-l4t-core \
+    nvidia-l4t-init
+
+apt-mark showhold | grep nvidia-l4t
+# Must show all 6
+```
+
+**Step 3 — Update apt sources to r36.5:**
+```bash
+# Verify current source
+cat /etc/apt/sources.list.d/nvidia-l4t-apt-source.list
+# Expect: r36.4
+
+sudo sed -i 's/r36\.4/r36.5/g' /etc/apt/sources.list.d/nvidia-l4t-apt-source.list
+
+# Verify
+cat /etc/apt/sources.list.d/nvidia-l4t-apt-source.list
+# Expect: r36.5 on all three lines
+```
+
+**Step 4 — Upgrade CUDA compute stack:**
+
+> ⚠️ **REVISION 4.7 units:** On units running L4T REVISION 4.7, `dist-upgrade` with
+> L4T packages held will show "0 upgraded" because r36.5 packages have a dependency
+> chain that requires all L4T packages to upgrade together. If you see this, skip to
+> Step 5 — the full upgrade will happen there with the unhold.
+>
+> **REVISION 4.4 units:** `dist-upgrade` works normally with packages held — CUDA
+> stack upgrades independently.
+
+```bash
+sudo apt-get update
+sudo apt-get dist-upgrade -y
+sudo apt install --fix-broken -o Dpkg::Options::="--force-overwrite"
+```
+
+> If prompted about config files — answer **N** (keep current version).
+> If output shows `0 upgraded, 0 newly installed` — this is expected on 4.7 units, proceed to Step 5.
+
+**Step 5 — Upgrade L4T kernel:**
+
+**For REVISION 4.4 units** — selective upgrade (kernel only, bootloader stays held):
+```bash
+# Unhold
+sudo apt-mark unhold \
+    nvidia-l4t-bootloader \
+    nvidia-l4t-kernel \
+    nvidia-l4t-kernel-dtbs \
+    nvidia-l4t-kernel-headers \
+    nvidia-l4t-core \
+    nvidia-l4t-init
+
+# Install new kernel packages
+sudo apt-get install -y \
+    nvidia-l4t-core \
+    nvidia-l4t-kernel \
+    nvidia-l4t-kernel-dtbs \
+    nvidia-l4t-kernel-headers \
+    nvidia-l4t-init
+```
+
+**For REVISION 4.7 units** — full upgrade (all packages together):
+```bash
+# Unhold all
+sudo apt-mark unhold \
+    nvidia-l4t-bootloader \
+    nvidia-l4t-kernel \
+    nvidia-l4t-kernel-dtbs \
+    nvidia-l4t-kernel-headers \
+    nvidia-l4t-core \
+    nvidia-l4t-init
+
+# Full dist-upgrade — upgrades everything together
+sudo apt-get dist-upgrade -y
+```
+
+**Both paths — rehold immediately after:**
+```bash
+sudo apt-mark hold \
+    nvidia-l4t-bootloader \
+    nvidia-l4t-kernel \
+    nvidia-l4t-kernel-dtbs \
+    nvidia-l4t-kernel-headers \
+    nvidia-l4t-core \
+    nvidia-l4t-init
+
+apt-mark showhold | grep nvidia-l4t
+# Must show all 6
+```
+
+**Step 6 — Reboot and verify:**
+```bash
+sudo reboot
+```
+
+> ⚠️ **Expect a long first boot after kernel upgrade** — initramfs regeneration can
+> make the first boot take 2–3 minutes. Use `ping -t 192.168.1.22` and wait for
+> replies before attempting SSH. Do not assume the unit is bricked until at least
+> 3 minutes have passed.
+
+After reboot — fix gateway if needed, then verify:
+```bash
+cat /etc/nv_tegra_release
+# Expect: REVISION: 5.0
+
+nvcc --version | grep release
+# Expect: release 12.6
+```
+
+**Then continue with the relevant phases:**
+- VimbaX upgrade → Phase 4 (remove old version first: `sudo rm -rf /opt/VimbaX_2025-1`)
+- OpenCV rebuild → Phase 5 (purge old build first per script prompts)
+- TRC binary push → Phase 6 (make clean && make mandatory — soname changed)
+- All other phases as normal → Phase 7, 8
+
+**Gate:** `cat /etc/nv_tegra_release` must show `REVISION: 5.0` before proceeding.
 
 ---
 
@@ -166,17 +378,22 @@ The non-Super and Super J4012 are mechanically different — do not mix them.
 > All units must be reflashed with our known-good JetPack 6.2.2 image regardless
 > of what version ships pre-installed. Pre-installed OS may contain unknown
 > packages, OEM customizations, or security vulnerabilities.
-> Boot once to accept EULA, then reflash.
 >
-> **Correct procedure for all units:**
-> 1. Boot without FC REC jumper → accept EULA → complete first-boot setup
-> 2. Power off
-> 3. Short FC REC → connect Micro-USB → power on → reflash via SDK Manager
-> 1. Power on without FC REC jumper
+> **Correct pre-flash sequence for all new units — two boots required:**
+>
+> **Boot 1 — Accept factory EULA:**
+> 1. Power on WITHOUT FC REC jumper — monitor and keyboard required
 > 2. Accept EULA on Jetson display
-> 3. Complete minimal first-boot setup (username/password)
-> 4. Power off
-> Then proceed with recovery mode below.
+> 3. Complete full OEM first-boot setup (username `ipg`, password)
+> 4. Let it fully boot to desktop
+>
+> **Boot 2 — Confirm stable:**
+> 5. Reboot — accept any second-stage prompts
+> 6. Confirm fully booted and stable at desktop
+> 7. Power off completely
+>
+> **Then proceed with recovery mode below.**
+> SDK Manager flash will fail or loop if either boot is skipped.
 >
 > Units that have previously been set up can go straight to recovery mode.
 
@@ -565,8 +782,12 @@ sudo jetson_clocks --show | grep -E "cpu0:|GPU Min"
 Verify the hardware encode pipeline before proceeding. Start Windows receive first:
 
 ```
-gst-launch-1.0.exe udpsrc port=5000 buffer-size=2097152 caps="application/x-rtp,media=video,encoding-name=H264,payload=96" ! rtpjitterbuffer latency=50 drop-on-latency=true ! rtph264depay ! h264parse ! nvh264dec ! videoconvert n-threads=4 ! fpsdisplaysink sync=false text-overlay=true
+gst-launch-1.0.exe udpsrc address=192.168.1.208 port=5000 buffer-size=2097152 caps="application/x-rtp,media=video,encoding-name=H264,payload=96" ! rtpjitterbuffer latency=50 drop-on-latency=true ! rtph264depay ! h264parse ! nvh264dec ! videoconvert n-threads=4 ! fpsdisplaysink sync=false text-overlay=true
 ```
+
+> **Dual-NIC Windows:** If THEIA has multiple NICs, always specify `address=192.168.1.208`
+> to bind the receiver to the correct interface. Without it, the stream may arrive on a
+> different NIC and not display.
 
 Then on Jetson:
 ```bash
@@ -850,16 +1071,32 @@ gst-inspect-1.0 | grep vmb
 ### 4.8 Camera pipeline test
 
 Verify full camera → encode → stream path before proceeding to OpenCV.
-Start receive side on Windows first, then send from Jetson.
+Two steps — videotestsrc first, then live Alvium.
 
-**Receive (Windows):**
+**Receive (Windows) — start this first for both tests:**
 ```
-gst-launch-1.0.exe udpsrc port=5000 buffer-size=2097152 caps="application/x-rtp,media=video,encoding-name=H264,payload=96" ! rtpjitterbuffer latency=50 drop-on-latency=true ! rtph264depay ! h264parse ! nvh264dec ! videoconvert n-threads=4 ! fpsdisplaysink sync=false text-overlay=true signal-fps-measurements=true
+gst-launch-1.0.exe udpsrc address=192.168.1.208 port=5000 buffer-size=2097152 caps="application/x-rtp,media=video,encoding-name=H264,payload=96" ! rtpjitterbuffer latency=50 drop-on-latency=true ! rtph264depay ! h264parse ! nvh264dec ! videoconvert n-threads=4 ! fpsdisplaysink sync=false text-overlay=true signal-fps-measurements=true
 ```
 
-**Send (Jetson) — update camera ID from ListCameras output:**
+> **Dual-NIC Windows:** Specify `address=192.168.1.208` to bind to the correct NIC.
+
+**Test 1 — videotestsrc (no camera required):**
 ```bash
-gst-launch-1.0 -v vmbsrc camera=DEV_1AB22C04ECA1 \
+gst-launch-1.0 videotestsrc is-live=true \
+    ! "video/x-raw,width=1280,height=720,framerate=60/1" \
+    ! nvvidconv \
+    ! "video/x-raw(memory:NVMM),format=NV12" \
+    ! nvv4l2h264enc bitrate=10000000 \
+    ! h264parse \
+    ! rtph264pay config-interval=1 pt=96 \
+    ! udpsink host=192.168.1.208 port=5000 sync=false async=false
+```
+
+**Pass:** Test pattern visible on Windows. Ctrl+C to stop.
+
+**Test 2 — Live Alvium camera — substitute camera ID from ListCameras output:**
+```bash
+gst-launch-1.0 -v vmbsrc camera=DEV_1AB22C0xxxxx \
     width=1024 height=720 exposuretime=20000 \
     ! video/x-raw,format=UYVY \
     ! nvvidconv \
@@ -871,7 +1108,11 @@ gst-launch-1.0 -v vmbsrc camera=DEV_1AB22C04ECA1 \
     ! udpsink host=192.168.1.208 port=5000 sync=0
 ```
 
-**Pass:** Live H.264 video visible on Windows. ✅ Confirmed working 2026-04-09.
+> **Note — iris:** The Alvium iris may be closed on first use — image will appear
+> dark or black. This is normal and not a pipeline failure. The iris opens once
+> TRC initialises the camera with its full configuration at runtime.
+
+**Pass:** Live H.264 video visible on Windows (may be dark — see iris note). ✅ Confirmed working 2026-04-09.
 
 ---
 
@@ -1084,6 +1325,17 @@ chmod +x ~/CV/SETUP/04_verify_all.sh
 chmod +x ~/CV/SETUP/cleanup_pre_image.sh
 ```
 
+> ⚠️ **Windows line endings:** Scripts transferred from Windows via SCP may contain
+> `\r\n` line endings which cause `/bin/bash^M: bad interpreter` errors on Linux.
+> Fix all scripts after every SCP transfer:
+> ```bash
+> sed -i 's/\r//' ~/CV/TRC/trc_start.sh
+> sed -i 's/\r//' ~/CV/TRC/trc_start_bench.sh
+> sed -i 's/\r//' ~/CV/SETUP/04_verify_all.sh
+> sed -i 's/\r//' ~/CV/SETUP/cleanup_pre_image.sh
+> sed -i 's/\r//' ~/CV/SETUP/install_opencv4.13.0_Jetpack6.2.2.sh
+> ```
+
 ### 7.2 Configure bench autostart — gold standard for image
 
 The **bench script is the gold standard for the production image**. Units boot
@@ -1213,6 +1465,9 @@ rm -f  ~/CV/SETUP/opencv_build_*.log
 rm -rf ~/CV/SETUP/opencv_build_workspace/
 rm -rf ~/CV/SETUP/deploy/
 rm -rf ~/CV/SETUP/gst-vmbsrc/
+# Remove stray start scripts — these belong in ~/CV/TRC/ not SETUP/
+rm -f  ~/CV/SETUP/trc_start.sh
+rm -f  ~/CV/SETUP/trc_start_bench.sh
 
 # ~/CV/TRC/ — build artifacts, source, docs (binary-only production image)
 rm -f ~/CV/TRC/*.o
@@ -1407,6 +1662,36 @@ cd ~/CV/SETUP/
 
 ---
 
+## Fleet Registry
+
+All deployed TRC units. Update this table when a unit is built, upgraded, or retired.
+
+> **SOM serial** is read from `/proc/device-tree/serial-number` — unique per NVIDIA module from factory.
+> **Hostname** is `trc-<full SOM serial>`. **IP** is always `192.168.1.22` (role address).
+
+| Hostname | SOM Serial | TRC Version | JetPack | Path | Date | Location | Notes |
+|---|---|---|---|---|---|---|---|
+| `trc-1420825016588` | 1420825016588 | 3.0.2 | 6.2.2 | A | 2026-04-09 | — | Unit 1 |
+| `trc-1423624314616` | 1423624314616 | 3.0.2 | 6.2.2 | A | 2026-04-09 | — | Unit 2 |
+| `trc-1420825019234` | 1420825019234 | 3.0.2 | 6.2.2 | A | 2026-04-10 | — | Unit 3 |
+| `trc-1420825020919` | 1420825020919 | 4.0.1 | 6.2.2 | A | 2026-04-13 | — | Unit 4 |
+| `trc-1420825016537` | 1420825016537 | 4.0.1 | 6.2.2 | A | 2026-04-13 | — | Unit 5 |
+| `trc-1423624314071` | 1423624314071 | 4.1.2 | 6.2.2 | C | 2026-04-13 | I1 | Path C validated (4.4→5.0) |
+| `trc-1420825013697` | 1420825013697 | 4.0.1 | 6.2.2 | C | 2026-04-13 | — | Path C validated (4.7→5.0) |
+| `trc-1420825019951` | 1420825019951 | 4.1.2 | 6.2.2 | C | 2026-04-15 | P2 | Path C (4.7→5.0) |
+| `trc-1420825020046` | 1420825020046 | 4.0.2 | 6.2.2 | C | 2026-04-17 | — | Path C (4.4→5.0) |
+| `trc-1420825022024` | 1420825022024 | 4.0.2 | 6.2.2 | C | 2026-04-17 | Home Lab | Path C (4.4→5.0) |
+| `trc-1422124347828` | 1422124347828 | 4.0.2 | 6.2.2 | C | 2026-04-18 | — | Path C validated (4.3→5.0) |
+| `trc-1420825018548` | 1420825018548 | 4.0.3 | 6.2.2 | A | 2026-04-19 | — | Path A — was JetPack 5.x, reflashed |
+
+> **`04_verify_all.sh` TRC version check:** The script checks for a TRC version string prefix (e.g. `"TRC 4"`). After any TRC major version change, update the check in the script and push the updated script to all units:
+> ```bash
+> sed -i 's/"TRC 3"/"TRC 4"/' ~/CV/SETUP/04_verify_all.sh
+> ```
+> The updated `04_verify_all.sh` should be included in the standard file transfer (Phase 7.1) so new units always have the correct check from the start.
+
+---
+
 ## Known Issues and Notes
 
 | Issue | Notes |
@@ -1427,7 +1712,16 @@ cd ~/CV/SETUP/
 
 | Version | Date | Notes |
 |---------|------|-------|
-| 2.2.2 | 2026-04-13 | Phase 4.6: `libVmbCPP.so: file too short` fix documented — stray file in `~/` causes error; `rm -f ~/libVmbCPP.so` resolves. Phase 8.2: `test1.py` kept as survivor (diagnostic tool) — removed from cleanup script. Phase 9.2/9.3: rewritten — `dd` and `l4t_backup_restore.sh` documented as NOT supported for cloning (QSPI not transferred). Correct tool is `l4t_initrd_flash.sh --massflash` (pending validation). Ubuntu host disk space requirement (≥50GB) documented. Path A confirmed as current new-unit procedure until massflash validated. Known issues: two new entries added. |
+| 2.3.1 | 2026-04-19 | TRC 4.1.0 introduced. Makefile note: new source transfers from Windows may reset VIMBAX_DIR to `VimbaX_2025-1` — always run `sed -i 's|VimbaX_2025-1|VimbaX_2026-1|g' Makefile` after transfer. Scripts need `chmod +x` after transfer (both `trc_start.sh` and `trc_start_bench.sh`). Hot-reload procedure: `pkill trc_start_bench.sh && pkill ./trc` → fix line endings → rebuild → restart. |
+| 2.3.0 | 2026-04-19 | Fleet Registry: `trc-1420825018548` added — JetPack 5.x (R35) unit, required full Path A reflash. TRC 4.0.3 introduced. R35 warning added to Path C. |
+| 2.2.9 | 2026-04-18 | Path C validated on REVISION 4.3 → 5.0. Fleet Registry: `trc-1422124347828` added (11 units). |
+| 2.2.8 | 2026-04-17 | Fleet Registry: `trc-1420825022024` added. Path C Step 1b: gateway before ping. Step 1c: passwordless sudo. Step 1d: clean CV directory. |
+| 2.2.7 | 2026-04-17 | Fleet Registry section added. `04_verify_all.sh` TRC version check note added. |
+| 2.2.6 | 2026-04-15 | Path C Step 1: clock sync verification added. Path C Step 4: REVISION 4.7 note. Path C Step 5: split 4.4/4.7 paths. Phase 2.3 and 4.8: Windows GStreamer `address=` parameter for dual-NIC. |
+| 2.2.5 | 2026-04-15 | Path C Step 6: long boot warning added. Phase 4.8: two-step pipeline test and iris note added. |
+| 2.2.4 | 2026-04-13 | Path C reinstated — validated in-place apt upgrade 6.2.1 → 6.2.2. Path B updated. Phase 8.2 cleanup: stray trc_start scripts removal added. |
+| 2.2.3 | 2026-04-13 | Phase 0.3: two-boot sequence documented. Phase 7.1: Windows line endings fix added. |
+| 2.2.2 | 2026-04-13 | Phase 4.6: `libVmbCPP.so: file too short` fix documented. Phase 8.2: `test1.py` kept as survivor. Phase 9.2/9.3: rewritten — dd/l4t_backup_restore NOT supported for cloning. Known issues: two new entries. |
 | 2.2.1 | 2026-04-10 | Phase 7.1: `04_verify_all.sh` and `cleanup_pre_image.sh` added to file push step. Phase 7.3: marked POST-DEPLOYMENT ONLY. Checkpoint 7: corrected log reference and tcpdump target. Phase 8.2: `gst-vmbsrc/` directory added to cleanup script. Pass criteria table: Makefile row annotated with Gate A/B caveat. |
 | 2.2.0 | 2026-04-10 | Path C retired — upgrade path is Path B (image restore). Path B updated to cover upgrades. Path D: Super units share same TRC role IP. IP 192.168.1.22 documented as TRC role address shared by all units. Hostname scheme: `trc-<SOM serial>` from `/proc/device-tree/serial-number` — Phase 1.1a added. Phase 8 restructured: 8.1 desktop removal, 8.2 cleanup script (`cleanup_pre_image.sh`), 8.3 two-gate verify (54 PASS pre-cleanup / 53 PASS + 1 expected FAIL post-cleanup). Bench crontab documented as gold standard for image. |
 | 1.0.0 | 2026-04-09 | Initial — based on live baseline verification of lab Jetson 2026-04-06 |
