@@ -91,7 +91,58 @@ Session numbers marked `~` are approximate where the exact session number is unc
 
 ---
 
-## CB-20260419c — TRC Jetson health telemetry compaction + GPU temp + OSD colour coding
+## CB-20260421 — ENG GUI MCC V3 hardware revision support
+**Files:** `defines.cs`, `MSG_MCC.cs`, `frmMCC.cs`, `frmMCC_Designer.cs`
+**ICD:** no change — wire protocol unchanged, C# implementation only
+**ARCH:** no change
+
+**Summary:** ENG GUI updated to support MCC V3 hardware revision. Power control layout redesigned with logical abstraction (Gimbal Power, Relay Bus, Laser HV Sol) replacing raw hardware names. All four build targets supported: V1·48V·3kW, V2·300V·6kW, V3·48V·3kW, V3·300V·6kW.
+
+**`defines.cs` changes:**
+- `CHARGE_LEVELS`: `DISABLE→OFF` to align with firmware `CHARGE_LEVELS::OFF`; all four values annotated per revision (V1/V3 vs V2)
+- `MCC_POWER` enum: five renames (`GPS_RELAY→RELAY_GPS`, `LASER_RELAY→RELAY_LASER`, `GIM_VICOR→VICOR_GIM`, `TMS_VICOR→VICOR_TMS`); `RELAY_NTP=7` added; full V1/V2/V3 pin and opto annotations
+- `SET_CHARGER` docstring: V1/V3 (DBU3200 I2C) vs V2 (GPIO only) clarified
+- `RES_E4`/`RES_EC` retired notices: updated to new enum names
+
+**`MSG_MCC.cs` changes:**
+- `HW_REV` comment: `0x03=V3` added
+- `IsV3` property added (`HW_REV == 0x03`)
+- `HW_REV_Label`: V3 case added with voltage/laser annotation
+- `pb_*` renames: `pb_GpsRelay→pb_RelayGps`, `pb_LaserRelay→pb_RelayLaser`, `pb_GimVicor→pb_VicorGim`, `pb_TmsVicor→pb_VicorTms`; old names retained as backward-compat aliases
+- `pb_RelayNtp` added (PowerBits bit 7, V3 only)
+- `isLaserModelMatch` added (HealthBits bit 4)
+- `isLaserPowerBus_Enabled` compat alias: updated to `RELAY_LASER`
+- Compat aliases `isVicor_Enabled`, `isRelay1_Enabled`, `isRelay2_Enabled` updated to new enum names
+- Header comments for byte [9] and [10] updated
+
+**`frmMCC.cs` changes:**
+- `ApplyHwRevLayout()`: full three-way V1/V2/V3 guard; V3·6kW detected from `pb_VicorGim`
+- Power control logical abstraction:
+  - `chk_Solenoid1` = Laser HV Sol (`SOL_HEL`) — V1/V3·3kW only
+  - `chk_Solenoid2` = Gimbal Power (`SOL_BDA` on V1/V3·3kW, `VICOR_GIM` on V2/V3·6kW) — all revisions
+  - `chk_Vicor` = Relay Bus (`VICOR_BUS`) — V1/V3·3kW only; hidden V2/V3·6kW
+  - `chk_Relay1` = GPS Relay (`RELAY_GPS`) — V1/V3; hidden V2
+  - `chk_Relay2` = Laser Relay (`RELAY_LASER`) — all revisions
+  - `chk_Relay3` = TMS Vicor (`VICOR_TMS`) — V2/V3·6kW only
+  - `chk_Relay4` = NTP Relay (`RELAY_NTP`) — V3 only; unhidden
+- `chk_Solenoid2` handler: dispatches `SOL_BDA` or `VICOR_GIM` per revision
+- `chk_Vicor` handler: always `VICOR_BUS` (control hidden when not applicable)
+- `chk_Relay4` handler added: `RELAY_NTP`
+- All `pb_*` references updated to new names
+- `CHARGE_LEVELS.DISABLE` → `CHARGE_LEVELS.OFF`
+- `mb_LasPow_Enabled_rb`: updated to `pb_RelayLaser`
+- Status readback block: `mb_Relay4_Enabled_rb` now shows `pb_RelayNtp`; gimbal power readback revision-aware
+
+**`frmMCC_Designer.cs` changes:**
+- Checkbox labels updated: `Solenoid 1 (HEL)→Laser HV Sol`, `Solenoid 2 (BDA)→Gimbal Power`, `VICOR→Relay Bus`, `Relay 1 (GPS)→GPS Relay`, `Relay 2 (HEL)→Laser Relay`, `Relay 3 (TMS)→TMS Vicor`, `Relay 4 (RES)→NTP Relay`
+- `chk_Relay4_Enable.CheckedChanged` wired to `chk_Relay4_Enable_CheckedChanged`
+
+**Items closed:** none
+**Items opened:** none — pending compile verify
+
+---
+
+
 **Files:** `telemetry.h`, `compositor.h`, `udp_listener.h`, `main.cpp`, `udp_listener.cpp`, `osd.cpp`, `osd.h`, `compositor.cpp`, `MSG_TRC.cs`, `frmTRC.cs`
 **ICD:** v4.1.0 → v4.2.0
 
