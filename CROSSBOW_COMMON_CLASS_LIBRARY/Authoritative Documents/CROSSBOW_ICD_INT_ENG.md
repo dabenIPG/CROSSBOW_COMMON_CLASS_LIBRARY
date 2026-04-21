@@ -12,6 +12,18 @@
 
 ## Version History
 
+**vTBD changes (MCC V3 hardware revision — HW_REV_V3 + LASER_xK axis):**
+- MCC REG1 byte [254] `HW_REV`: `0x03`=V3 (PMS Controller 1.0 Rev B — monolithic PCB, 48V or 300V battery, 3kW or 6kW laser). Tagged vTBD pending ICD version bump.
+- `MCC_POWER` enum: five renames for naming convention alignment (bit positions unchanged — no wire-level breaking change). `GPS_RELAY→RELAY_GPS`, `LASER_RELAY→RELAY_LASER`, `GIM_VICOR→VICOR_GIM`, `TMS_VICOR→VICOR_TMS`. Bit 7 promoted from `RES` → `RELAY_NTP` (Phoenix NTP appliance relay — V3 only; always 0 on V1/V2).
+- `MCC_POWER` V3 valid values: `RELAY_GPS(0)`, `VICOR_BUS(1)`, `RELAY_LASER(2)`, `SOL_HEL(5)`, `SOL_BDA(6)`, `RELAY_NTP(7)` (3kW); adds `VICOR_GIM(3)`, `VICOR_TMS(4)` (6kW). `VICOR_BUS` polarity inverted V1→V3 (LOW=ON → HIGH=ON). `RELAY_LASER` dispatches to pin 54 (3kW) or `PIN_ENERGIZE` pin 63 (6kW) — compile-time gated by `LASER_3K`/`LASER_6K`.
+- `LASER_3K`/`LASER_6K` compile-time axis added to `hw_rev.hpp` — gates `EnablePower(RELAY_LASER)` pin dispatch. Runtime `ipg.laserModel` sense is verification only.
+- `MSG_MCC.cs`: `IsV3`/`HW_REV_Label` updated; `pb_RelayNtp` property added (PowerBits bit 7, V3 only). Enum rename aliases: `pb_GpsRelay→pb_RelayGps`, `pb_LaserRelay→pb_RelayLaser`, `pb_GimVicor→pb_VicorGim`, `pb_TmsVicor→pb_VicorTms` (old names retained as backward-compat aliases).
+- `0xE2 PMS_POWER_ENABLE`: V3 valid values updated — see enum table. `RELAY_NTP(7)` valid on V3 only.
+- `CHARGE_LEVELS` / `0xAF SET_CHARGER`: V1/V3 (DBU3200 I2C restored on V3). V2 still returns `STATUS_CMD_REJECTED`.
+- `HEALTH_BITS` byte [9] bit 4 promoted from `RES` → `isLaserModelMatch` — compile-time `LASER_xK` vs runtime `ipg.LASER_MODEL_BITS()` sense. `false` until laser connects and model confirmed. Diagnostic: `isHEL_Ready` (DEVICE_READY bit 2) true + `isLaserModelMatch` false = hardware config error; both false = laser not yet up.
+- `MSG_MCC.cs`: `pb_LaserModelMatch` property added (HealthBits bit 4). Pending `frmMCC` indicator wire-up.
+- Open item: `DEF-2` — TMC-specific enums (`TMC_VICORS`, `TMC_DAC_CHANNELS`, `TMC_PUMP_SPEEDS`) currently guarded by `!defined(HW_REV_V2)` in `defines.hpp` — must migrate to controller-scoped `TMC_HW_REV_V2` guard to avoid cross-controller revision flag collisions on mixed fleets.
+
 **v4.2.0 changes (CB-20260419c — Jetson health compaction + GPU temp):**
 - TRC REG1 Jetson health fields compacted int16 → uint8 — resolution sufficient for all values (temps 0–95°C, loads 0–100%); saves 4 bytes.
 - `jetsonTemp` [45–46] int16 → `jetsonTemp` [45] uint8. Source: `thermal_zone0` millidegrees ÷ 1000.
@@ -628,7 +640,7 @@ Scoping differs by codebase (`enum ICD` in C#/THEIA, `enum ICD_CMDS` in TRC, `en
 |------|------|-------------|---------|------------|-------------|------------|-------|------------|------------|
 | 0xE0 | SET_BCAST_FIRECONTROL_STATUS | Broadcast fire control vote bytes to all embedded controllers. **Moved from `0xAB` (v3.6.0).** Internal command — MCC aggregates vote state from A1 stream and forwards to TRC via BDC. Verify source: confirm whether MCC sends autonomously on every A1 cycle or only on vote state change. | uint8 voteBitsMcc (MCC vote bits); uint8 voteBitsBdc (BDC geometry vote bits) | — | ✓ | ✓ | `INT_ENG` | MCC, BDC, TRC | — |
 | 0xE1 | RES_E1 | **RETIRED v3.6.0** — SET_MCC_DEVICES_ENABLE superseded by `SET_DEVICES_ENABLE (0xAA)`. Returns `STATUS_CMD_REJECTED` pending handler removal (FW-C8). | — | — | — | — | `RES` | RES | RES |
-| 0xE2 | PMS_POWER_ENABLE | Unified power output control — replaces `PMS_SOL_ENABLE` (0xE2), `PMS_RELAY_ENABLE` (0xE4), `PMS_VICOR_ENABLE` (0xEC). INT_ENG only — A3 returns `STATUS_CMD_REJECTED`. | uint8 which (MCC_POWER enum: 0=GPS_RELAY, 1=VICOR_BUS, 2=LASER_RELAY, 3=GIM_VICOR, 4=TMS_VICOR, 5=SOL_HEL, 6=SOL_BDA); uint8 0/1. V1 valid: 0–2, 5–6. V2 valid: 2–4. Invalid `which` for active revision → `STATUS_CMD_REJECTED`. | — | — | ✓ | `INT_ENG` | MCC | MCC |
+| 0xE2 | PMS_POWER_ENABLE | Unified power output control — replaces `PMS_SOL_ENABLE` (0xE2), `PMS_RELAY_ENABLE` (0xE4), `PMS_VICOR_ENABLE` (0xEC). INT_ENG only — A3 returns `STATUS_CMD_REJECTED`. | uint8 which (MCC_POWER enum: 0=RELAY_GPS, 1=VICOR_BUS, 2=RELAY_LASER, 3=VICOR_GIM, 4=VICOR_TMS, 5=SOL_HEL, 6=SOL_BDA, 7=RELAY_NTP); uint8 0/1. V1 valid: 0–2, 5–6. V2 valid: 2–4. V3-3kW valid: 0–2, 5–7. V3-6kW valid: 0–4, 7. Invalid `which` for active revision → `STATUS_CMD_REJECTED`. | — | — | ✓ | `INT_ENG` | MCC | MCC |
 | 0xE3 | RES_E3 | **RETIRED v3.6.0** — PMS_CHARGER_ENABLE merged into `SET_CHARGER (0xAF)`. Returns `STATUS_CMD_REJECTED` pending handler removal (FW-C8). | — | — | — | — | `RES` | RES | RES |
 | 0xE4 | ~~PMS_RELAY_ENABLE~~ → **RES_E4** | **RETIRED v3.4.0** — returns `STATUS_CMD_REJECTED`. Use `0xE2 PMS_POWER_ENABLE` with `MCC_POWER::GPS_RELAY (0)` or `MCC_POWER::LASER_RELAY (2)`. | — | — | — | — | `RES` | MCC | MCC |
 | 0xE5 | RES_E5 | Reserved | — | — | — | — | `RES` | RES | RES |
@@ -638,7 +650,7 @@ Scoping differs by codebase (`enum ICD` in C#/THEIA, `enum ICD_CMDS` in TRC, `en
 | 0xE9 | TMS_SET_VICOR_ENABLE | TMS Vicor enable | uint8 vicor (TMC_VICORS enum); uint8 0/1 — V1: values 0–3 valid; V2: values 0–2,4 valid (PUMP2=4; HEAT=3 does not exist on V2) | — | — | ✓ | `INT_ENG` | MCC, TMC | MCC |
 | 0xEA | TMS_SET_LCM_ENABLE | TMS LCM enable | uint8 lcm (enum); uint8 0/1 | — | — | ✓ | `INT_ENG` | MCC, TMC | MCC |
 | 0xEB | TMS_SET_TARGET_TEMP | Set TMS target temperature | uint8 temp °C — **enforced range [10–40°C]**; firmware clamps silently. Values outside range are accepted without error but constrained. | — | — | ✓ | `INT_OPS` | MCC, TMC | MCC |
-| 0xEC | ~~PMS_VICOR_ENABLE~~ → **RES_EC** | **RETIRED v3.4.0** — returns `STATUS_CMD_REJECTED`. Use `0xE2 PMS_POWER_ENABLE` with `MCC_POWER::VICOR_BUS (1)`, `GIM_VICOR (3)`, or `TMS_VICOR (4)`. | — | — | — | — | `RES` | MCC | MCC |
+| 0xEC | ~~PMS_VICOR_ENABLE~~ → **RES_EC** | **RETIRED v3.4.0** — returns `STATUS_CMD_REJECTED`. Use `0xE2 PMS_POWER_ENABLE` with `MCC_POWER::VICOR_BUS (1)`, `VICOR_GIM (3)`, or `VICOR_TMS (4)`. | — | — | — | — | `RES` | MCC | MCC |
 | 0xED | RES_ED | **RETIRED v3.6.0** — PMS_SET_CHARGER_LEVEL merged into `SET_CHARGER (0xAF)`. Returns `STATUS_CMD_REJECTED` pending handler removal (FW-C8). | — | — | — | — | `RES` | RES | RES |
 | 0xEE | RES_EE | Reserved | — | — | — | — | `RES` | RES | RES |
 | 0xEF | RES_EF | TMS register response | — | — | — | — | `RES` | RES | RES |
@@ -1072,8 +1084,8 @@ Fixed block size: **256 bytes**.
 | 5 | 5 | 7 | 2 | dt_us | uint16 | µs in processing loop |
 | 7 | 7 | 8 | 1 | MCC DEVICE_ENABLED_BITS | uint8 | 0:NTP; 1:TMC; 2:HEL; 3:BAT; 4:PTP; 5:CRG; 6:GNSS; 7:BDC |
 | 8 | 8 | 9 | 1 | MCC DEVICE_READY_BITS | uint8 | 0:NTP; 1:TMC; 2:HEL; 3:BAT; 4:PTP; 5:CRG; 6:GNSS; 7:BDC |
-| 9 | 9 | 10 | 1 | MCC HEALTH_BITS | uint8 | 0:isReady; 1:isChargerEnabled; 2:isNotBatLowVoltage; 3:isTrainingMode (v3.5.0); 4–7:RES ⚠ **Breaking change v3.4.0** — solenoid/laser bits moved to POWER_BITS byte [10]. Old layout: 1:isSolenoid1_En; 2:isSolenoid2_En; 3:isLaserPower_En; 4:isChargerEnabled; 5:isNotBatLowVoltage. Read HW_REV [254] — layout identical on both revisions. |
-| 10 | 10 | 11 | 1 | MCC POWER_BITS | uint8 | Bit N = MCC_POWER enum value N. Unused outputs for active revision always 0 — no guards needed in decoder. 0:isPwr_GpsRelay(V1\|0 V2); 1:isPwr_VicorBus(V1\|0 V2); 2:isPwr_LaserRelay(both); 3:isPwr_GimVicor(0 V1\|V2); 4:isPwr_TmsVicor(0 V1\|V2); 5:isPwr_SolHel(V1\|0 V2); 6:isPwr_SolBda(V1\|0 V2); 7:RES ⚠ **Breaking change v3.4.0** — old layout: 0–2:RES; 3:isVicorEnabled; 4:isRelay1En; 5:isRelay2En; 6:isRelay3En; 7:isRelay4En. Read HW_REV [254] to confirm V1 vs V2 before interpreting bits 0–1 and 3–6. |
+| 9 | 9 | 10 | 1 | MCC HEALTH_BITS | uint8 | 0:isReady; 1:isChargerEnabled; 2:isNotBatLowVoltage; 3:isTrainingMode (v3.5.0); 4:isLaserModelMatch (vTBD — compile-time LASER_xK vs runtime ipg.LASER_MODEL_BITS() sense; false until laser connects and model confirmed); 5–7:RES ⚠ **Breaking change v3.4.0** — solenoid/laser bits moved to POWER_BITS byte [10]. Old layout: 1:isSolenoid1_En; 2:isSolenoid2_En; 3:isLaserPower_En; 4:isChargerEnabled; 5:isNotBatLowVoltage. Read HW_REV [254] — layout identical on all revisions. |
+| 10 | 10 | 11 | 1 | MCC POWER_BITS | uint8 | Bit N = MCC_POWER enum value N. Unused outputs for active revision always 0 — no guards needed in decoder. 0:isPwr_RelayGps(V1/V3\|0 V2); 1:isPwr_VicorBus(V1/V3\|0 V2); 2:isPwr_RelayLaser(all); 3:isPwr_VicorGim(0 V1\|V2\|V3-6kW only); 4:isPwr_VicorTms(0 V1\|V2\|V3-6kW only); 5:isPwr_SolHel(V1/V3-3kW\|0 V2/V3-6kW); 6:isPwr_SolBda(V1/V3-3kW\|0 V2/V3-6kW); 7:isPwr_RelayNtp(V3 only\|0 V1/V2) ⚠ **Breaking change v3.4.0** — old layout: 0–2:RES; 3:isVicorEnabled; 4:isRelay1En; 5:isRelay2En; 6:isRelay3En; 7:isRelay4En. Read HW_REV [254] to confirm revision before interpreting bits. — vTBD: bit 7 promoted RES→RELAY_NTP; enum renames. |
 | 11 | 11 | 12 | 1 | MCC VOTE BITS | uint8 | 0:isLaserTotalHW_Vote_rb; 1:isNotAbort_Vote_rb; 2:isArmed_Vote_rb; 3:isBDA_Vote_rb; 4:isEMON_rb; 5:isLaserFireRequested_Vote; 6:isLaserTotal_Vote_rb; 7:isCombat_Vote_rb |
 | 12 | 12 | 20 | 8 | NTP epoch Time | uint64 | ms since epoch |
 | 20 | 20 | 21 | 1 | Temp 1 (Charger) | int8 | °C |
@@ -1135,7 +1147,7 @@ Fixed block size: **256 bytes**.
 | 245 | 245 | 249 | 4 | MCC VERSION WORD | uint32 | |
 | 249 | 249 | 253 | 4 | MCU Temp | float | °C |
 | 253 | 253 | 254 | 1 | TIME_BITS | uint8 | bit0:isPTP_Enabled; bit1:ptp.isSynched; bit2:usingPTP; bit3:ntp.isSynched; bit4:ntpUsingFallback; bit5:ntpHasFallback; bit6–7:RES — session 32 |
-| 254 | 254 | 255 | 1 | HW_REV | uint8 | 0x01=V1 (relay bus/solenoids/charger I2C); 0x02=V2 (dual Vicor/no solenoids/no I2C). Read before interpreting HEALTH_BITS [9] and POWER_BITS [10]. — v3.4.0 |
+| 254 | 254 | 255 | 1 | HW_REV | uint8 | `0x01`=V1 (relay bus/solenoids/charger I2C · 48V · 3kW); `0x02`=V2 (dual Vicor/no solenoids/no I2C · 300V · 6kW); `0x03`=V3 (monolithic PCB · relay bus/solenoids/charger I2C · 48V or 300V · 3kW or 6kW — compile-time `LASER_xK` axis). Read before interpreting HEALTH_BITS [9] and POWER_BITS [10]. — v3.4.0; `0x03` added vTBD |
 | 255 | 255 | 256 | 1 | LASER_MODEL | uint8 | `LASER_MODEL` enum. `0x00`=UNKNOWN/not yet sensed; `0x01`=YLM_3K (YLM-3000-SM-VV); `0x02`=YLM_6K (YLM-6000-U3-SM). Was RESERVED. Backwards compatible — old clients reading `0x00` see UNKNOWN. — v3.5.0 |
 
 **Defined: 256 bytes. Reserved: 0 bytes. Fixed block: 256 bytes.**
@@ -1522,20 +1534,23 @@ fixed block (bytes 60–123). Fixed block size: **64 bytes**.
 
 ### MCC_POWER — `0xE2 PMS_POWER_ENABLE` which payload byte + POWER_BITS byte [10] bit index
 *v3.4.0 — replaces `MCC_SOLENOIDS`, `MCC_RELAYS`, `MCC_VICORS` (all removed from `defines.hpp`/`defines.cs`)*
+*vTBD — enum renames (bit positions unchanged); bit 7 promoted RES→RELAY_NTP; LASER_xK compile axis added*
 
 Enum value N = `POWER_BITS` byte [10] bit N. Used as `which` payload byte in `0xE2 PMS_POWER_ENABLE`.
 
-| Value | Enum | Revision | Description |
-|-------|------|----------|-------------|
-| 0 | `GPS_RELAY` | V1 only | GNSS power rail — NO opto, pin 83 |
-| 1 | `VICOR_BUS` | V1 only | Relay bank supply Vicor — inverted LOW=ON, A0 |
-| 2 | `LASER_RELAY` | Both | Laser enable — NO opto, pin 20 |
-| 3 | `GIM_VICOR` | V2 only | 300V→48V Gimbal Vicor — inverted LOW=ON, A0 |
-| 4 | `TMS_VICOR` | V2 only | TMS Vicor power bank — NC opto HIGH=ON, pin 83 |
-| 5 | `SOL_HEL` | V1 only | Laser HV bus solenoid — electromechanical, pin 5 |
-| 6 | `SOL_BDA` | V1 only | Gimbal power solenoid — electromechanical, pin 8 |
+| Value | Enum | V1 | V2 | V3 · 3kW | V3 · 6kW | Description |
+|-------|------|----|----|----------|----------|-------------|
+| 0 | `RELAY_GPS` | ✅ pin 83 | — | ✅ pin 67 | ✅ pin 67 | GPS appliance power — NO opto HIGH=ON |
+| 1 | `VICOR_BUS` | ✅ A0 LOW=ON | — | ✅ pin 40 HIGH=ON | ✅ pin 40 · PC open · fed from VICOR_TMS | Relay bus supply Vicor. Polarity inverts V1→V3. |
+| 2 | `RELAY_LASER` | ✅ pin 20 · 3kW bus | ✅ pin 83 · 6kW enable | ✅ pin 54 · 3kW bus | ✅ pin 63 `PIN_ENERGIZE` · ext PSU 5V | Laser enable. V3 pin dispatched by `LASER_xK` compile flag. |
+| 3 | `VICOR_GIM` | — | ✅ A0 NC HIGH=ON · 300V→48V | — | ✅ pin 55 HIGH=ON · 300V→48V | Gimbal Vicor. Sets `isBDC_Ready` on V2/V3-6kW. |
+| 4 | `VICOR_TMS` | — | ✅ pin 20 NC HIGH=ON · 300V→48V | — | ✅ pin 51 HIGH=ON · PC always open | TMS+board supply Vicor. V3: no independent fw switch. |
+| 5 | `SOL_HEL` | ✅ pin 5 · 3kW HV bus | — | ✅ pin 5 · 3kW HV bus | — | Laser HV bus solenoid — electromechanical. |
+| 6 | `SOL_BDA` | ✅ pin 8 · gimbal | — | ✅ pin 50 · gimbal | — | Gimbal power solenoid. Sets `isBDC_Ready` on V1/V3-3kW. |
+| 7 | `RELAY_NTP` | — | — | ✅ pin 56 HIGH=ON | ✅ pin 56 HIGH=ON | Phoenix NTP appliance power — NO opto. **New V3.** |
 
-> V1 valid: 0, 1, 2, 5, 6. V2 valid: 2, 3, 4. Invalid `which` for active revision → `STATUS_CMD_REJECTED`.
+> V1 valid: 0, 1, 2, 5, 6. V2 valid: 2, 3, 4. V3-3kW valid: 0, 1, 2, 5, 6, 7. V3-6kW valid: 0, 1, 2, 3, 4, 7. Invalid `which` for active revision → `STATUS_CMD_REJECTED`.
+> **Enum renames (vTBD):** `GPS_RELAY→RELAY_GPS`, `LASER_RELAY→RELAY_LASER`, `GIM_VICOR→VICOR_GIM`, `TMS_VICOR→VICOR_TMS`. Bit positions unchanged — no wire-level breaking change. C# backward-compat aliases retained in `MSG_MCC.cs`.
 
 ### LASER_MODEL — MCC REG1 byte [255]
 *v3.5.0 — was RESERVED. Sensed via `RMN` command on laser connect. Written by firmware `SEND_REG_01()`. Read by `MSG_MCC.cs` and `MSG_IPG.cs`.*
@@ -1607,33 +1622,35 @@ public enum TIME_SOURCE { None, PTP, NTP }
 | `ntpHasFallback` | `bool` | TIME_BITS bit 5 | Fallback server is configured |
 | `usingPTP` | `bool` | TIME_BITS bit 2 | PTP is the active time source |
 
-### v3.4.0 Additions (MCC unification)
+### v3.4.0 Additions (MCC unification) + vTBD (V3 additions)
 
 | Property | Type | Source | Description |
 |----------|------|--------|-------------|
-| `HW_REV` | `byte` | byte [254] | Hardware revision: `0x01`=V1, `0x02`=V2 |
+| `HW_REV` | `byte` | byte [254] | Hardware revision: `0x01`=V1, `0x02`=V2, `0x03`=V3 (vTBD) |
 | `IsV1` | `bool` | derived | `HW_REV == 0x01` |
 | `IsV2` | `bool` | derived | `HW_REV == 0x02` |
+| `IsV3` | `bool` | derived | `HW_REV == 0x03` — vTBD |
 | `HW_REV_Label` | `string` | derived | Human-readable revision description |
 | `HealthBits` | `byte` | byte [9] | Renamed from `StatusBits` — health only: isReady, isChargerEnabled, isNotBatLowVoltage |
 | `PowerBits` | `byte` | byte [10] | Renamed from `StatusBits2` — full power map: bit N = `MCC_POWER` value N |
 | `StatusBits` | `byte` | alias | Backward-compat → `HealthBits` |
 | `StatusBits2` | `byte` | alias | Backward-compat → `PowerBits` |
-| `isReady` | `bool` | HealthBits bit 0 | MCC system ready (was missing) |
-| `isCharger_Enabled` | `bool` | HealthBits bit 1 | Charger GPIO enabled (was StatusBits bit 4) |
-| `isNotBatLowVoltage` | `bool` | HealthBits bit 2 | Bus voltage ≥ 47V (was StatusBits bit 5) |
-| `isHEL_TrainingMode` | `bool` | HealthBits bit 3 | MCC training mode active — power clamped to 10% (v3.5.0) |
-| `pb_GpsRelay` | `bool` | PowerBits bit 0 | GPS relay state (V1 live, V2 always false) |
-| `pb_VicorBus` | `bool` | PowerBits bit 1 | Relay bus Vicor state (V1 live, V2 always false) |
-| `pb_LaserRelay` | `bool` | PowerBits bit 2 | Laser relay state (both revisions) |
-| `pb_GimVicor` | `bool` | PowerBits bit 3 | GIM Vicor state (V1 always false, V2 live) |
-| `pb_TmsVicor` | `bool` | PowerBits bit 4 | TMS Vicor state (V1 always false, V2 live) |
-| `pb_SolHel` | `bool` | PowerBits bit 5 | HEL solenoid state (V1 live, V2 always false) |
-| `pb_SolBda` | `bool` | PowerBits bit 6 | BDA solenoid state (V1 live, V2 always false) |
+| `isReady` | `bool` | HealthBits bit 0 | MCC system ready |
+| `isCharger_Enabled` | `bool` | HealthBits bit 1 | Charger GPIO enabled |
+| `isNotBatLowVoltage` | `bool` | HealthBits bit 2 | Bus voltage ≥ 47V |
+| `isHEL_TrainingMode` | `bool` | HealthBits bit 3 | Training mode active — power clamped to 10% (v3.5.0) |
+| `isLaserModelMatch` | `bool` | HealthBits bit 4 | Compile-time `LASER_xK` matches runtime sensed model. false until laser connects. See DEVICE_READY bit 2 for combined diagnostic. — vTBD |
+| `pb_RelayGps` | `bool` | PowerBits bit 0 | GPS relay state (V1/V3 live, V2 always false) — vTBD rename from `pb_GpsRelay` |
+| `pb_VicorBus` | `bool` | PowerBits bit 1 | Relay bus Vicor state (V1/V3 live, V2 always false) |
+| `pb_RelayLaser` | `bool` | PowerBits bit 2 | Laser relay/enable state (all revisions) — vTBD rename from `pb_LaserRelay` |
+| `pb_VicorGim` | `bool` | PowerBits bit 3 | GIM Vicor state (V2/V3-6kW live, V1/V3-3kW always false) — vTBD rename from `pb_GimVicor` |
+| `pb_VicorTms` | `bool` | PowerBits bit 4 | TMS Vicor state (V2/V3-6kW live, V1/V3-3kW always false) — vTBD rename from `pb_TmsVicor` |
+| `pb_SolHel` | `bool` | PowerBits bit 5 | HEL solenoid state (V1/V3-3kW live, V2/V3-6kW always false) |
+| `pb_SolBda` | `bool` | PowerBits bit 6 | BDA solenoid state (V1/V3-3kW live, V2/V3-6kW always false) |
+| `pb_RelayNtp` | `bool` | PowerBits bit 7 | NTP relay state (V3 live, V1/V2 always false) — vTBD new |
 
-> **Compat aliases retained** — `isVicor_Enabled`, `isRelay1_Enabled`, `isRelay2_Enabled` now revision-aware (check `IsV2`). `isRelay3/4_Enabled` return `false` permanently.
+> **Compat aliases retained** — `pb_GpsRelay`, `pb_LaserRelay`, `pb_GimVicor`, `pb_TmsVicor` → renamed counterparts above. `isVicor_Enabled`, `isRelay1_Enabled`, `isRelay2_Enabled` revision-aware. `isRelay3/4_Enabled` return `false` permanently.
 > **Removed** — `isUnSolicitedMode_Enabled` (retired session 35). `MCC_SOLENOIDS`, `MCC_RELAYS`, `MCC_VICORS` removed from `defines.cs` — use `MCC_POWER`.
-
 > **⚠ `MCC_DEVICES` enum:** C# enum `RTCLOCK=4` — update to `PTP=4`. `isPTP_DeviceEnabled/Ready` currently use literal `4`.
 
 ### Bug Fixed (session 29)

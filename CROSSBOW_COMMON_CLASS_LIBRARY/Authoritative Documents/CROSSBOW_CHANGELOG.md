@@ -24,6 +24,73 @@ Session numbers marked `~` are approximate where the exact session number is unc
 
 ---
 
+## CB-20260420 — MCC V3 hardware revision (HW_REV_V3 + LASER_xK axis)
+**Files:** `hw_rev.hpp`, `pin_defs_mcc.hpp`, `defines.hpp`, `mcc.hpp`, `mcc.cpp`, `MCC.ino`, `ARCHITECTURE.md`, `CROSSBOW_ICD_INT_ENG.md`
+**ICD:** vTBD (MCC REG1 HW_REV `0x03`; MCC_POWER enum renames; RELAY_NTP bit 7; HEALTH_BITS bit 4 `isLaserModelMatch`)
+**ARCH:** v4.0.1 → v4.1.0
+
+**Summary:** MCC V3 hardware revision added (PMS Controller 1.0 Rev B — monolithic PCB). Unified firmware codebase now supports V1, V2, and V3. Second compile-time axis `LASER_3K`/`LASER_6K` added to `hw_rev.hpp` to gate laser-model-dependent pin dispatch. Five `MCC_POWER` enum values renamed for naming convention alignment (bit positions unchanged). `RELAY_NTP` added at bit 7 for Phoenix NTP appliance relay (V3 only). `isLaserModelMatch` added to `HEALTH_BITS` bit 4 — compile-time vs runtime model sense. All four build targets verified clean compile: V1+3K, V2+6K, V3+3K, V3+6K.
+
+**`hw_rev.hpp` changes:**
+- `HW_REV_V3` block added — PMS Controller 1.0 Rev B (monolithic PCB).
+- `MCC_HW_REV_BYTE = 0x03` for V3.
+- `LASER_3K` / `LASER_6K` compile-time axis added with mutual-exclusion guards. Valid combinations: V1+LASER_3K, V2+LASER_6K, V3+either.
+- V3 power pin/polarity macros: `VICOR_BUS` pin 40 `HIGH=ON` (polarity inverted vs V1 LOW=ON); `RELAY_GPS` pin 67; `RELAY_LASER` dispatches pin 54 (LASER_3K) or pin 63 PIN_ENERGIZE (LASER_6K); `VICOR_GIM` pin 55 (LASER_6K only); `VICOR_TMS` pin 51 (LASER_6K only); `SOL_HEL` pin 5; `SOL_BDA` pin 50; `RELAY_NTP` pin 56.
+- Error guards: `HW_REV_V1 + LASER_6K` → compile error; `HW_REV_V2 + LASER_3K` → compile error.
+
+**`pin_defs_mcc.hpp` changes:**
+- Three-way `#if HW_REV_V1 / #elif HW_REV_V2 / #elif HW_REV_V3` guards throughout — no V1==V3 assumptions.
+- V3-only pins added: `PIN_WIZ_CS(10)`, `PIN_STM_RESET(62)`, `PIN_IP178_RST(52)`, `PIN_SWITCH_USB_EN(64)`, `PIN_LOCAL_NOT_ABORT(3)`, `PIN_LOCAL_ARM(4)`, `PIN_ABORT_SW_EN(44)`, `PIN_ARM_SW_EN(46)`, `PIN_isFIRE(42)`, `PIN_MODE(43)`, `PIN_ENERGIZE(63)`, `PIN_TRIG_RB(72)`, `PIN_isFIRE_Ready(75)`, `PIN_BAT_SENSE_RB(73)`, `PIN_VICOR_TEMP2(A5)`, `PIN_TEMP_4(A4)`, `PIN_RELAY3_ENABLE(54)`.
+- `PIN_ARM_NOTABORT_BDA_RB` retired on V3 (HW AND gate removed — SW AND in `CheckVotes()`).
+- `PIN_PRE_TRIG_RB` retired on V3 (replaced by `PIN_TRIG_RB`).
+- Redundant `BDPIN_LED_USER_5` alias removed — all five LEDs come from OpenCR variant.
+
+**`defines.hpp` changes:**
+- `MCC_POWER` enum: five renames (`GPS_RELAY→RELAY_GPS`, `LASER_RELAY→RELAY_LASER`, `GIM_VICOR→VICOR_GIM`, `TMS_VICOR→VICOR_TMS`); `RELAY_NTP=7` added.
+- Inline comments updated with V1/V2/V3 pin annotations and polarity per value.
+- `0xE2 PMS_POWER_ENABLE` docstring: V3 valid values added.
+- `0xAF SET_CHARGER` / `CHARGE_LEVELS`: V1/V3 (DBU3200 I2C restored on V3).
+- HW_REV comment block: `0x03=V3` added.
+- Hardware revision guard comment updated: `!defined(HW_REV_V2)` convention noted as DEF-2 risk.
+
+**`mcc.hpp` changes:**
+- `isCRG_Ready()`: V3 branch added — `dbu.isConnected()` same as V1.
+- `HB_CRG()`: V3 branch added — `dbu.HB_ms()` same as V1.
+- `chargeLevel` field: V3 guard added (V1/V3 — I2C charger present).
+- `dbu` include guard: `#if defined(HW_REV_V1) || defined(HW_REV_V3)`.
+- Power flag names updated: `isPwr_GpsRelay→isPwr_RelayGps` etc. (all seven flags renamed to match enum).
+- `isPwr_RelayNtp` added (bit 7).
+- `POWER_BITS()`: bit 7 `RELAY_NTP` added.
+
+**`mcc.cpp` changes:**
+- `EnablePower()`: `#elif defined(HW_REV_V3)` case block added. V3-3kW: RELAY_GPS(67), VICOR_BUS(40), RELAY_LASER(54), SOL_HEL(5), SOL_BDA(50) — sets `isBDC_Ready`. V3-6kW: RELAY_GPS(67), VICOR_BUS(40), RELAY_LASER→PIN_ENERGIZE(63), VICOR_GIM(55) — sets `isBDC_Ready`, VICOR_TMS(51), RELAY_NTP(56).
+- `StateManager()`: V3 power-on/off sequences added for both LASER_3K and LASER_6K. LASER_6K boot order: VICOR_TMS first (board power), then VICOR_GIM, then RELAY_LASER (PIN_ENERGIZE). LASER_3K mirrors V1 with updated pin names.
+- `CheckVotes()`: V3 branch — `isLaserTotalHW_Vote_rb` computed as SW AND of `digitalRead(PIN_SAFETY_ISNOTABORT)`, `digitalRead(PIN_SAFETY_ISARMED)`, `digitalRead(PIN_SAFETY_ISBDAVOTE)`. HW AND gate (`PIN_ARM_NOTABORT_BDA_RB`) absent on V3.
+- `dbu.INIT()` / `dbu.UPDATE()` guards: `defined(HW_REV_V1) || defined(HW_REV_V3)`.
+- `SEND_REG_01()` charger block: V3 branch same as V1 (DBU3200 fields).
+- Serial debug strings: all `MCC_POWER` enum name references updated to new names.
+- `PIN_CRG_OK` `digitalRead` block: V2 only guard confirmed.
+
+**`ARCHITECTURE.md` changes (v4.1.0):**
+- §9 MCC header: V3 + `LASER_xK` axis documented.
+- §9.1 hardware variants table: V1/V2/V3 three-column with V2 pin-reuse warning.
+- §9.1a (new): PMS Power Flow — full power flow diagrams for V1, V2, V3, V3*, V4 planning. `MCC_POWER` enum cross-revision table.
+- §9.6: Two-axis build config (HW_REV + LASER_xK), valid combinations matrix, updated polarity macros.
+- §3.1: HW_REV_V3 row added; MCC `IsV3` C# pattern; HW_REV byte `0x03`; bring-up note for V3 VICOR_BUS polarity.
+- §16: MCC compat matrix entry updated.
+
+**Items closed:** none
+**Items opened:**
+| ID | Item | Priority |
+|----|------|----------|
+| DEF-2 | `TMC_VICORS` / `TMC_DAC_CHANNELS` / `TMC_PUMP_SPEEDS` in `defines.hpp` guarded by `!defined(HW_REV_V2)` — **silent wrong-enum failure on mixed-revision fleets.** Concrete failure: MCC V3 build sets `-DHW_REV_V3` (not `HW_REV_V2`), so `!defined(HW_REV_V2)` is true — MCC gets `TMC_VICORS::PUMP=2` and `TMC_VICORS::HEAT=3`. If the fleet is running TMC V2 hardware, `HEAT=3` is a gap/invalid on TMC V2 (intentional gap to prevent misrouting). MCC sends `TMS_SET_VICOR_ENABLE(HEAT, 1)` and TMC V2 silently rejects or misroutes it — no compile error, no link error, no runtime assert. Symmetric risk: MCC V2 build + TMC V1 fleet loses `HEAT` visibility entirely. **Fix:** move `TMC_VICORS`, `TMC_DAC_CHANNELS`, `TMC_PUMP_SPEEDS` out of `defines.hpp` into `tmc.hpp`, guarded by controller-scoped `TMC_HW_REV_V1` / `TMC_HW_REV_V2`. `defines.hpp` retains only the command bytes (`0xE8`, `0xE9`). C# `defines.cs` must be updated in parallel — same three enums, same controller-scoped guard logic. MCC firmware forwards raw `uint8` payload and never interprets the enum values directly, so MCC translation unit does not need the enums post-fix. | 🔴 High |
+| FW-MCC-V3-ISR | Vote ISR `attachInterrupt()` calls never implemented in `MCC.ino` — ISR functions exist (`abortVote_ISR`, `armVote_ISR`, `bdaVote_ISR`, `hwVote_ISR`, `fireVote_ISR`) but are dead code. `CheckVotes()` polling in `UPDATE()` is the active readback mechanism (~20ms worst-case latency). **Note: hardware AND gates handle actual fire control votes in real time — firmware readback is telemetry only, 20ms latency is not a safety concern.** V3 bring-up showed interrupt triggering issues — suspected hardware issue. Revisit with scope on readback pins (ISNOTABORT=2, ISARMED=7, ISBDAVOTE=8, FIREVOTE=41) to confirm signal levels and edge behaviour before attaching interrupts. Do not attach until HW verified. | 🟡 Medium |
+| ICD-MCC-V3 | ICD version bump for MCC V3 changes: HW_REV `0x03`, MCC_POWER enum renames, RELAY_NTP bit 7 promotion, `isLaserModelMatch` HEALTH_BITS bit 4. Tagged vTBD pending bump decision. | 🟡 Medium |
+| ARCH-MCC-V3 | ARCHITECTURE.md version bump to v4.1.0 for MCC V3 section additions. | 🟡 Medium |
+| FW-MCC-LASER-MATCH | `isLaserModelMatch` HEALTH_BITS bit 4 added — compile-time `LASER_xK` vs runtime `ipg.LASER_MODEL_BITS()` sense. `false` until laser connects and model confirmed. Combination with `isHEL_Ready` (DEVICE_READY bit 2) gives full diagnostic: both false = not up; both true = nominal; HEL ready + match false = config error. Pending `MSG_MCC.cs` `pb_LaserModelMatch` property and `frmMCC` indicator. | 🟡 Medium |
+
+---
+
 ## CB-20260419c — TRC Jetson health telemetry compaction + GPU temp + OSD colour coding
 **Files:** `telemetry.h`, `compositor.h`, `udp_listener.h`, `main.cpp`, `udp_listener.cpp`, `osd.cpp`, `osd.h`, `compositor.cpp`, `MSG_TRC.cs`, `frmTRC.cs`
 **ICD:** v4.1.0 → v4.2.0

@@ -404,7 +404,7 @@ at boot. Read the `HW_REV` register byte before interpreting `HEALTH_BITS` and `
 
 | Controller | HW_REV Byte | V1 Platform | V2 Platform | Key V1 → V2 Differences | ICD Breaking Change |
 |-----------|------------|-------------|-------------|--------------------------|---------------------|
-| **MCC** | REG1 [254] | STM32F7 | STM32F7 | Solenoids (SOL_HEL, SOL_BDA) retired; single relay-bus Vicor replaced by dual independent Vicors (GIM_VICOR LOW=ON, TMS_VICOR HIGH=ON); GPS relay removed (GNSS always powered); charger changed from I2C (DBU3200 CC/CV) to GPIO-only; charger enable pin moved (6→82) | `HEALTH_BITS`/`POWER_BITS` rename — ICD v3.4.0 |
+| **MCC** | REG1 [254] | STM32F7 | STM32F7 | STM32F7 | Solenoids retired on V2, restored on V3 (SOL_BDA pin moved 8→50); relay bus Vicor absent V2, restored V3 (pin A0→40, polarity LOW→HIGH); three relays on V3 vs two on V1 (RELAY_NTP new on V3); VICOR_GIM/TMS absent V1, switched V2, optional external V3-6kW; charger I2C retired V2, restored V3; `LASER_3K`/`LASER_6K` compile axis gates RELAY_LASER pin dispatch (V3 only) | `HEALTH_BITS`/`POWER_BITS` rename — ICD v3.4.0; V3 enum renames (RELAY_GPS, RELAY_LASER, RELAY_NTP, VICOR_GIM, VICOR_TMS) + `HW_REV_BYTE 0x03` — ICD vTBD |
 | **BDC** | REG1 [392] | STM32F7 | STM32F7 | Vicor PSU polarity inverted (NC opto LOW=ON → non-inverted HIGH=ON); Vicor thermistor pin moved (GPIO 0→20); three new NTC thermistors added (RELAY GPIO 19, BAT GPIO 18, USB GPIO 16); IP175 5-port Ethernet switch added (RESET GPIO 52, DISABLE GPIO 64); unused DIG2 (GPIO 42) removed | `HEALTH_BITS`/`POWER_BITS` rename; `isSwitchEnabled` HEALTH_BITS bit 1 (V2 only) — ICD v3.5.1 |
 | **TMC** | REG1 [62] | STM32F7 | STM32F7 | Single Vicor pump (DAC speed control) replaced by two independent TRACO DC-DCs (on/off only, per-pump); heater subsystem (Vicor + DAC) removed; two ADS1015 external ADCs (8 aux temp channels) removed — replaced by direct MCU analog inputs; total Vicors reduced 4→2 (LCM only); PSU inhibit opto polarity flipped (NO CTRL_ON=LOW → NC CTRL_ON=HIGH); `tv3`/`tv4` temp channels V1-only (0x00 on V2) | None breaking — unified in session 30 |
 | **FMC** | REG1 [45] | SAMD21 (MKR) | STM32F7 (OpenCR) | **Platform change** — SAMD21 → STM32F7; serial abstracted (`SerialUSB`→`Serial` via `FMC_SERIAL`); SPI bus abstracted (`SPI`→`SPI_IMU` via `FMC_SPI`); BME280 ambient TPH (Temp/Pressure/Humidity) live on V2 (REG1 [47–58]); V1 TPH bytes always 0x00; NTP unconditional on V2 (SAMD21 `SerialUSB` blocking bug not applicable on STM32) | `HEALTH_BITS` [7] / `POWER_BITS` [46] promoted from RESERVED; `isFSM_Powered`/`isStageEnabled` moved from HEALTH_BITS to POWER_BITS — ICD v3.5.2 |
@@ -415,9 +415,11 @@ at boot. Read the `HW_REV` register byte before interpreting `HEALTH_BITS` and `
 // All controllers: read HW_REV byte first; gate V2-only field reads on IsV2
 bool IsV1  = (HW_REV == 0x01);
 bool IsV2  = (HW_REV == 0x02);
+bool IsV3  = (HW_REV == 0x03);
 
 // MCC — byte [254]
-bool mccIsV2 = msgMcc.IsV2;   // gates: HEALTH_BITS[9], POWER_BITS[10], TMS_VICOR fields
+bool mccIsV2 = msgMcc.IsV2;   // gates: HEALTH_BITS[9], POWER_BITS[10] V2-only bits (VICOR_GIM/TMS)
+bool mccIsV3 = msgMcc.IsV3;   // gates: RELAY_NTP bit 7, V3 pin map, LASER_xK model-aware paths
 
 // BDC — byte [392]
 bool bdcIsV2 = msgBdc.IsV2;   // gates: isSwitchEnabled (HEALTH_BITS bit 1), TEMP_RELAY/BAT/USB [393-395]
@@ -433,16 +435,20 @@ bool fmcIsV2 = msgFmc.IsV2;   // gates: POWER_BITS [46], TPH fields [47-58]
 
 | Define | MCC | BDC | TMC | FMC |
 |--------|-----|-----|-----|-----|
-| `HW_REV_V1` | V1 — solenoids, relay-bus Vicor, I2C charger | V1 — Vicor NC opto LOW=ON, GPIO 0 thermistor | V1 — Vicor pump, ADS1015, heater | V1 — SAMD21/MKR layout |
-| `HW_REV_V2` | V2 — dual Vicor (GIM+TMS), no solenoids, GPIO charger | V2 — Vicor HIGH=ON, GPIO 20 thermistor, 3 new NTCs, IP175 | V2 — TRACO pumps, direct MCU analog, no heater | V2 — STM32F7/OpenCR layout |
-| HW_REV byte | `MCC_HW_REV_BYTE` → REG1 [254] | `BDC_HW_REV_BYTE` → REG1 [392] | `TMC_HW_REV_BYTE` → REG1 [62] | `FMC_HW_REV_BYTE` → REG1 [45] |
-| Polarity macro | `POL_PWR_GIM_ON=LOW` / `POL_PWR_TMS_ON=HIGH` (V2) | `POL_VICOR_ON/OFF` | `CTRL_ON/CTRL_OFF` | `FSM_POW_ON/OFF` |
+| `HW_REV_V1` | V1 — relay bus Vicor (A0 LOW=ON), solenoids, GPS relay, I2C charger | V1 — Vicor NC opto LOW=ON, GPIO 0 thermistor | V1 — Vicor pump, ADS1015, heater | V1 — SAMD21/MKR layout |
+| `HW_REV_V2` | V2 — VICOR_GIM (A0 HIGH=ON) + VICOR_TMS (pin 20 HIGH=ON), no solenoids, no relay bank, GPIO charger | V2 — Vicor HIGH=ON, GPIO 20 thermistor, 3 new NTCs, IP175 | V2 — TRACO pumps, direct MCU analog, no heater | V2 — STM32F7/OpenCR layout |
+| `HW_REV_V3` | V3 — VICOR_BUS (pin 40 HIGH=ON), solenoids restored (SOL_BDA pin 50), three relays (GPS/NTP/LASER), I2C charger; `LASER_6K` adds VICOR_GIM (pin 55) + VICOR_TMS (pin 51) external | — | — | — |
+| HW_REV byte | `MCC_HW_REV_BYTE` → REG1 [254] · `0x01`=V1, `0x02`=V2, `0x03`=V3 | `BDC_HW_REV_BYTE` → REG1 [392] | `TMC_HW_REV_BYTE` → REG1 [62] | `FMC_HW_REV_BYTE` → REG1 [45] |
+| Polarity macro | `POL_VICOR_BUS_ON=LOW`(V1) / `POL_PWR_GIM_ON=HIGH`(V2) / `POL_VICOR_BUS_ON=HIGH`(V3) | `POL_VICOR_ON/OFF` | `CTRL_ON/CTRL_OFF` | `FSM_POW_ON/OFF` |
 | Serial | — | — | — | `FMC_SERIAL` (`SerialUSB`↔`Serial`) |
 | SPI | — | — | — | `FMC_SPI` (`SPI`↔`SPI_IMU`) |
 
-> ⚠️ **Bring-up note (MCC V2):** `POL_PWR_GIM_ON = LOW` and `POL_PWR_TMS_ON = HIGH` are
-> analytically derived — verify with a meter on first V2 MCC hardware bring-up before enabling
-> relay sequences.
+> ⚠️ **Bring-up note (MCC V2):** `POL_PWR_GIM_ON = HIGH` and `POL_PWR_TMS_ON = HIGH` are
+> confirmed on hardware 2026-04-08.
+
+> ⚠️ **Bring-up note (MCC V3 VICOR_BUS):** `POL_VICOR_BUS_ON = HIGH` on V3 — polarity inverted
+> vs V1 (was LOW=ON). Use `POL_VICOR_BUS_ON` / `POL_VICOR_BUS_OFF` macros from `hw_rev.hpp`;
+> never write literal `HIGH`/`LOW` to the VICOR_BUS pin.
 
 > ⚠️ **BDC Vicor polarity:** V1 NC opto (LOW=ON, safe-off=HIGH). V2 non-inverted (HIGH=ON,
 > safe-off=LOW). Boot-safe state uses `POL_VICOR_OFF` — never write literal `HIGH`/`LOW` to
@@ -1286,7 +1292,7 @@ Compositor (60 Hz)
 
 MCC runs on Arduino/STM32F7, FW v3.3.0, IP: 192.168.1.10.
 
-Hardware revision is selected at compile time in `hw_rev.hpp` (`HW_REV_V1` or `HW_REV_V2`). The active revision is reported in REG1 byte [254] (`HW_REV`) so `MSG_MCC.cs` can self-detect the register layout. Read byte [254] before interpreting `HEALTH_BITS` [9] and `POWER_BITS` [10].
+Hardware revision is selected at compile time in `hw_rev.hpp` (`HW_REV_V1`, `HW_REV_V2`, or `HW_REV_V3`). A second compile-time axis `LASER_3K` / `LASER_6K` selects the laser model and gates power pin dispatch in `EnablePower()` — the runtime `ipg.laserModel` sense is a verification check only. The active revision is reported in REG1 byte [254] (`HW_REV`) so `MSG_MCC.cs` can self-detect the register layout. Read byte [254] before interpreting `HEALTH_BITS` [9] and `POWER_BITS` [10].
 
 ### 9.1 Role
 
@@ -1302,15 +1308,110 @@ Master Control Controller — manages all power and energy subsystems:
 
 **Hardware variants:**
 
-| Subsystem | V1 | V2 |
-|-----------|----|----|\n| Solenoids | SOL_HEL (pin 5) + SOL_BDA (pin 8) — laser HV bus + gimbal power | **Retired** — hardware removed |
-| Relay bus | Single Vicor (A0, LOW=ON) → relay bank | **Repurposed** → `GIM_VICOR` (A0, LOW=ON) — 300V→48V Gimbal Vicor |
-| TMS Vicor | None (`MCC_RELAYS::TMS` was pinless) | Pin 83 = `TMS_VICOR` — NC opto → TMS Vicor power bank (HIGH=ON) |
-| GPS relay | Pin 83 (NO opto) → GNSS power | **Retired** — GNSS always powered at boot |
-| Laser relay | Pin 20 (NO opto) → laser digital bus | Pin 20 (NO opto) → laser enable (swapped from pin 83) |
-| Charger enable | GPIO pin 6 | GPIO pin 82 (was CHARGER_MODE on V1) |
-| Charger I2C | DBU3200 — CC/CV control, status | **Retired** — new charger GPIO only |
-| `isBDC_Ready` source | Set by SOL_BDA on in StateManager | Set by `EnablePower(GIM_VICOR)` in StateManager |
+| Subsystem | V1 · 48V · 3kW | V2 · 300V · 6kW | V3 · 48V or 300V · 3kW or 6kW |
+|-----------|----------------|-----------------|-------------------------------|
+| Battery | 48V | 300V | 48V (3kW) or 300V (6kW) |
+| STM32 input | 48V direct | 300V→48V via VICOR_GIM/TMS (unmanaged) | 48V direct (3kW) or 300V→48V via VICOR_TMS PC-always-open (6kW) |
+| Solenoids | `SOL_HEL` pin 5 (laser HV bus) + `SOL_BDA` pin 8 (gimbal) | **Retired** | `SOL_HEL` pin 5 (3kW only) + `SOL_BDA` pin 50 (3kW only) |
+| Relay bus Vicor | `VICOR_BUS` A0 LOW=ON · 48V→24V | **None** — no relay bank | `VICOR_BUS` pin 40 HIGH=ON · 48V→24V (3kW) or fed from VICOR_TMS 48V pickoff (6kW) — PC always open |
+| VICOR_GIM | None | A0 NC HIGH=ON · 300V→48V gimbal ⚠️ reuses V1 VICOR_BUS pin | pin 55 HIGH=ON · 300V→48V gimbal (6kW only) |
+| VICOR_TMS | None | pin 20 NC HIGH=ON · 300V→48V TMS ⚠️ reuses V1 RELAY_LASER pin | pin 51 HIGH=ON · 300V→48V · feeds MCC board + TMC header passthrough (6kW) · PC always open at boot |
+| RELAY_GPS | pin 83 NO HIGH=ON → GPS 24V | **None** — GPS via unmanaged Vicor 300V→24V | pin 67 NO HIGH=ON → GPS 24V |
+| RELAY_NTP | **None** — NTP appliance direct powered, no relay | **None** — NTP via unmanaged Vicor 300V→24V | pin 56 NO HIGH=ON → Phoenix NTP appliance 24V — **new V3** |
+| RELAY_LASER | pin 20 NO HIGH=ON · 3kW digital bus 24V | pin 83 NO HIGH=ON · 6kW digital enable ⚠️ reuses V1 RELAY_GPS pin | pin 54 NO HIGH=ON · 3kW digital bus 24V (3kW) **or** pin 63 `PIN_ENERGIZE` NO opto · 5V out → ext PSU enable (6kW) |
+| Charger enable | GPIO pin 6 · DBU3200 I2C CC/CV | GPIO pin 82 · GPIO only — no I2C | GPIO pin 6 · DBU3200 I2C CC/CV (same as V1) |
+| Charger mode | pin 82 (legacy, unused) | **Retired** | pin 65 (legacy, unused) |
+| `isBDC_Ready` source | Set by `SOL_BDA` in StateManager | Set by `EnablePower(VICOR_GIM)` in StateManager | Set by `SOL_BDA` in StateManager (3kW) or `EnablePower(VICOR_GIM)` (6kW) |
+
+> ⚠️ **V2 pin-reuse note:** V2 reused three V1 pins with polarity changes to accommodate 300V architecture: A0 (VICOR_BUS→VICOR_GIM), pin 20 (RELAY_LASER→VICOR_TMS), pin 83 (RELAY_GPS→RELAY_LASER). V3 uses dedicated pins for all outputs — no reuse.
+
+### 9.1a PMS Power Flow — Per Hardware Revision
+
+The PMS (Power Management System) connects directly to the battery on all revisions. The MCC acts as the PDU controller, switching power to all downstream accessories via `EnablePower()`. Compile-time defines `HW_REV_Vx` and `LASER_xK` together fully determine the pin map and power sequence. `LASER_3K` always implies 48V battery; `LASER_6K` always implies 300V battery (internal or external PSU) — these are physically coupled. A mismatch is a hardware configuration error; the runtime `ipg.laserModel` sense provides fault detection only.
+
+**V1 — 48V battery · 3kW laser** (`-DHW_REV_V1 -DLASER_3K`)
+```
+48V bat → PMS:
+  SOL_HEL  (pin 5,  HIGH=ON) → 3kW laser HV bus 48V
+  SOL_BDA  (pin 8,  HIGH=ON) → gimbal 48V              [sets isBDC_Ready]
+  TMC                        → 48V passthrough · no switch
+  NTP appliance              → 48V direct · no switch · no relay
+
+48V bat → VICOR_BUS (A0, LOW=ON) → 24V relay bus:
+  RELAY_GPS   (pin 83, HIGH=ON) → GPS appliance 24V
+  RELAY_LASER (pin 20, HIGH=ON) → 3kW laser digital bus 24V
+```
+
+**V2 — 300V battery · 6kW laser** (`-DHW_REV_V2 -DLASER_6K`)
+```
+300V bat → PMS:
+  VICOR_TMS (pin 20, NC HIGH=ON) → 300V→48V → TMC         [⚠ pin was V1 RELAY_LASER]
+  VICOR_GIM (A0,    NC HIGH=ON) → 300V→48V → gimbal       [⚠ pin was V1 VICOR_BUS]
+                                                            [sets isBDC_Ready]
+  GPS + NTP → unmanaged Vicor 300V→24V direct · no firmware switch
+  No relay bank on V2
+
+300V bat → busbar direct → 6kW laser HV:
+  RELAY_LASER (pin 83, HIGH=ON) → 6kW laser digital enable [⚠ pin was V1 RELAY_GPS]
+```
+
+**V3 — 48V battery · 3kW laser** (`-DHW_REV_V3 -DLASER_3K`)
+```
+48V bat → PMS (monolithic PCB):
+  SOL_HEL  (pin 5,  HIGH=ON) → 3kW laser HV bus 48V
+  SOL_BDA  (pin 50, HIGH=ON) → gimbal 48V              [sets isBDC_Ready]
+  TMC                        → 48V passthrough via MCC board header · no switch
+
+48V bat → onboard VICOR_BUS (pin 40, HIGH=ON) → 24V relay bus:
+  RELAY_GPS   (pin 67, HIGH=ON) → GPS appliance 24V
+  RELAY_NTP   (pin 56, HIGH=ON) → Phoenix NTP appliance 24V    [new V3]
+  RELAY_LASER (pin 54, HIGH=ON) → 3kW laser digital bus 24V
+
+Note: net label ARD_D40_LSR_PWR_EN on pin 40 is misleading —
+pin 40 is the relay bus Vicor enable, not a laser signal.
+```
+
+**V3\* — 300V battery · 6kW laser** (`-DHW_REV_V3 -DLASER_6K`)
+```
+300V bat → PMS:
+  VICOR_TMS (pin 51, HIGH=ON) → 300V→48V → MCC board power + TMC header passthrough
+  VICOR_GIM (pin 55, HIGH=ON) → 300V→48V → gimbal              [sets isBDC_Ready]
+
+VICOR_TMS 48V output → pickoff → onboard VICOR_BUS (pin 40):
+  VICOR_BUS PC pin always-open at boot (no independent fw control)
+  Input is VICOR_TMS 48V — VICOR_TMS must be enabled before relay bank is available
+  RELAY_GPS   (pin 67, HIGH=ON) → GPS appliance 24V
+  RELAY_NTP   (pin 56, HIGH=ON) → Phoenix NTP appliance 24V
+  RELAY_LASER → not driven · pin 54 unused on 6kW path
+
+300V bat → busbar direct → 6kW laser HV:
+  PIN_ENERGIZE / RELAY_LASER bit 2 (pin 63, NO opto)
+    closes → 5V out → external PSU enable signal
+
+Note: V3* requires the external Vicor pack from V2 (VICOR_GIM + VICOR_TMS)
+fitted to the V3 PCB. VICOR_TMS PC pin is held open — no firmware switch.
+```
+
+**V4 — 48V or 300V battery · 3kW or 6kW laser** (future)
+- Consolidates V3 and V3\* into a single voltage-variable platform.
+- Solenoids (`SOL_HEL`, `SOL_BDA`) retired — bits 5 and 6 available for reassignment.
+- Board includes an input Vicor (bat→48V) to accommodate either battery voltage natively.
+- `RELAY_NTP`, `RELAY_GPS`, and three-relay bank carried forward.
+
+**`MCC_POWER` enum — full cross-revision reference (POWER_BITS byte [10], bit N = enum value N):**
+
+| Bit | Enum | V1 pin | V2 pin | V3 pin · 3kW | V3 pin · 6kW | V4 | Notes |
+|-----|------|--------|--------|--------------|--------------|-----|-------|
+| 0 | `RELAY_GPS` | 83 NO HIGH=ON | — | 67 NO HIGH=ON | 67 NO HIGH=ON | ✅ | GPS appliance power |
+| 1 | `VICOR_BUS` | A0 LOW=ON · 48V→24V | — no relay bank | 40 HIGH=ON · 48V→24V | 40 HIGH=ON · fed from VICOR_TMS | ✅ | Relay bus prerequisite. Polarity flips V1→V3. |
+| 2 | `RELAY_LASER` | 20 NO HIGH=ON · 3kW bus | 83 NO HIGH=ON · 6kW enable ⚠️ | 54 NO HIGH=ON · 3kW bus | 63 PIN_ENERGIZE NO · 5V ext PSU | ✅ | V2 reuses V1 RELAY_GPS pin |
+| 3 | `VICOR_GIM` | — | A0 NC HIGH=ON · 300V→48V ⚠️ | — | 55 HIGH=ON · 300V→48V gimbal | ✅ | V2 reuses V1 VICOR_BUS pin. Sets isBDC_Ready on V2/V3-6kW. |
+| 4 | `VICOR_TMS` | — | 20 NC HIGH=ON · 300V→48V ⚠️ | — | 51 HIGH=ON · 300V→48V board+TMC · PC open | ✅ | V2 reuses V1 RELAY_LASER pin. No fw switch on V3*. |
+| 5 | `SOL_HEL` | 5 HIGH=ON · 3kW HV bus | — | 5 HIGH=ON · 3kW HV bus | — | → `LASER_HV_EN`? | V4: solenoid retired; bit available for reassignment |
+| 6 | `SOL_BDA` | 8 HIGH=ON · gimbal | — | 50 HIGH=ON · gimbal | — | — retired | Sets isBDC_Ready on V1/V3-3kW. V4: bit available. |
+| 7 | `RELAY_NTP` | — | — | 56 NO HIGH=ON | 56 NO HIGH=ON | ✅ | Phoenix NTP appliance power — new V3 |
+
+> ⚠️ **Bring-up note (V3 VICOR_BUS):** `POL_VICOR_BUS_ON = HIGH` on V3 — polarity inverted vs V1 (was LOW=ON). Use `POL_VICOR_BUS_ON` / `POL_VICOR_BUS_OFF` macros; never write literal `HIGH`/`LOW` to the VICOR_BUS pin.
 
 ### 9.2 Subsystem Embedding
 
@@ -1436,16 +1537,41 @@ Validated session 29: state=MASTER, `offset=0.000ns`, `Time Offsets Valid=TRUE`,
 
 ### 9.6 Build Configuration (`hw_rev.hpp`)
 
+Two compile-time axes must both be set. `hw_rev.hpp` enforces mutual exclusion within each axis and validates the combination.
+
+**Axis 1 — Hardware revision:**
+
 | Define | Effect |
 |--------|--------|
-| `HW_REV_V1` | V1 hardware — relay bus Vicor, solenoids, GPS relay, charger I2C |
-| `HW_REV_V2` | V2 hardware — dual Vicor (GIM+TMS), no solenoids, no GPS relay, GPIO-only charger |
-| `MCC_HW_REV_BYTE` | Auto-set — `0x01` (V1) or `0x02` (V2); written to REG1 byte [254] |
-| `PIN_PWR_*` / `POL_PWR_*_ON/OFF` | Per-revision pin and polarity macros for all 7 power outputs |
-| `POL_PWR_GIM_ON = LOW` | GIM_VICOR inverted drive — ⚠️ analytically derived, verify on V2 bring-up |
-| `POL_PWR_TMS_ON = HIGH` | TMS_VICOR NC opto — ⚠️ analytically derived, verify on V2 bring-up |
+| `HW_REV_V1` | V1 hardware — relay bus Vicor (A0 LOW=ON), solenoids, GPS relay, charger I2C (DBU3200) |
+| `HW_REV_V2` | V2 hardware — VICOR_GIM (A0) + VICOR_TMS (pin 20) switched, no relay bank, no solenoids, GPIO-only charger |
+| `HW_REV_V3` | V3 hardware — monolithic PCB, relay bus Vicor (pin 40 HIGH=ON), solenoids, three relays (GPS/NTP/LASER), charger I2C (DBU3200). 6kW variant (`LASER_6K`) adds external VICOR_GIM (pin 55) + VICOR_TMS (pin 51). |
+| `MCC_HW_REV_BYTE` | Auto-set — `0x01` (V1), `0x02` (V2), `0x03` (V3); written to REG1 byte [254] |
 
-`EnablePower(MCC_POWER, bool)` is the sole function that calls `digitalWrite` on power output pins. All seven `MCC_POWER` outputs (GPS_RELAY, VICOR_BUS, LASER_RELAY, GIM_VICOR, TMS_VICOR, SOL_HEL, SOL_BDA) are dispatched through a single switch in `EnablePower()`. `EnableRelay()`, `EnableVicor()`, and `EnableSol()` wrappers were removed — all call sites use `EnablePower()` directly.
+**Axis 2 — Laser model:**
+
+| Define | Effect |
+|--------|--------|
+| `LASER_3K` | 3kW laser (YLM-3000-SM-VV) — 48V battery. Gates `EnablePower(RELAY_LASER)` to drive pin 20 (V1) or pin 54 (V3). Enables `SOL_HEL` path. |
+| `LASER_6K` | 6kW laser (YLM-6000) — 300V battery. Gates `EnablePower(RELAY_LASER)` to drive pin 83 (V2) or `PIN_ENERGIZE` pin 63 (V3). Disables `SOL_HEL`. |
+
+**Valid build combinations:**
+
+| `HW_REV` | `LASER_3K` | `LASER_6K` | Battery | Valid |
+|----------|-----------|-----------|---------|-------|
+| `HW_REV_V1` | ✅ only | ❌ compile error | 48V | ✅ |
+| `HW_REV_V2` | ❌ compile error | ✅ only | 300V | ✅ |
+| `HW_REV_V3` | ✅ | ✅ | 48V (3kW) or 300V (6kW) | ✅ |
+
+**Power pin and polarity macros:**
+
+| Macro group | V1 | V2 | V3 |
+|-------------|----|----|-----|
+| `POL_VICOR_BUS_ON/OFF` | `LOW` / `HIGH` (inverted) | — | `HIGH` / `LOW` ⚠️ polarity flips V1→V3 |
+| `POL_VICOR_GIM_ON/OFF` | — | `HIGH` / `LOW` ✅ HW-1 confirmed | `HIGH` / `LOW` |
+| `POL_VICOR_TMS_ON/OFF` | — | `HIGH` / `LOW` ✅ HW-2 confirmed | `HIGH` / `LOW` |
+
+`EnablePower(MCC_POWER, bool)` is the sole function that calls `digitalWrite` on power output pins. All eight `MCC_POWER` outputs (`RELAY_GPS`, `VICOR_BUS`, `RELAY_LASER`, `VICOR_GIM`, `VICOR_TMS`, `SOL_HEL`, `SOL_BDA`, `RELAY_NTP`) are dispatched through a single switch in `EnablePower()`, gated by `#if defined(HW_REV_Vx)` and `#if defined(LASER_xK)` blocks. Outputs not valid for the active build target are rejected in the `default` case — no `digitalWrite`, no flag change.
 
 ---
 
@@ -1910,7 +2036,7 @@ UInt32 patch =  VERSION_WORD        & 0xFFF;
 | EXT_OPS 15000 port block migration | ✅ Session 37 — 15001/15002/15009/15010 verified |
 | TMC V1/V2 hardware abstraction | ✅ Session 30 — `hw_rev.hpp`, unified codebase FW v3.3.0, HW_REV byte [62] self-detecting |
 | TMC `SINGLE_LOOP` topology flag | ✅ Session 30 — STATUS_BITS1 bit 6, both revisions |
-| MCC V1/V2 hardware abstraction | ✅ MCC unification — `hw_rev.hpp`, unified codebase FW v3.3.0, HW_REV byte [254] self-detecting. HEALTH_BITS/POWER_BITS breaking change — ICD v3.4.0 required. |
+| MCC V1/V2/V3 hardware abstraction | ✅ MCC unification (ICD v3.4.0) + V3 add — `hw_rev.hpp`, unified codebase, HW_REV byte [254] self-detecting (`0x01`=V1, `0x02`=V2, `0x03`=V3). `LASER_3K`/`LASER_6K` compile axis. MCC_POWER enum renames (RELAY_GPS, RELAY_LASER, RELAY_NTP, VICOR_GIM, VICOR_TMS) — ICD vTBD. |
 | BDC HB counters REG1 [396–403] | ✅ CB-20260413d — 8 bytes, defined count 396→404 |
 | BDC V1/V2 hardware abstraction | ✅ BDC unification — `hw_rev.hpp`, unified codebase FW v3.3.0, HW_REV byte [392] self-detecting. HEALTH_BITS/POWER_BITS rename (ICD v3.5.1). Vicor polarity flip V1→V2. Three new thermistors + IP175 switch control on V2. |
 | FMC STM32F7 port + V1/V2 hardware abstraction | ✅ FMC STM32F7 port — `hw_rev.hpp`, unified codebase FW v3.3.0, HW_REV byte [45] self-detecting. HEALTH_BITS byte [7] / POWER_BITS byte [46] (ICD v3.5.2). ptp.INIT() gated FW-B3. FMC_SERIAL/FMC_SPI platform abstraction. |

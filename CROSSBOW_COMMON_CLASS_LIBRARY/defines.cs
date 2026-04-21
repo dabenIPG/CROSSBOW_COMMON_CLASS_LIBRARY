@@ -195,26 +195,29 @@ namespace CROSSBOW
 
     public enum CHARGE_LEVELS
     {
-        DISABLE = 0,
-        LO = 10,  //
-        MED = 30, //
-        HI = 55,  //
+        OFF = 0,      // all revisions — GPIO disable only, no I2C side-effect on V2
+        LO = 10,     // V1/V3 only — DBU3200 I2C CC/CV 10A; V2 returns STATUS_CMD_REJECTED
+        MED = 30,     // V1/V3 only — DBU3200 I2C CC/CV 30A; V2 returns STATUS_CMD_REJECTED
+        HI = 55,     // V1/V3 only — DBU3200 I2C CC/CV 55A; V2 returns STATUS_CMD_REJECTED
     }
 
     // MCC unified power output enum — matches MCC_POWER in defines.hpp
     // Enum value N = POWER_BITS byte 10 bit N.
     // Used with ICD.PMS_POWER_ENABLE (0xE2): { (byte)MCC_POWER, (byte)(en?1:0) }
-    // V1 valid: GPS_RELAY, VICOR_BUS, LASER_RELAY, SOL_HEL, SOL_BDA
-    // V2 valid: LASER_RELAY, GIM_VICOR, TMS_VICOR
+    // V1·48V·3kW valid:      RELAY_GPS, VICOR_BUS, RELAY_LASER, SOL_HEL, SOL_BDA
+    // V2·300V·6kW valid:     RELAY_LASER, VICOR_GIM, VICOR_TMS
+    // V3·48V·3kW valid:      RELAY_GPS, VICOR_BUS, RELAY_LASER, SOL_HEL, SOL_BDA, RELAY_NTP
+    // V3·300V·6kW valid:     RELAY_GPS, VICOR_BUS, RELAY_LASER, VICOR_GIM, VICOR_TMS, RELAY_NTP
     public enum MCC_POWER
     {
-        GPS_RELAY = 0,  // V1 only — GNSS power rail, pin 83
-        VICOR_BUS = 1,  // V1 only — relay bank Vicor, A0
-        LASER_RELAY = 2,  // Both   — laser enable, pin 20
-        GIM_VICOR = 3,  // V2 only — 300V→48V Gimbal Vicor, A0
-        TMS_VICOR = 4,  // V2 only — TMS Vicor bank, pin 83
-        SOL_HEL = 5,  // V1 only — laser HV bus solenoid, pin 5
-        SOL_BDA = 6,  // V1 only — gimbal power solenoid, pin 8
+        RELAY_GPS = 0,  // V1/V3     — GPS appliance · NO opto HIGH=ON · pin 83(V1) / 67(V3)
+        VICOR_BUS = 1,  // V1/V3·3kW — relay bus 48V→24V · V1:A0 LOW=ON / V3:pin 40 HIGH=ON
+        RELAY_LASER = 2,  // All       — laser enable · pin 20(V1) / 83(V2) / 54(V3·3kW) / 63 PIN_ENERGIZE(V3·6kW)
+        VICOR_GIM = 3,  // V2/V3·6kW — gimbal 300V→48V · NC HIGH=ON · A0(V2) / pin 55(V3)
+        VICOR_TMS = 4,  // V2/V3·6kW — TMS+board 300V→48V · NC HIGH=ON · pin 20(V2) / 51(V3)
+        SOL_HEL = 5,  // V1/V3·3kW — laser HV bus solenoid · electromech HIGH=ON · pin 5
+        SOL_BDA = 6,  // V1/V3·3kW — gimbal solenoid · electromech HIGH=ON · pin 8(V1) / 50(V3)
+        RELAY_NTP = 7,  // V3 only   — NTP appliance · NO opto HIGH=ON · pin 56
     }
 
     // Laser model identity — sensed via RMN on connect.
@@ -269,7 +272,7 @@ namespace CROSSBOW
         SET_BDC_HORIZ = 0xAC,  //	VECTOR OF FLOATS HORIZ ELEVATION	float[360]
         SET_HEL_POWER = 0xAD, // SETS LASER POWER    uint8 [0 100]
         CLEAR_HEL_ERROR = 0xAE, // CLEAR LASER ERROR None
-        SET_CHARGER = 0xAF,  // Assigned v3.6.0. Merges 0xE3 (PMS_CHARGER_ENABLE) and 0xED (PMS_SET_CHARGER_LEVEL). Level required on every call. V1: GPIO+I2C level control. V2: GPIO enable only — level 0=disable, non-zero=enable (no I2C on V2). uint8 level: 0=disable 10=low 30=med 55=high
+        SET_CHARGER = 0xAF,  // Assigned v3.6.0. Merges 0xE3 (PMS_CHARGER_ENABLE) and 0xED (PMS_SET_CHARGER_LEVEL). Level required on every call. V1/V3: GPIO+I2C level control (DBU3200). V2: GPIO enable only — no I2C. uint8 level (CHARGE_LEVELS): 0=OFF 10=LO 30=MED 55=HI. Non-zero on V2 returns STATUS_CMD_REJECTED.
 
         // RESERVING 0xB FOR BDC COMMAND
         RES_B0 = 0xB0,  // ⚠ RETIRED v3.6.0 — SET_BDC_REINIT superseded by SET_REINIT (0xA9). Returns STATUS_CMD_REJECTED pending FW-C8.
@@ -330,7 +333,7 @@ namespace CROSSBOW
         RES_E1 = 0xE1,  // ⚠ RETIRED v3.6.0 — SET_MCC_DEVICES_ENABLE superseded by SET_DEVICES_ENABLE (0xAA). Returns STATUS_CMD_REJECTED pending FW-C8.
         PMS_POWER_ENABLE = 0xE2,  // uint8(MCC_POWER); uint8 0/1 — INT_ENG only, both revisions. Replaces PMS_SOL_ENABLE/PMS_RELAY_ENABLE/PMS_VICOR_ENABLE.
         RES_E3 = 0xE3,  // ⚠ RETIRED v3.6.0 — PMS_CHARGER_ENABLE merged into SET_CHARGER (0xAF). Returns STATUS_CMD_REJECTED pending FW-C8.
-        RES_E4 = 0xE4,  // ⚠ RETIRED — was PMS_RELAY_ENABLE. Use PMS_POWER_ENABLE with GPS_RELAY or LASER_RELAY.
+        RES_E4 = 0xE4,  // ⚠ RETIRED — was PMS_RELAY_ENABLE. Use PMS_POWER_ENABLE with RELAY_GPS or RELAY_LASER.
         RES_E5 = 0xE5,  //	
         RES_E6 = 0xE6,  // ⚠ RETIRED v3.6.0 — SET_FIRE_VOTE moved to 0xAB and promoted to INT_OPS. Returns STATUS_CMD_REJECTED pending FW-C8.
         TMS_INPUT_FAN_SPEED = 0xE7,  // which byte 0/1; speed (0=off, 128=low, 255=high) — see TMC_FAN_SPEEDS
@@ -338,7 +341,7 @@ namespace CROSSBOW
         TMS_SET_VICOR_ENABLE = 0xE9,  //	SET VICOR X TO ON/OFF	which byte vicor (0-3), byte on/off
         TMS_SET_LCM_ENABLE = 0xEA,  //	SET LCM X TO ON/OFF	which byte lcm enum, byte on/off
         TMS_SET_TARGET_TEMP = 0xEB,  // Set Target Temp C  byte [10-40 deg C] — firmware clamps silently
-        RES_EC = 0xEC,  // ⚠ RETIRED — was PMS_VICOR_ENABLE. Use PMS_POWER_ENABLE with VICOR_BUS, GIM_VICOR, or TMS_VICOR.
+        RES_EC = 0xEC,  // ⚠ RETIRED — was PMS_VICOR_ENABLE. Use PMS_POWER_ENABLE with VICOR_BUS, VICOR_GIM, or VICOR_TMS.
         RES_ED = 0xED,  // ⚠ RETIRED v3.6.0 — PMS_SET_CHARGER_LEVEL merged into SET_CHARGER (0xAF). Returns STATUS_CMD_REJECTED pending FW-C8.
         RES_EE = 0xEE,  //
         RES_EF = 0xEF,  // 
