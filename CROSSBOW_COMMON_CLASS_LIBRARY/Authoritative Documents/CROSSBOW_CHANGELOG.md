@@ -35,12 +35,12 @@ Session numbers marked `~` are approximate where the exact session number is unc
 - `HW_REV_V3` block added — PMS Controller 1.0 Rev B (monolithic PCB).
 - `MCC_HW_REV_BYTE = 0x03` for V3.
 - `LASER_3K` / `LASER_6K` compile-time axis added with mutual-exclusion guards. Valid combinations: V1+LASER_3K, V2+LASER_6K, V3+either.
-- V3 power pin/polarity macros: `VICOR_BUS` pin 40 `HIGH=ON` (polarity inverted vs V1 LOW=ON); `RELAY_GPS` pin 67; `RELAY_LASER` dispatches pin 54 (LASER_3K) or pin 63 PIN_ENERGIZE (LASER_6K); `VICOR_GIM` pin 55 (LASER_6K only); `VICOR_TMS` pin 51 (LASER_6K only); `SOL_HEL` pin 5; `SOL_BDA` pin 50; `RELAY_NTP` pin 56.
+- V3 power pin/polarity macros: `VICOR_BUS` pin 40 `HIGH=ON` (polarity inverted vs V1 LOW=ON); `RELAY_GPS` pin 54 ⚠ HW-corrected (was 67 pre-bring-up); `RELAY_LASER` dispatches pin 67 ⚠ HW-corrected (was 54 pre-bring-up) or pin 63 PIN_ENERGIZE (LASER_6K); `VICOR_GIM` pin 55 (LASER_6K only); `VICOR_TMS` pin 51 (LASER_6K only); `SOL_HEL` pin 5; `SOL_BDA` pin 50; `RELAY_NTP` pin 56.
 - Error guards: `HW_REV_V1 + LASER_6K` → compile error; `HW_REV_V2 + LASER_3K` → compile error.
 
 **`pin_defs_mcc.hpp` changes:**
 - Three-way `#if HW_REV_V1 / #elif HW_REV_V2 / #elif HW_REV_V3` guards throughout — no V1==V3 assumptions.
-- V3-only pins added: `PIN_WIZ_CS(10)`, `PIN_STM_RESET(62)`, `PIN_IP178_RST(52)`, `PIN_SWITCH_USB_EN(64)`, `PIN_LOCAL_NOT_ABORT(3)`, `PIN_LOCAL_ARM(4)`, `PIN_ABORT_SW_EN(44)`, `PIN_ARM_SW_EN(46)`, `PIN_isFIRE(42)`, `PIN_MODE(43)`, `PIN_ENERGIZE(63)`, `PIN_TRIG_RB(72)`, `PIN_isFIRE_Ready(75)`, `PIN_BAT_SENSE_RB(73)`, `PIN_VICOR_TEMP2(A5)`, `PIN_TEMP_4(A4)`, `PIN_RELAY3_ENABLE(54)`.
+- V3-only pins added: `PIN_WIZ_CS(10)`, `PIN_STM_RESET(62)`, `PIN_IP178_RESET(52)` (renamed from PIN_IP178_RST), `PIN_SWITCH_DISABLE(64)` (renamed from PIN_SWITCH_USB_EN), `PIN_LOCAL_NOT_ABORT(3)`, `PIN_LOCAL_ARM(4)`, `PIN_ABORT_SW_EN(44)`, `PIN_ARM_SW_EN(46)`, `PIN_isFIRE(42)`, `PIN_MODE(43)`, `PIN_ENERGIZE(63)`, `PIN_TRIG_RB(72)`, `PIN_isFIRE_Ready(75)`, `PIN_BAT_SENSE_RB(73)`, `PIN_VICOR_TEMP2(A5)`, `PIN_TEMP_4(A4)`, `PIN_RELAY3_ENABLE(67)` ⚠ HW-corrected (was 54 pre-bring-up).
 - `PIN_ARM_NOTABORT_BDA_RB` retired on V3 (HW AND gate removed — SW AND in `CheckVotes()`).
 - `PIN_PRE_TRIG_RB` retired on V3 (replaced by `PIN_TRIG_RB`).
 - Redundant `BDPIN_LED_USER_5` alias removed — all five LEDs come from OpenCR variant.
@@ -88,6 +88,49 @@ Session numbers marked `~` are approximate where the exact session number is unc
 | ICD-MCC-V3 | ICD version bump for MCC V3 changes: HW_REV `0x03`, MCC_POWER enum renames, RELAY_NTP bit 7 promotion, `isLaserModelMatch` HEALTH_BITS bit 4. Tagged vTBD pending bump decision. | 🟡 Medium |
 | ARCH-MCC-V3 | ARCHITECTURE.md version bump to v4.1.0 for MCC V3 section additions. | 🟡 Medium |
 | FW-MCC-LASER-MATCH | `isLaserModelMatch` HEALTH_BITS bit 4 added — compile-time `LASER_xK` vs runtime `ipg.LASER_MODEL_BITS()` sense. `false` until laser connects and model confirmed. Combination with `isHEL_Ready` (DEVICE_READY bit 2) gives full diagnostic: both false = not up; both true = nominal; HEL ready + match false = config error. Pending `MSG_MCC.cs` `pb_LaserModelMatch` property and `frmMCC` indicator. | 🟡 Medium |
+
+---
+
+## CB-20260421b — MCC V3 hardware bring-up corrections
+**Files:** `pin_defs_mcc.hpp`, `hw_rev.hpp`, `MCC.ino`, `MCC_PMS_Architecture.docx`
+**ICD:** no change
+**ARCH:** no change — MCC_PMS_Architecture.docx pin table corrected
+
+**Summary:** First V3 hardware bring-up revealed three discrepancies between schematic assumptions and actual PCB routing. All corrected and verified on hardware.
+
+**Change 1 — RELAY_GPS / RELAY_LASER pin swap (pin_defs_mcc.hpp + hw_rev.hpp)**
+
+Physical relay bank wiring on V3 PCB is opposite to schematic assumption:
+
+| Signal | Pre-HW (assumed) | Post-HW (confirmed) |
+|--------|-----------------|---------------------|
+| `RELAY_GPS` / `PIN_RELAY1_ENABLE` | pin 67 | **pin 54** |
+| `RELAY_LASER` / `PIN_RELAY3_ENABLE` | pin 54 | **pin 67** |
+| `RELAY_NTP` / `PIN_RELAY2_ENABLE` | pin 56 | pin 56 (unchanged) |
+
+Comments in `hw_rev.hpp` `PIN_PWR_GPS` and `PIN_PWR_NTP` macros updated to reflect new physical pins. `MCC_PMS_Architecture.docx` §9.6 enum table updated.
+
+**Change 2 — Pin define renames (pin_defs_mcc.hpp)**
+
+| Old name | New name | Pin |
+|----------|----------|-----|
+| `PIN_IP178_RST` | `PIN_IP178_RESET` | 52 |
+| `PIN_SWITCH_USB_EN` | `PIN_SWITCH_DISABLE` | 64 |
+
+Name changes reflect actual hardware function more clearly. `PIN_SWITCH_DISABLE` HIGH=off, LOW=switch powered.
+
+**Change 3 — MCC.ino V3 init block**
+
+Added `pinMode` and safe-state `digitalWrite` for `PIN_IP178_RESET` and `PIN_SWITCH_DISABLE` under `#if defined(HW_REV_V3)`:
+```cpp
+digitalWrite(PIN_IP178_RESET,    HIGH);   // HIGH = not resetting
+pinMode(PIN_IP178_RESET,         OUTPUT);
+digitalWrite(PIN_SWITCH_DISABLE, LOW);    // LOW = switch powered
+pinMode(PIN_SWITCH_DISABLE,      OUTPUT);
+```
+
+**Items closed:** none
+**Items opened:** none
 
 ---
 

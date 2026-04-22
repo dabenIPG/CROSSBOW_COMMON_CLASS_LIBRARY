@@ -163,6 +163,12 @@ namespace CROSSBOW
         LO = 128,
         HI = 255,
     }
+
+    // TMC_PUMP_SPEEDS — V1 only.
+    // V1 Vicors accept a DAC trim voltage to set pump motor speed.
+    // V2 TRACO PSUs are fixed-voltage on/off — no speed control.
+    // Guard removed (DEF-2): enum is TMC-internal only; no cross-controller
+    // call sites exist. frmTMC.cs gates visibility via ApplyHwRevLayout().
     public enum TMC_PUMP_SPEEDS
     {
         OFF = 0,    // also turns off vicor
@@ -170,6 +176,7 @@ namespace CROSSBOW
         MED = 500,  // 12.0V
         HI = 800,   // 20.0V
     }
+
     public enum TMC_LCM_SPEEDS
     {
         OFF = 0,    // 
