@@ -2,7 +2,7 @@
 
 **Document:** `CROSSBOW_ICD_INT_ENG`
 **Doc #:** IPGD-0003
-**Version:** 4.2.0
+**Version:** 4.2.1
 **Date:** 2026-04-19 (CB-20260419c — Jetson health compaction, GPU temp)
 **Classification:** IPG Internal Use Only
 **Source:** CB_ICD_v1_7.xlsx reconciled with ARCHITECTURE.md (TRC v3.0); `defines.hpp` canonical v3.X.Y
@@ -23,6 +23,12 @@
 - `HEALTH_BITS` byte [9] bit 4 promoted from `RES` → `isLaserModelMatch` — compile-time `LASER_xK` vs runtime `ipg.LASER_MODEL_BITS()` sense. `false` until laser connects and model confirmed. Diagnostic: `isHEL_Ready` (DEVICE_READY bit 2) true + `isLaserModelMatch` false = hardware config error; both false = laser not yet up.
 - `MSG_MCC.cs`: `pb_LaserModelMatch` property added (HealthBits bit 4). Pending `frmMCC` indicator wire-up.
 - Open item: `DEF-2` — TMC-specific enums (`TMC_VICORS`, `TMC_DAC_CHANNELS`, `TMC_PUMP_SPEEDS`) currently guarded by `!defined(HW_REV_V2)` in `defines.hpp` — must migrate to controller-scoped `TMC_HW_REV_V2` guard to avoid cross-controller revision flag collisions on mixed fleets.
+
+**v4.2.1 changes (scope/target audit — whitelist-verified):**
+- Command table: `INT_OPS Target` column corrected to `—` for 13 INT_ENG-scoped rows where the column was erroneously populated: `0xB1`, `0xBC`, `0xBD`, `0xE2`, `0xE8`, `0xE9`, `0xEA`, `0xF0`, `0xF4`, `0xF5`, `0xF7`, `0xFC`, `0xFE`. Firmware `EXT_CMDS_MCC[]` and `EXT_CMDS_BDC[]` whitelists verified — all 13 are correctly excluded from A3.
+- `0xD1 ORIN_ACAM_COCO_ENABLE`, `0xF6 BDC_SET_FSM_TRACK_ENABLE`, `0xFA BDC_SET_STAGE_HOME`: Scope corrected `INT_OPS → INT_ENG`; `INT_OPS Target → —`. Absent from `EXT_CMDS_BDC[]` — A3 access was never implemented.
+- `0xBF`, `0xEF`, `0xFF`: Description corrected — confirmed unused in firmware (no inbound handler, no outbound CMD_BYTE role). "May be outbound" note removed.
+- Appendix A added — command map visualization specification (cell format, color legend, CSS classes, regeneration instruction).
 
 **v4.2.0 changes (CB-20260419c — Jetson health compaction + GPU temp):**
 - TRC REG1 Jetson health fields compacted int16 → uint8 — resolution sufficient for all values (temps 0–95°C, loads 0–100%); saves 4 bytes.
@@ -561,7 +567,7 @@ Scoping differs by codebase (`enum ICD` in C#/THEIA, `enum ICD_CMDS` in TRC, `en
 | Byte | Enum | Description | Payload | TRC ASCII | TRC Binary | BDC Binary | Scope | INT_ENG Target | INT_OPS Target |
 |------|------|-------------|---------|------------|-------------|------------|-------|------------|------------|
 | 0xB0 | RES_B0 | **RETIRED v3.6.0** — SET_BDC_REINIT superseded by `SET_REINIT (0xA9)`. Returns `STATUS_CMD_REJECTED` pending handler removal (FW-C8). | — | — | — | — | `RES` | RES | RES |
-| 0xB1 | SET_BDC_VOTE_OVERRIDE | Override individual BDC geometry vote bit. **Moved from `0xAA` (v3.6.0).** | uint8 vote (0=HORIZ,1=KIZ,2=LCH,3=BDA); uint8 0/1 | — | — | ✓ | `INT_ENG` | BDC | BDC |
+| 0xB1 | SET_BDC_VOTE_OVERRIDE | Override individual BDC geometry vote bit. **Moved from `0xAA` (v3.6.0).** | uint8 vote (0=HORIZ,1=KIZ,2=LCH,3=BDA); uint8 0/1 | — | — | ✓ | `INT_ENG` | BDC | — |
 | 0xB2 | SET_GIM_POS | Set gimbal position | int32 pan, int32 tilt | — | — | ✓ | `INT_OPS` | BDC | BDC |
 | 0xB3 | SET_GIM_SPD | Set gimbal speed | int16 pan, int16 tilt | — | — | ✓ | `INT_OPS` | BDC | BDC |
 | 0xB4 | SET_CUE_OFFSET | Set cue track offset (AZ, EL) | float az_deg, float el_deg | — | — | ✓ | `INT_OPS` | BDC | BDC |
@@ -572,10 +578,10 @@ Scoping differs by codebase (`enum ICD` in C#/THEIA, `enum ICD_CMDS` in TRC, `en
 | 0xB9 | SET_PID_ENABLE | Enable/disable PID loop | uint8 which (0=cue,1=video); uint8 0/1 | — | — | ✓ | `INT_OPS` | BDC | BDC |
 | 0xBA | SET_SYS_LLA | Set platform geodetic position | float lat, float lng, float alt | — | — | ✓ | `INT_OPS` | BDC | BDC |
 | 0xBB | SET_SYS_ATT | Set platform attitude (RPY) | float roll, float pitch, float yaw | — | — | ✓ | `INT_OPS` | BDC | BDC |
-| 0xBC | SET_BDC_VICOR_ENABLE | BDC Vicor power enable | uint8 0/1 | — | — | ✓ | `INT_ENG` | BDC | BDC |
-| 0xBD | SET_BDC_RELAY_ENABLE | BDC relay enable | uint8 relay (1–4); uint8 0/1 | — | — | ✓ | `INT_ENG` | BDC | BDC |
+| 0xBC | SET_BDC_VICOR_ENABLE | BDC Vicor power enable | uint8 0/1 | — | — | ✓ | `INT_ENG` | BDC | — |
+| 0xBD | SET_BDC_RELAY_ENABLE | BDC relay enable | uint8 relay (1–4); uint8 0/1 | — | — | ✓ | `INT_ENG` | BDC | — |
 | 0xBE | RES_BE | **RETIRED v3.6.0** — SET_BDC_DEVICES_ENABLE superseded by `SET_DEVICES_ENABLE (0xAA)`. Returns `STATUS_CMD_REJECTED` pending handler removal (FW-C8). | — | — | — | — | `RES` | RES | RES |
-| 0xBF | RES_BF | BDC register response — may be outbound CMD_BYTE. Awaiting firmware confirmation before clearing. | — | — | — | — | `RES` | RES | RES |
+| 0xBF | RES_BF | Reserved — confirmed unused in firmware. No inbound command handler; no outbound CMD_BYTE role. | — | — | — | — | `RES` | — | — |
 
 
 ---
@@ -613,7 +619,7 @@ Scoping differs by codebase (`enum ICD` in C#/THEIA, `enum ICD_CMDS` in TRC, `en
 | Byte | Enum | Description | Payload | TRC ASCII | TRC Binary | BDC Binary | Scope | INT_ENG Target | INT_OPS Target |
 |------|------|-------------|---------|------------|-------------|------------|-------|------------|------------|
 | 0xD0 | ORIN_CAM_SET_ACTIVE | Set active camera | uint8 BDC_CAM_IDS (0=VIS,1=MWIR) | SELECT CAM1|CAM2 | ✓ | ✓ | `INT_OPS` | BDC, TRC | BDC |
-| 0xD1 | ORIN_ACAM_COCO_ENABLE | Enable/disable COCO intra-trackbox inference on active camera. **Moved from `0xDF` (v3.6.0).** Model must be loaded (ISR lifecycle). Camera switch auto-disables COCO. Planned multi-op extension (COCO-07): op=0 off, op=1 on, op=2 load, op=3 unload, op=4 set_drift (param=uint8 threshold×100), op=5 set_interval (param=uint8 N). | uint8 op [, uint8 param] | COCO ON|OFF|LOAD|UNLOAD|DRIFT|INTERVAL | needs impl | — | `INT_OPS` | BDC, TRC | BDC |
+| 0xD1 | ORIN_ACAM_COCO_ENABLE | Enable/disable COCO intra-trackbox inference on active camera. **Moved from `0xDF` (v3.6.0).** Model must be loaded (ISR lifecycle). Camera switch auto-disables COCO. Planned multi-op extension (COCO-07): op=0 off, op=1 on, op=2 load, op=3 unload, op=4 set_drift (param=uint8 threshold×100), op=5 set_interval (param=uint8 N). | uint8 op [, uint8 param] | COCO ON|OFF|LOAD|UNLOAD|DRIFT|INTERVAL | needs impl | — | `INT_ENG` | BDC, TRC | — |
 | 0xD2 | RES_D2 | **RETIRED v3.6.0** — ORIN_SET_STREAM_60FPS retired. Framerate is compile/launch time configuration only. ASCII `FRAMERATE <fps>` on port 5012 covers all ENG use. | — | FRAMERATE <fps> | — | — | `RES` | RES | RES |
 | 0xD3 | ORIN_SET_STREAM_OVERLAYS | Set HUD overlay bitmask. bit0=Reticle, bit1=TrackPreview, bit2=TrackBox, bit3=CueChevrons, bit4=AC_Projections, bit5=AC_LeaderLines, bit6=FocusScore, bit7=OSD | uint8 bitmask (8 flags — see Enumerations sheet) | RETICLE ON|OFF | ✓ | ✓ | `INT_OPS` | BDC, TRC | BDC |
 | 0xD4 | ORIN_ACAM_SET_CUE_FLAG | Set cue flag indicator (HUD chevrons) | uint8 0/1 | — | ✓ | ✓ | `INT_OPS` | BDC, TRC | BDC |
@@ -640,20 +646,20 @@ Scoping differs by codebase (`enum ICD` in C#/THEIA, `enum ICD_CMDS` in TRC, `en
 |------|------|-------------|---------|------------|-------------|------------|-------|------------|------------|
 | 0xE0 | SET_BCAST_FIRECONTROL_STATUS | Broadcast fire control vote bytes to all embedded controllers. **Moved from `0xAB` (v3.6.0).** Internal command — MCC aggregates vote state from A1 stream and forwards to TRC via BDC. Verify source: confirm whether MCC sends autonomously on every A1 cycle or only on vote state change. | uint8 voteBitsMcc (MCC vote bits); uint8 voteBitsBdc (BDC geometry vote bits) | — | ✓ | ✓ | `INT_ENG` | MCC, BDC, TRC | — |
 | 0xE1 | RES_E1 | **RETIRED v3.6.0** — SET_MCC_DEVICES_ENABLE superseded by `SET_DEVICES_ENABLE (0xAA)`. Returns `STATUS_CMD_REJECTED` pending handler removal (FW-C8). | — | — | — | — | `RES` | RES | RES |
-| 0xE2 | PMS_POWER_ENABLE | Unified power output control — replaces `PMS_SOL_ENABLE` (0xE2), `PMS_RELAY_ENABLE` (0xE4), `PMS_VICOR_ENABLE` (0xEC). INT_ENG only — A3 returns `STATUS_CMD_REJECTED`. | uint8 which (MCC_POWER enum: 0=RELAY_GPS, 1=VICOR_BUS, 2=RELAY_LASER, 3=VICOR_GIM, 4=VICOR_TMS, 5=SOL_HEL, 6=SOL_BDA, 7=RELAY_NTP); uint8 0/1. V1 valid: 0–2, 5–6. V2 valid: 2–4. V3-3kW valid: 0–2, 5–7. V3-6kW valid: 0–4, 7. Invalid `which` for active revision → `STATUS_CMD_REJECTED`. | — | — | ✓ | `INT_ENG` | MCC | MCC |
+| 0xE2 | PMS_POWER_ENABLE | Unified power output control — replaces `PMS_SOL_ENABLE` (0xE2), `PMS_RELAY_ENABLE` (0xE4), `PMS_VICOR_ENABLE` (0xEC). INT_ENG only — A3 returns `STATUS_CMD_REJECTED`. | uint8 which (MCC_POWER enum: 0=RELAY_GPS, 1=VICOR_BUS, 2=RELAY_LASER, 3=VICOR_GIM, 4=VICOR_TMS, 5=SOL_HEL, 6=SOL_BDA, 7=RELAY_NTP); uint8 0/1. V1 valid: 0–2, 5–6. V2 valid: 2–4. V3-3kW valid: 0–2, 5–7. V3-6kW valid: 0–4, 7. Invalid `which` for active revision → `STATUS_CMD_REJECTED`. | — | — | ✓ | `INT_ENG` | MCC | — |
 | 0xE3 | RES_E3 | **RETIRED v3.6.0** — PMS_CHARGER_ENABLE merged into `SET_CHARGER (0xAF)`. Returns `STATUS_CMD_REJECTED` pending handler removal (FW-C8). | — | — | — | — | `RES` | RES | RES |
 | 0xE4 | ~~PMS_RELAY_ENABLE~~ → **RES_E4** | **RETIRED v3.4.0** — returns `STATUS_CMD_REJECTED`. Use `0xE2 PMS_POWER_ENABLE` with `MCC_POWER::GPS_RELAY (0)` or `MCC_POWER::LASER_RELAY (2)`. | — | — | — | — | `RES` | MCC | MCC |
 | 0xE5 | RES_E5 | Reserved | — | — | — | — | `RES` | RES | RES |
 | 0xE6 | RES_E6 | **RETIRED v3.6.0** — SET_FIRE_VOTE moved to `0xAB` and promoted to INT_OPS. Returns `STATUS_CMD_REJECTED` pending handler removal (FW-C8). | — | — | — | — | `RES` | RES | RES |
 | 0xE7 | TMS_INPUT_FAN_SPEED | Set fan speed | uint8 which (0/1); uint8 speed (0=off,128=low,255=high) — matches `TMC_FAN_SPEEDS` enum | — | — | ✓ | `INT_OPS` | MCC, TMC | MCC |
-| 0xE8 | TMS_SET_DAC_VALUE | Set DAC output value | uint8 dac (`TMC_DAC_CHANNELS` enum); uint16 value | — | — | ✓ | `INT_ENG` | MCC, TMC | MCC |
-| 0xE9 | TMS_SET_VICOR_ENABLE | TMS Vicor enable | uint8 vicor (TMC_VICORS enum); uint8 0/1 — V1: values 0–3 valid; V2: values 0–2,4 valid (PUMP2=4; HEAT=3 does not exist on V2) | — | — | ✓ | `INT_ENG` | MCC, TMC | MCC |
-| 0xEA | TMS_SET_LCM_ENABLE | TMS LCM enable | uint8 lcm (enum); uint8 0/1 | — | — | ✓ | `INT_ENG` | MCC, TMC | MCC |
+| 0xE8 | TMS_SET_DAC_VALUE | Set DAC output value | uint8 dac (`TMC_DAC_CHANNELS` enum); uint16 value | — | — | ✓ | `INT_ENG` | MCC, TMC | — |
+| 0xE9 | TMS_SET_VICOR_ENABLE | TMS Vicor enable | uint8 vicor (TMC_VICORS enum); uint8 0/1 — V1: values 0–3 valid; V2: values 0–2,4 valid (PUMP2=4; HEAT=3 does not exist on V2) | — | — | ✓ | `INT_ENG` | MCC, TMC | — |
+| 0xEA | TMS_SET_LCM_ENABLE | TMS LCM enable | uint8 lcm (enum); uint8 0/1 | — | — | ✓ | `INT_ENG` | MCC, TMC | — |
 | 0xEB | TMS_SET_TARGET_TEMP | Set TMS target temperature | uint8 temp °C — **enforced range [10–40°C]**; firmware clamps silently. Values outside range are accepted without error but constrained. | — | — | ✓ | `INT_OPS` | MCC, TMC | MCC |
 | 0xEC | ~~PMS_VICOR_ENABLE~~ → **RES_EC** | **RETIRED v3.4.0** — returns `STATUS_CMD_REJECTED`. Use `0xE2 PMS_POWER_ENABLE` with `MCC_POWER::VICOR_BUS (1)`, `VICOR_GIM (3)`, or `VICOR_TMS (4)`. | — | — | — | — | `RES` | MCC | MCC |
 | 0xED | RES_ED | **RETIRED v3.6.0** — PMS_SET_CHARGER_LEVEL merged into `SET_CHARGER (0xAF)`. Returns `STATUS_CMD_REJECTED` pending handler removal (FW-C8). | — | — | — | — | `RES` | RES | RES |
 | 0xEE | RES_EE | Reserved | — | — | — | — | `RES` | RES | RES |
-| 0xEF | RES_EF | TMS register response | — | — | — | — | `RES` | RES | RES |
+| 0xEF | RES_EF | Reserved — confirmed unused in firmware. No inbound command handler; no outbound CMD_BYTE role. | — | — | — | — | `RES` | — | — |
 
 
 ---
@@ -664,22 +670,22 @@ Scoping differs by codebase (`enum ICD` in C#/THEIA, `enum ICD_CMDS` in TRC, `en
 
 | Byte | Enum | Description | Payload | TRC ASCII | TRC Binary | BDC Binary | Scope | INT_ENG Target | INT_OPS Target |
 |------|------|-------------|---------|------------|-------------|------------|-------|------------|------------|
-| 0xF0 | FMC_SET_FSM_POW | FSM power enable | uint8 0/1 | — | — | ✓ | `INT_ENG` | BDC, FMC | BDC |
+| 0xF0 | FMC_SET_FSM_POW | FSM power enable | uint8 0/1 | — | — | ✓ | `INT_ENG` | BDC, FMC | — |
 | 0xF1 | BDC_SET_FSM_HOME | FSM set home position | int16 x, int16 y | — | — | ✓ | `INT_OPS` | BDC, FMC | BDC |
 | 0xF2 | BDC_SET_FSM_IFOVS | FSM set iFOV scaling | float x, float y | — | — | ✓ | `INT_OPS` | BDC, FMC | BDC |
 | 0xF3 | FMC_SET_FSM_POS | FSM set position | int16 x, int16 y | — | — | ✓ | `INT_OPS` | BDC, FMC | BDC |
-| 0xF4 | BDC_SET_FSM_SIGNS | FSM axis direction signs | int8 x, int8 y | — | — | ✓ | `INT_ENG` | BDC, FMC | BDC |
-| 0xF5 | FMC_FSM_TEST_SCAN | FSM test scan | none | — | — | ✓ | `INT_ENG` | BDC, FMC | BDC |
-| 0xF6 | BDC_SET_FSM_TRACK_ENABLE | FSM track mode enable | uint8 0/1 | — | — | ✓ | `INT_OPS` | BDC, FMC | BDC |
-| 0xF7 | FMC_READ_FSM_POS | Read FSM position from ADC | none | — | — | ✓ | `INT_ENG` | BDC, FMC | BDC |
+| 0xF4 | BDC_SET_FSM_SIGNS | FSM axis direction signs | int8 x, int8 y | — | — | ✓ | `INT_ENG` | BDC, FMC | — |
+| 0xF5 | FMC_FSM_TEST_SCAN | FSM test scan | none | — | — | ✓ | `INT_ENG` | BDC, FMC | — |
+| 0xF6 | BDC_SET_FSM_TRACK_ENABLE | FSM track mode enable | uint8 0/1 | — | — | ✓ | `INT_ENG` | BDC, FMC | — |
+| 0xF7 | FMC_READ_FSM_POS | Read FSM position from ADC | none | — | — | ✓ | `INT_ENG` | BDC, FMC | — |
 | 0xF8 | RES_F8 | Reserved | — | — | — | — | `RES` | RES | RES |
 | 0xF9 | RES_F9 | Reserved | — | — | — | — | `RES` | RES | RES |
-| 0xFA | BDC_SET_STAGE_HOME | Focus stage waist home | uint32 position | — | — | ✓ | `INT_OPS` | BDC, FMC | BDC |
+| 0xFA | BDC_SET_STAGE_HOME | Focus stage waist home | uint32 position | — | — | ✓ | `INT_ENG` | BDC, FMC | — |
 | 0xFB | FMC_SET_STAGE_POS | Focus stage set position | uint32 position | — | — | ✓ | `INT_OPS` | BDC, FMC | BDC |
-| 0xFC | FMC_STAGE_CALIB | Focus stage calibrate | none | — | — | ✓ | `INT_ENG` | BDC, FMC | BDC |
+| 0xFC | FMC_STAGE_CALIB | Focus stage calibrate | none | — | — | ✓ | `INT_ENG` | BDC, FMC | — |
 | 0xFD | RES_FD | Reserved | — | — | — | — | `RES` | RES | RES |
-| 0xFE | FMC_SET_STAGE_ENABLE | Focus stage enable | uint8 0/1 | — | — | ✓ | `INT_ENG` | BDC, FMC | BDC |
-| 0xFF | RES_FF | FSM register response | — | — | — | — | `RES` | RES | RES |
+| 0xFE | FMC_SET_STAGE_ENABLE | Focus stage enable | uint8 0/1 | — | — | ✓ | `INT_ENG` | BDC, FMC | — |
+| 0xFF | RES_FF | Reserved — confirmed unused in firmware. No inbound command handler; no outbound CMD_BYTE role. | — | — | — | — | `RES` | — | — |
 
 
 ---
@@ -1990,3 +1996,92 @@ reads `512`. Older firmware clients ignore the reserved area they already skip.
 | 7–511 | reserved | `0x00` |
 
 ---
+
+---
+
+## Appendix A — Command Map Visualization
+
+The CROSSBOW command space (0xA0–0xFF, 96 bytes) is visualized as a **6×16 grid** at the start of any ICD review session. This appendix is the authoritative specification for that visualization so it can be regenerated consistently.
+
+### Grid Structure
+
+- **Rows:** six byte ranges — `0xA_`, `0xB_`, `0xC_`, `0xD_`, `0xE_`, `0xF_`
+- **Columns:** low nibble `_0` through `_F` (left to right)
+- **Row label:** left of each row, monospace, e.g. `0xA0`
+- **Column header:** low nibble digit above each column
+
+Each **cell** contains three stacked text elements:
+
+| Element | CSS class | Content | Example |
+|---------|-----------|---------|---------|
+| Byte | `.byte` | Full hex address | `0xA0` |
+| Short name | `.sname` | Enum name ≤10 chars, `text-overflow: ellipsis` | `UNSOLICITED` |
+| Tag | `.stag` | Scope or status label | `INT_OPS` |
+
+### Color Classes
+
+Three active colors plus one reserved for problems:
+
+| Class | Light bg | Dark bg | Meaning |
+|-------|----------|---------|---------|
+| `s-ok` | `#f0f4ff` | `#1a2a4a` | **INT_OPS** — accessible via A3 (THEIA / external integrators) |
+| `s-eng` | `#f5f0ff` | `#2a1a4a` | **INT_ENG** — accessible via A2 only (ENG GUI / maintenance) |
+| `s-av` | `var(--color-background-secondary)` | same | **Unused** — reserved, retired, or unassigned; dashed border |
+| `s-mm` | `#fff8e0` | `#3a2a00` | **Problem** — reserved for issues (Scope/Target mismatch, whitelist conflict). Amber border 1.5px. **Not used when the map is clean.** |
+
+> **Color policy:** red is not used. Amber (`s-mm`) is the sole problem indicator and only appears when an audit finds a conflict. A clean map has only blue, purple, and gray.
+
+Text colors follow the ramp of the background fill: 800-stop in light mode, 100/200-stop in dark mode.
+
+### Mismatch Detection Rule
+
+A cell renders as `s-mm` (amber) when **both** conditions are true:
+- `Scope = INT_ENG`
+- `INT_OPS Target ≠ —`
+
+This flags rows where the two columns contradict each other. Resolution requires checking the firmware `EXT_CMDS_MCC[]` / `EXT_CMDS_BDC[]` whitelists — the whitelist is the ground truth for A3 accessibility.
+
+### CSS Skeleton
+
+```css
+.block-row  { display: grid; grid-template-columns: 44px 1fr; gap: 5px; }
+.bl         { font-size: 10px; font-family: var(--font-mono); text-align: right; }
+.cmd-grid   { display: grid; grid-template-columns: repeat(16, 1fr); gap: 2px; }
+.cell       { border-radius: 3px; padding: 3px 2px; border: 0.5px solid transparent; }
+.cell .byte { font-family: var(--font-mono); font-size: 9px; display: block; line-height: 1.3; }
+.cell .sname{ font-family: var(--font-mono); font-size: 8px; display: block;
+              white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cell .stag { font-size: 7px; display: block; line-height: 1.5; margin-top: 1px; }
+
+.s-ok  { background: #f0f4ff; border-color: #b8c8f0; }
+.s-eng { background: #f5f0ff; border-color: #c8b8f0; }
+.s-av  { background: var(--color-background-secondary);
+         border: 0.5px dashed var(--color-border-secondary); }
+.s-mm  { background: #fff8e0; border-color: #d0a020; border-width: 1.5px; }  /* problems only */
+
+@media (prefers-color-scheme: dark) {
+  .s-ok  { background: #1a2a4a; border-color: #3a5888; }
+  .s-eng { background: #2a1a4a; border-color: #6848b8; }
+  .s-mm  { background: #3a2a00; border-color: #d0a020; }
+}
+```
+
+### Legend
+
+```
+■ INT_OPS   blue   — A3 accessible (included in CROSSBOW_ICD_INT_OPS)
+■ INT_ENG   purple — A2 only (this document only)
+□ unused    gray   — reserved, retired, or unassigned; dashed border
+■ problem   amber  — Scope/Target conflict or whitelist mismatch (dormant when map is clean)
+```
+
+### Regeneration Instruction
+
+At the start of any ICD review session, request:
+
+> *"Render the CROSSBOW ICD command map in the session format."*
+
+The session will render a static HTML widget (no JS-generated content) with all 96 cells hardcoded and hover `title` attributes carrying full row detail. Data is sourced from the command tables in this document. The `s-mm` class is applied when Scope/Target conflicts are detected; a clean ICD produces no amber cells.
+
+**Format first established:** CB-20260416d  
+**Specification captured here:** ICD v4.2.1

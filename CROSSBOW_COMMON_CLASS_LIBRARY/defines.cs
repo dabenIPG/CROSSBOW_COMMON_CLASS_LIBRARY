@@ -142,62 +142,12 @@ namespace CROSSBOW
         DRIFT = 0x07,  // set drift threshold; param: encoded float (see ICD)
         INTERVAL = 0x08,  // set inference interval divisor; param: uint8 [1–N]
     }
-    // 0xE8 TMS_SET_DAC_VALUE — dac payload byte 0
-    // Also used by ENG GUI to send direct DAC channel commands.
-    // Authoritative here — absent from pin_defs_tmc.hpp (FW) and defines.hpp (C++).
-    public enum TMC_DAC_CHANNELS
-    {
-        LCM1                 = 0x00,
-        LCM2                 = 0x02,
-        PUMP                 = 0x04,
-        HEATER               = 0x06,
-        MCP4728_WIPER        = 0x0B,
-        MCP4728_CHANNEL_A_NV = 0x10,
-        MCP4728_CHANNEL_B_NV = 0x12,
-        MCP4728_CHANNEL_C_NV = 0x14,
-        MCP4728_CHANNEL_D_NV = 0x16,
-    };
+
     public enum TMC_FAN_SPEEDS
     {
         OFF = 0,
         LO = 128,
         HI = 255,
-    }
-
-    // TMC_PUMP_SPEEDS — V1 only.
-    // V1 Vicors accept a DAC trim voltage to set pump motor speed.
-    // V2 TRACO PSUs are fixed-voltage on/off — no speed control.
-    // Guard removed (DEF-2): enum is TMC-internal only; no cross-controller
-    // call sites exist. frmTMC.cs gates visibility via ApplyHwRevLayout().
-    public enum TMC_PUMP_SPEEDS
-    {
-        OFF = 0,    // also turns off vicor
-        LO = 350,   // 9.6V  — NOTE: too low for sustained operation, use MED+
-        MED = 500,  // 12.0V
-        HI = 800,   // 20.0V
-    }
-
-    public enum TMC_LCM_SPEEDS
-    {
-        OFF = 0,    // 
-        LO = 1024,  //
-        MED = 2048, //
-        HI = 4095,  //
-    }
-    public enum TMC_VICORS
-    {
-        LCM1 = 0,
-        LCM2 = 1,
-        PUMP = 2,   // V1 — single Vicor, both pumps in parallel
-        PUMP1 = 2,   // V2 — TRACO PSU pump 1 (same wire value as PUMP)
-        HEAT = 3,   // V1 only — heater Vicor
-        PUMP2 = 4,   // V2 only — TRACO PSU pump 2
-    }
-
-    public enum TMC_LCMS
-    {
-        LCM1 = 0,    // 
-        LCM2 = 1,  //
     }
 
     public enum CHARGE_LEVELS

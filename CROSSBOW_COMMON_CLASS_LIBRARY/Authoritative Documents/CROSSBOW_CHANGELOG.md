@@ -24,6 +24,47 @@ Session numbers marked `~` are approximate where the exact session number is unc
 
 ---
 
+## CB-20260422 — DEF-2: TMC-specific enums moved to tmc.hpp / tmc.cs
+**Files:** `defines.hpp`, `tmc.hpp`, `defines.cs`, `tmc.cs`
+**ICD:** no change
+**ARCH:** no change
+
+**Summary:** Full analysis and resolution of DEF-2. Determined through call-site audit and MCC/BDC A3 whitelist review that the cross-controller enum contamination risk was real in principle but had no active call sites — MCC firmware never interprets `TMC_VICORS`, `TMC_DAC_CHANNELS`, or `TMC_PUMP_SPEEDS`; both whitelists confirm `0xE8`/`0xE9` are not exposed at A3. Root cause of the original DEF-2 concern (`!defined(HW_REV_V2)` resolving against MCC's own HW_REV flag) confirmed. Resolution: move all TMC controller-specific enums to `tmc.hpp` (firmware) and `tmc.cs` (C#), leaving `defines.hpp`/`defines.cs` as fleet-wide ICD only. `TMC_FAN_SPEEDS` retained in `defines.cs` — `0xE7 TMS_INPUT_FAN_SPEED` is on the MCC A3 whitelist and exposed at INT_OPS. ICD column correction noted: `0xE8`/`0xE9` INT_ENG Target should read `TMC` only, not `MCC, TMC` — logged under ICD-MCC-V3.
+
+**`defines.hpp` changes:**
+- `TMC_FAN_SPEEDS` removed → moved to `tmc.hpp`
+- `TMC_PUMP_SPEEDS` removed → moved to `tmc.hpp`
+- `TMC_VICORS` removed → moved to `tmc.hpp`
+- `TMC_LCMS` removed → moved to `tmc.hpp`
+- `TMC_LCM_SPEEDS` removed → moved to `tmc.hpp`
+- `TMC_DAC_CHANNELS` removed → moved to `tmc.hpp`
+- File header comment updated: guarded enums list replaced with DEF-2 closure note
+
+**`tmc.hpp` changes:**
+- TMC-specific enums block added after `#define A2_RX_BUFFER`, before `class TMC`
+- `TMC_DAC_CHANNELS`: guard changed from `!defined(HW_REV_V2)` → `defined(HW_REV_V1)` — safe here since `hw_rev.hpp` guarantees exactly one revision set with `#error` guards
+- `TMC_VICORS`: guard changed from `!defined(HW_REV_V2)` → `defined(HW_REV_V1)` / `defined(HW_REV_V2)` — eliminates cross-controller revision ambiguity
+
+**`defines.cs` changes:**
+- `TMC_PUMP_SPEEDS` removed → moved to `tmc.cs`
+- `TMC_VICORS` removed → moved to `tmc.cs`
+- `TMC_LCMS` removed → moved to `tmc.cs`
+- `TMC_LCM_SPEEDS` removed → moved to `tmc.cs`
+- `TMC_DAC_CHANNELS` removed → moved to `tmc.cs`
+- `TMC_FAN_SPEEDS` retained — consumed by MCC A3 whitelist path (`0xE7 TMS_INPUT_FAN_SPEED`)
+
+**`tmc.cs` changes:**
+- TMC-specific enums block added before `public class TMC`, inside `CROSSBOW` namespace
+
+**Items closed:**
+| ID | Item |
+|----|------|
+| DEF-2 | TMC-specific enums moved to `tmc.hpp` / `tmc.cs`; `defines` files are now fleet-wide ICD only |
+
+**Items opened:** none
+
+---
+
 ## CB-20260420 — MCC V3 hardware revision (HW_REV_V3 + LASER_xK axis)
 **Files:** `hw_rev.hpp`, `pin_defs_mcc.hpp`, `defines.hpp`, `mcc.hpp`, `mcc.cpp`, `MCC.ino`, `ARCHITECTURE.md`, `CROSSBOW_ICD_INT_ENG.md`
 **ICD:** vTBD (MCC REG1 HW_REV `0x03`; MCC_POWER enum renames; RELAY_NTP bit 7; HEALTH_BITS bit 4 `isLaserModelMatch`)
@@ -83,7 +124,7 @@ Session numbers marked `~` are approximate where the exact session number is unc
 **Items opened:**
 | ID | Item | Priority |
 |----|------|----------|
-| DEF-2 | `TMC_VICORS` / `TMC_DAC_CHANNELS` / `TMC_PUMP_SPEEDS` in `defines.hpp` guarded by `!defined(HW_REV_V2)` — **silent wrong-enum failure on mixed-revision fleets.** Concrete failure: MCC V3 build sets `-DHW_REV_V3` (not `HW_REV_V2`), so `!defined(HW_REV_V2)` is true — MCC gets `TMC_VICORS::PUMP=2` and `TMC_VICORS::HEAT=3`. If the fleet is running TMC V2 hardware, `HEAT=3` is a gap/invalid on TMC V2 (intentional gap to prevent misrouting). MCC sends `TMS_SET_VICOR_ENABLE(HEAT, 1)` and TMC V2 silently rejects or misroutes it — no compile error, no link error, no runtime assert. Symmetric risk: MCC V2 build + TMC V1 fleet loses `HEAT` visibility entirely. **Fix:** move `TMC_VICORS`, `TMC_DAC_CHANNELS`, `TMC_PUMP_SPEEDS` out of `defines.hpp` into `tmc.hpp`, guarded by controller-scoped `TMC_HW_REV_V1` / `TMC_HW_REV_V2`. `defines.hpp` retains only the command bytes (`0xE8`, `0xE9`). C# `defines.cs` must be updated in parallel — same three enums, same controller-scoped guard logic. MCC firmware forwards raw `uint8` payload and never interprets the enum values directly, so MCC translation unit does not need the enums post-fix. | 🔴 High |
+
 | FW-MCC-V3-ISR | Vote ISR `attachInterrupt()` calls never implemented in `MCC.ino` — ISR functions exist (`abortVote_ISR`, `armVote_ISR`, `bdaVote_ISR`, `hwVote_ISR`, `fireVote_ISR`) but are dead code. `CheckVotes()` polling in `UPDATE()` is the active readback mechanism (~20ms worst-case latency). **Note: hardware AND gates handle actual fire control votes in real time — firmware readback is telemetry only, 20ms latency is not a safety concern.** V3 bring-up showed interrupt triggering issues — suspected hardware issue. Revisit with scope on readback pins (ISNOTABORT=2, ISARMED=7, ISBDAVOTE=8, FIREVOTE=41) to confirm signal levels and edge behaviour before attaching interrupts. Do not attach until HW verified. | 🟡 Medium |
 | ICD-MCC-V3 | ICD version bump for MCC V3 changes: HW_REV `0x03`, MCC_POWER enum renames, RELAY_NTP bit 7 promotion, `isLaserModelMatch` HEALTH_BITS bit 4. Tagged vTBD pending bump decision. | 🟡 Medium |
 | ARCH-MCC-V3 | ARCHITECTURE.md version bump to v4.1.0 for MCC V3 section additions. | 🟡 Medium |
@@ -959,9 +1000,9 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 
 # PART 2 — OPEN ITEMS
 
-**Last reconciled:** 2026-04-16 (CB-20260416c — end-of-session closures)
-**ICD Reference:** INT_ENG v3.5.2 → v3.6.0 pending (IPGD-0003) | INT_OPS v3.3.8 (IPGD-0004) | EXT_OPS v3.3.0 (IPGD-0005)
-**ARCH Reference:** v3.3.7 → pending update (IPGD-0006)
+**Last reconciled:** 2026-04-22 (ICD scope/target audit — whitelist-verified)
+**ICD Reference:** INT_ENG v4.2.1 (IPGD-0003) | INT_OPS v3.6.2 (IPGD-0004) | EXT_OPS v3.3.0 (IPGD-0005)
+**ARCH Reference:** v4.0.4 (IPGD-0006)
 **Closed items:** Part 3 of this document
 
 ---
@@ -979,7 +1020,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | FW-B3 | PTP DELAY_REQ W5500 contention — fleet-wide workaround active | 🟢 Low | When two or more controllers have PTP active simultaneously, W5500 blocks ~40ms per DELAY_REQ on ARP resolution, saturating main loop. **Workaround: `isPTP_Enabled=false` fleet-wide — NTP only in production. NTP server (.33) provides adequate time accuracy for current operations.** Proposed fixes when PTP is needed: (1) `suppressDelayReq` flag per-controller; (2) staggered DELAY_REQ timing — FMC +50ms offset after FOLLOW_UP. Unblocks FW-B4. | `ptpClient.cpp/hpp` — DELAY_REQ transmission logic |
 | ~~HW-FMC-1~~ | ~~FMC/BDC shared power rail — HW fix applied, bench verify pending~~ | ✅ **CLOSED** | **Bench-verified CB-20260413.** Shared 5V line on USB serial connector between FMC and BDC corrected in hardware. Merged FMC-HW-4, FMC-HW-5, FMC-HW-7. Brownout no longer observed with both controllers active. Production harness isolation confirmed on user's bench. | Hardware — bench + production harness ✅ |
 | HMI-AWB | VIS camera AWB passthrough — HMI binding pending | ⏳ AWB-ENG closed CB-20260416e | **(1) AWB-ENG ✅ CLOSED** — `CMD_VIS_AWB = 0xC4` assigned; `bdc.hpp` whitelist, `trc.hpp/cpp` `SET_AWB()`, `bdc.cpp` UDP handler + serial + HELP, `udp_listener.cpp` binary handler all complete. `ICD_CMDS` alias retired from `types.h`. **(2) AWB-HMI ⏳ pending** — expose on THEIA HMI; AWB maps to Xbox controller input, binding TBD. | THEIA `frmMain.cs` — Xbox binding |
-| HMI-TRACKER | Tracker controls (COCO + optical flow) — ENG GUI then HMI | ⏳ Pending | Two sub-steps: **(1) TRACKER-ENG:** COCO class filter (`0xD9`) in ICD and firmware whitelist — C# wiring to `frmBDC.cs` only. COCO enable is now `0xD1` (moved from `0xDF` — update C# reference). **(2) TRACKER-HMI:** expose on THEIA HMI — Xbox controller binding TBD. Optical flow deferred to TRC session. | `frmBDC.cs`, THEIA HMI `.cs`, `defines.cs` (`ORIN_ACAM_COCO_ENABLE` enum value → `0xD1`) |
+| HMI-TRACKER | Tracker controls (COCO + optical flow) — ENG GUI then HMI | ⏳ Pending | Two sub-steps: **(1) TRACKER-ENG:** COCO class filter (`0xD9`) in ICD and firmware whitelist — C# wiring to `frmBDC.cs` only. COCO enable is `0xD1` (moved from `0xDF`). **⚠ Note:** `0xD1` is INT_ENG only — not in `EXT_CMDS_BDC[]`, not reachable from A3. TRACKER-ENG step (ENG GUI via A2) remains valid. **(2) TRACKER-HMI:** `0xD1` COCO enable is not accessible via A3/THEIA. Reassess whether COCO enable belongs on HMI or ENG GUI only. Xbox binding TBD if scope confirmed. Optical flow deferred to TRC session. | `frmBDC.cs`, THEIA HMI `.cs`, `defines.cs` (`ORIN_ACAM_COCO_ENABLE` enum value → `0xD1`) |
 
 ---
 
@@ -999,7 +1040,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | ~~FW-C11~~ | ~~Implement `SET_REINIT` at `0xA9` — MCC and BDC~~ | ✅ **CLOSED** | Confirmed in current source: MCC `mcc.cpp` line 610 ✅, BDC `bdc.cpp` line 1188 ✅. |
 | ~~FW-C12~~ | ~~Implement `SET_DEVICES_ENABLE` at `0xAA` — MCC and BDC~~ | ✅ **CLOSED** | Confirmed in current source: MCC `mcc.cpp` line 622 ✅, BDC `bdc.cpp` line 1200 ✅. |
 | ~~FW-C13~~ | ~~Implement `SET_CHARGER` at `0xAF` — MCC~~ | ✅ **CLOSED** | Confirmed in current source: MCC `mcc.cpp` line 712 ✅. |
-| ICD-1 | ICD INT_ENG update pass — CB-20260412 + BDC HB bytes | ⏳ Pending | Bump ICD to v3.6.0. Full list of changes: **(New)** `0xA1` SET_HEL_TRAINING_MODE, `0xA3` SET_TIMESRC, `0xA9` SET_REINIT, `0xAA` SET_DEVICES_ENABLE, `0xAB` SET_FIRE_VOTE, `0xAF` SET_CHARGER, `0xD1` ORIN_COCO_ENABLE, `0xE0` SET_BCAST_FIRECONTROL_STATUS, `0xB1` SET_BDC_VOTE_OVERRIDE. **(Retired)** `0xA9`, `0xB0`, `0xB1` (old), `0xBE`, `0xD1` (old), `0xD2`, `0xD8`, `0xDF`, `0xE0` (old), `0xE1`, `0xE3`, `0xE6`, `0xED`. **(Scope to INT_OPS)** `0xA2`, `0xA3`, `0xA1`, `0xAB`. **(INT_ENG)** `0xE0` BCAST_FC, `0xB1` VOTE_OVR. Update version history section. Bump ICD document register entry. | `CROSSBOW_ICD_INT_ENG.md`, IPGD-0003 register entry |
+| ~~ICD-1~~ | ~~ICD INT_ENG update pass — CB-20260412 + BDC HB bytes~~ | ✅ **CLOSED CB-20260422** | ICD INT_ENG now at v4.2.1. CB-20260412 changes were incorporated at v3.6.0 and subsequent versions. Scope/target audit completed CB-20260422 — 19 corrections applied, Appendix A visualization spec added.
 | ~~DEF-1~~ | ~~defines.hpp / defines.cs update pass — CB-20260412 enum changes~~ | ✅ **CLOSED** | **Verified CB-20260413.** Both files contain all CB-20260412 enum changes — `SET_TIMESRC=0xA3`, `SET_REINIT=0xA9`, `SET_DEVICES_ENABLE=0xAA`, `SET_CHARGER=0xAF` all added; `SET_HEL_TRAINING_MODE=0xA1`, `ORIN_ACAM_COCO_ENABLE=0xD1`, `SET_BCAST_FIRECONTROL_STATUS=0xE0`, `SET_BDC_VOTE_OVERRIDE=0xB1` all reassigned; all retired names removed (replaced by `RES_xx` rejection markers, both files in lockstep). **Naming note:** slot `0xAB` retains the legacy name `SET_FIRE_REQUESTED_VOTE` from its `0xE6` origin — slot-only move, name preserved to avoid C# call-site churn. ICD-1 to use canonical name `SET_FIRE_REQUESTED_VOTE` in v4.0.0 entries (not the `SET_FIRE_VOTE` shorthand used in the original CB-20260412 spec). | `defines.hpp` ✅ `defines.cs` ✅ |
 | ARCH-1 | ARCHITECTURE.md update pass — CB-20260412 | ⏳ Pending | Update: §5 Port reference — note `0xA9`/`0xAA` as new unified fleet commands. §17 Open items — add ICD-1, DEF-1, FW-C8 through FW-C13, FW-C10. Note 0xA1 REG1 CMD_BYTE legacy status. ICD reference bump to v3.6.0 in ARCH header. All controller FW versions → 4.0.0. IsV4 gate documented. **Hardware revision sections:** Each controller section (MCC §9, BDC §10, TMC §?, FMC §12) needs V1/V2 subsections noting platform differences — MCC HW rev (laser/no-laser), BDC V1/V2 (Vicor/TRACO, IP175, new thermistors), TMC V1/V2 (single Vicor/two TRACOs, heater removed, ADS1015 removed), FMC V1/V2 (SAMD21/STM32F7). **CROSSBOW_FW_PATTERNS.md updates to incorporate into ARCH patterns appendix:** (1) platform table FMC row → V1 SAMD21 / V2 STM32F7; (2) line 19 warning update — FMC V2 follows OpenCR pattern; (3) `buildReg01()` example `ICD::GET_REGISTER1` → `0x00`; (4) HPP template `isUnSolicitedEnabled` → retired, replaced by per-client `wantsUnsolicited`. | `ARCHITECTURE.md` |
 | UG-1 | CROSSBOW_UG_ENG_GUI_draft.md update pass | 🟡 Partial | TRC section (§4.7) now written CB-20260419b. Remaining: ICD/ARCH version refs; MCC section (LASER_MODEL, HEL training mode, IsV4 gate, charger UI); BDC section (V1/V2 hardware table, IP175, HEALTH_BITS/POWER_BITS rename, new temps, IsV2 layout switching); TMC section (V1/V2 hardware table, PUMP/PIDGAIN serial commands, isSingleLoop); FMC section (V1 SAMD21 / V2 STM32F7 platform note); retired stream controls. | `CROSSBOW_UG_ENG_GUI_draft.md` |
@@ -1037,7 +1078,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | CLEANUP-3 | A3 ACK discrepancy — MCC visible in debug, BDC not | ⏳ Pending | MCC A3 ACK visible in debug output, BDC A3 not — both working. Likely a log level or debug print difference, not a protocol issue. Investigate when on HW. | `bdc.cpp` — A3 handler debug prints |
 | ~~BDC-FSM-VOTE-LATCH~~ | ~~`isFSMNotLimited` stale outside ATRACK/FTRACK — vote latches NO-FIRE on track exit~~ | ✅ **CLOSED** | **Opened and closed CB-20260413.** Bug: `isFSMNotLimited` (VOTE_BITS_BDC bit 7, `FSM_NOT_LTD` — inverted logic, bit set = "FSM not limited" = OK) was only updated inside the ATRACK/FTRACK case body of `BDC::PidUpdate()`. The variable is read every telemetry tick to build the broadcast vote bitmask at `bdc.hpp:224`, but the *write* only happened in track mode. On exit from ATRACK/FTRACK with the bit cleared (track point too far off-center → predicted FSM correction exceeds `FSM_ANGLE_MAX_TARGET_SPACE_DEG = 2.0°`), the value stuck at `false` and the broadcast vote kept reporting NO-FIRE until the next track entry recomputed it. User symptom: "FMC fsm limit vote not clearing on the BDC until system goes into track." Fix: compute `isFSMNotLimited` from the FMC FSM position readback (`fmc.fsm_posX_rb` / `fsm_posY_rb` — already extracted at `bdc.cpp:435-436` from FMC REG1 bytes [20-23] / [24-27] via the FW-B5 offset fix) at the top of `PidUpdate()`. Conversion: `(fsm_posX_rb - FSM_X0) * iFOV_FSM_X_DEG_COUNT` gives target-space degrees (matching units of the existing constants), magnitude check via `sqrt(ax_rb² + ay_rb²) <= FSM_ANGLE_MAX_TARGET_SPACE_DEG`. Sign omitted (magnitude only). Gimbal NED offset omitted (we want local FSM angle, not world frame). The ATRACK/FTRACK case body still overwrites with the predictive (track-error-derived) value when actively driving the FSM — the predictive computation leads the readback by one tick, which is the correct behaviour in track mode. In all other modes the readback value persists, so the vote tracks actual FSM angular state instead of latching the last ATRACK predictive value. **Placement note (preserve this design choice):** user moved the `if ((millis() - prev_PID_Millis) < TICK_PID) return;` rate gate from above the readback block to BELOW it — intentional. The FSM limit check is an instantaneous physical state read, not a control-loop concept, and gating it at PID rate would mean some A1 frames carry a vote bit up to one PID period stale. Both the readback fallback and the predictive override live inside `PidUpdate()` together by design — they are two halves of the same FSM-limit decision, paired alongside the existing FSM_X/FSM_Y/Set_FM_POS code. Do not move the rate gate back above the FSM block. Do not hoist either computation out of `PidUpdate()`. | `bdc.cpp` — `BDC::PidUpdate()` ✅ |
 
-### FMC
+### TMC
 
 | ID | Item | Status | Detail | Files |
 |----|------|--------|--------|-------|
@@ -1086,7 +1127,6 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | ~~CLEANUP-1~~ | ~~Dead code — MCC_STATUS and BDC_STATUS on controller classes~~ | ✅ **CLOSED CB-20260416** | Removed. | `mcc.cs`, `bdc.cs` ✅ |
 
 | CLEANUP-4 | Confirm ping stops correctly at STANDBY transition | ⏳ Pending | `PING_STATUS_*` bools stay at last value when ping loop stops. Verify `CB.MCC_STATUS`/`CB.BDC_STATUS` do not use stale ping state after STANDBY transition. Confirm on HW. | `frmMain.cs` — `PingHB()`, `crossbow.cs` |
-| GUI-3 | MSG_BDC.cs activeTimeSource reads from correct bits | ⏳ Open | Verify `activeTimeSource` reads from `TimeBits` (`tb_usingPTP`/`tb_isNTP_Synched`), not `DeviceReadyBits`. `MSG_TMC.cs` — align to `tb_*` prefix naming (cosmetic). | `MSG_BDC.cs`, `MSG_TMC.cs` |
 | GUI-5 | lbl_gimbal_hb — gimbalMSG.HB_TX_ms missing | ⏳ Open | `gimbalMSG.HB_TX_ms` property does not exist on `MSG_GIMBAL`. Find correct HB property name and fix binding in `frmBDC`. | `frmBDC.cs`, `MSG_GIMBAL.cs` |
 | ~~GUI-6~~ | ~~Rolling max stats to TRC tab~~ | ✅ **CLOSED CB-20260419b** | dt/HB rolling max stats with EMA α=0.10, RX staleness, gap counter, uptime, drop counter — all applied to `frmTRC.cs` matching `frmTMC` pattern. | `frmTRC.cs` ✅ |
 | ~~GUI-7~~ | ~~HB and status timing audit — all child devices~~ | ✅ **CLOSED CB-20260416** | Audit complete and verified on live HW. All HB bindings confirmed correct. | `frmBDC.cs`, `frmMCC.cs` ✅ |
@@ -1124,7 +1164,6 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | IPG-ROPS | 6K ch2 output power (`ROPS`) — not in current poll | 🟢 Low | YLM-6K supports `ROPS` command for channel 2 output power readback. Not in current firmware POLL loop — future extension if dual-channel monitoring required. No action until 6K system is in field use. | `ipg.cpp` — `POLL()` loop |
 | BDC-2 | Fuji startup comms errors | ⏳ Deferred | Spurious comms errors during Fuji VIS camera settling after boot — system recovers automatically. | `bdc.cpp` — Fuji comms init |
 | TRC-M9 | Deprecate TRC port 5010 | ⏳ Deferred | Legacy 64B binary port. Remove from TRC firmware and C# after HW validation confirms port 10018 fully operational. | TRC `udp_listener.cpp`, relevant C# client |
-| TRC-MUTEX | buildTelemetry() race condition | ⏳ Deferred | Mutex on `buildTelemetry()` race condition. Linux threading means concurrent access to telemetry struct is possible. Low priority. | TRC `udp_listener.cpp` |
 | ~~DEPLOY-3~~ | ~~Sustained bench test~~ | ✅ **CLOSED CB-20260416** | All five controllers running simultaneously — bench test complete. |
 | DEPLOY-4 | Verify .33 GPS lock before mission | ⏳ Pending | Confirm Phoenix Contact FL TIMESERVER has GPS lock (LOCK LED steady) before relying on it as primary NTP/Stratum 1. Without GPS lock degrades to internal oscillator. | — |
 | ~~DEPLOY-5~~ | ~~NovAtel GNSS (.30) — PTP configuration per production system~~ | ✅ **CLOSED CB-20260416** | Configuration procedure documented in CROSSBOW_GNSS_CONFIG.md (IPGD-0018) — `PTPMODE ENABLE_FINETIME` → `PTPTIMESCALE UTC_TIME` → `SAVECONFIG`. Applied and verified on bench unit. Each production unit requires same procedure at commissioning. |
@@ -1138,32 +1177,29 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 
 ## Reference — ICD Command Space Summary (CB-20260412)
 
+> **Historical snapshot — CB-20260412.** For the current command map, see `CROSSBOW_ICD_INT_ENG.md` Appendix A — Command Map Visualization. The table below records the original CB-20260412 assignments. Corrections applied since are noted inline.
+
 | Byte | Assignment | Scope | Notes |
 |------|------------|-------|-------|
-| `0xA1` | SET_HEL_TRAINING_MODE | INT_OPS | Moved from `0xAF`. Legacy REG1 CMD_BYTE role cleared (FW-C10 pending). |
-| `0xA3` | SET_TIMESRC | INT_OPS | New — pending FW-C8 (rejection handler removal) before live. |
-| `0xA9` | SET_REINIT | INT_OPS | New unified — replaces `0xB0`+`0xE0`. MCC+BDC, routing by IP. FW-C11 pending. |
-| `0xAA` | SET_DEVICES_ENABLE | INT_OPS | New unified — replaces `0xBE`+`0xE1`. MCC+BDC, routing by IP. FW-C12 pending. |
+| `0xA1` | SET_HEL_TRAINING_MODE | INT_OPS | Moved from `0xAF`. |
+| `0xA3` | SET_TIMESRC | INT_OPS | Assigned CB-20260412. FW-C7 implementation pending. |
+| `0xA9` | SET_REINIT | INT_OPS | Replaces `0xB0`+`0xE0`. MCC+BDC, routing by IP. |
+| `0xAA` | SET_DEVICES_ENABLE | INT_OPS | Replaces `0xBE`+`0xE1`. MCC+BDC, routing by IP. |
 | `0xAB` | SET_FIRE_VOTE | INT_OPS | Moved from `0xE6`. Promoted to INT_OPS. |
-| `0xAF` | SET_CHARGER | INT_OPS | New merged — replaces `0xE3`+`0xED`. MCC V1 only. FW-C13 pending. |
-| `0xC4` | RES | — | Candidate for AWB command (HMI-AWB). |
-| `0xD1` | ORIN_COCO_ENABLE | INT_OPS | Moved from `0xDF`. TRC binary: needs impl. |
+| `0xAF` | SET_CHARGER | INT_OPS | Merges `0xE3`+`0xED`. MCC V1/V2/V3. |
+| `0xC4` | CMD_VIS_AWB | INT_OPS | ~~Candidate~~ **Assigned CB-20260416e.** In `EXT_CMDS_BDC[]`. |
+| `0xD1` | ORIN_ACAM_COCO_ENABLE | ~~INT_OPS~~ **INT_ENG** | Moved from `0xDF`. **Scope corrected v4.2.1** — absent from `EXT_CMDS_BDC[]`, A3 not accessible. |
 | `0xE0` | SET_BCAST_FIRECONTROL_STATUS | INT_ENG | Moved from `0xAB`. Internal vote sync MCC→BDC→TRC. |
 | `0xB1` | SET_BDC_VOTE_OVERRIDE | INT_ENG | Moved from `0xAA`. BDC ENG block. |
-| **Freed this session** | `0xA9`(old), `0xB0`, `0xB1`(old), `0xBE`, `0xD1`(old), `0xD2`, `0xD8`, `0xDF`, `0xE0`(old), `0xE1`, `0xE3`, `0xE6`, `0xED` | — | All pending FW-C8 handler removal where applicable. |
-| **Available (clean)** | `0xA3`(after FW-C8), `0xC0`, `0xC3`, `0xC4`, `0xC5`, `0xC6`, `0xCF`, `0xD2`, `0xD8`, `0xDF`, `0xE1`, `0xE5`, `0xEE`, `0xF8`, `0xF9`, `0xFD` | — | `0xA3` available only after FW-C8. Others clean. |
-| **Available (needs FW-C8)** | `0xA3`, `0xB0`, `0xBE`, `0xE0`, `0xE3`, `0xE4`, `0xE6`, `0xEC`, `0xED` | — | Handler removal required before new assignment. |
-| **Awaiting confirmation** | `0xBF`, `0xCF`, `0xEF`, `0xFF` | — | May be outbound response CMD_BYTEs — firmware check required. |
 
----
 
 ## Reference — W5500 Socket Budget
 
 | Controller | PTP disabled | PTP enabled | ptp.INIT() | Notes |
 |---|---|---|---|---|
 | MCC | 6/8 | 8/8 | Gated ✅ | udpA1, udpA2, udpA3, gnss.rx:3001, gnss.tx:3002, HEL |
-| BDC | 7/8 | 7/8 | Unconditional ⚠️ | udpA1, udpA2, udpA3, gimbal×2, ptp×2. Needs gate — FW-B4 |
-| TMC | 4/8 | 4/8 | Unconditional ⚠️ | udpA1, udpA2, ptp×2. Needs gate — FW-B4 |
+| BDC | 7/8 | 7/8 | Gated ✅ | udpA1, udpA2, udpA3, gimbal×2, ptp×2. FW-B4 closed — gate confirmed in `bdc.cpp` boot state machine PTP_INIT step. |
+| TMC | 4/8 | 4/8 | Gated ✅ | udpA1, udpA2, ptp×2. FW-B4 closed — gate confirmed in `tmc.cpp` INIT(). |
 | FMC | 2/8 | 4/8 | Gated ✅ | udpA1, udpA2. STM32F7 (V2). Gated for FW-B3, not SAMD reason |
 | TRC | N/A | N/A | N/A | Linux kernel manages sockets |
 
@@ -1173,14 +1209,14 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 
 | Item | Value |
 |------|-------|
-| ICD INT_ENG | v3.5.2 — 2026-04-11 (IPGD-0003) |
-| ICD INT_OPS | v3.3.8 (IPGD-0004) |
+| ICD INT_ENG | v4.2.1 — 2026-04-22 (IPGD-0003) |
+| ICD INT_OPS | v3.6.2 — 2026-04-22 (IPGD-0004) |
 | ICD EXT_OPS | v3.3.0 (IPGD-0005) |
-| ARCH | v3.3.7 — 2026-04-11 (IPGD-0006) |
-| MCC firmware | v3.3.0 — STM32F7, OpenCR |
-| BDC firmware | v3.3.0 — STM32F7, OpenCR |
-| TMC firmware | v3.3.0 — STM32F7, OpenCR |
-| FMC firmware | v3.3.0 — STM32F7, OpenCR (V2 board) |
+| ARCH | v4.0.4 — 2026-04-19 (IPGD-0006) |
+| MCC firmware | v4.0.0 — STM32F7, OpenCR (V1/V2/V3 unified) |
+| BDC firmware | v4.0.0 — STM32F7, OpenCR (V1/V2 unified) |
+| TMC firmware | v4.0.0 — STM32F7, OpenCR (V1/V2 unified) |
+| FMC firmware | v4.0.0 — STM32F7, OpenCR (V2 board) |
 | TRC firmware | v3.0.2 — Jetson Orin NX, Linux 6.1 |
 | NTP primary | 192.168.1.33 — Phoenix Contact FL TIMESERVER (HW Stratum 1, GPS-disciplined) |
 | NTP fallback | 192.168.1.208 — Windows HMI (w32tm) |
@@ -1192,6 +1228,13 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 # PART 3 — CLOSED ITEMS
 
 *Most recent first. Within each session: FW → SW → Docs.*
+
+---
+
+## CB-20260422 — DEF-2 closure
+| ID | Item | Closed |
+|----|------|--------|
+| DEF-2 | TMC-specific enums moved to `tmc.hpp` / `tmc.cs`; `defines` files are now fleet-wide ICD only | CB-20260422 |
 
 ---
 

@@ -1,11 +1,30 @@
 # JETSON_SETUP.md — TRC Jetson Orin NX Setup Procedure
 **Document:** JETSON_SETUP.md (DOC-2)  
-**Version:** 2.3.1  
-**Date:** 2026-04-19  
-**Confirmed on:** Unit 1 (2026-04-09), Unit 2 (2026-04-09), Unit 3 (2026-04-10) — all 54 PASS, 0 FAIL  
+**Version:** 2.3.3  
+**Date:** 2026-04-24  
+**Confirmed on:** Unit 1 (2026-04-09), Unit 2 (2026-04-09), Unit 3 (2026-04-10), Unit 13 (2026-04-24), Unit 14 (2026-04-24) — all 54 PASS, 0 FAIL (Gate A) / 53 PASS, 1 expected FAIL (Gate B)  
 **Platform:** Seeed Studio reComputer J4012 **(non-Super, J401 carrier)** — see hardware note below  
 **JetPack:** 6.2.2 (L4T 36.5, Ubuntu 22.04, CUDA 12.6, cuDNN 9.3)  
 **Reference:** ARCHITECTURE.md §2.5, OPENCV_BUILD_HISTORY.md, TOMORROW_SESSION_PLAN.md
+
+---
+
+> # ⛔ CRITICAL — READ BEFORE STARTING
+>
+> **Follow this document exactly, in order, with no deviations.**
+>
+> - Execute every step as written. Do not skip, reorder, or substitute steps.
+> - Do not proceed to the next step until the current step passes its expected output.
+> - Do not add steps that are not in this document.
+> - If a step produces unexpected output, STOP and resolve it before continuing.
+> - If you are working with an assistant (human or AI), it must also follow this document exactly. If the assistant suggests a step not in this document, do not execute it — redirect to the document.
+> - Deviations that seem harmless often have downstream consequences (wrong sequencing of holds, missed gate checks, cleanup before verification). The document exists because these consequences have been learned the hard way.
+>
+> **The only acceptable deviation is one explicitly directed by a senior engineer who has reviewed the full context.**
+>
+> If you find a step that is wrong or missing, note it for a document update — do not fix it inline during a build.
+
+---
 
 > ⚠️ **Hardware variant — read before proceeding**
 >
@@ -381,16 +400,21 @@ The non-Super and Super J4012 are mechanically different — do not mix them.
 >
 > **Correct pre-flash sequence for all new units — two boots required:**
 >
-> **Boot 1 — Accept factory EULA:**
+> **Boot 1A — Accept factory EULA:**
 > 1. Power on WITHOUT FC REC jumper — monitor and keyboard required
 > 2. Accept EULA on Jetson display
 > 3. Complete full OEM first-boot setup (username `ipg`, password)
-> 4. Let it fully boot to desktop
+> 4. Do NOT install Chromium if prompted — it is not needed, skip it
+> 5. Let it fully boot to desktop
+>
+> **Boot 1B — Reject secondary prompts:**
+> 6. The unit will reboot automatically into a second-stage setup
+> 7. Reject Canonical/Ubuntu Pro prompts and any other optional install prompts
+> 8. Confirm fully booted and stable at desktop
 >
 > **Boot 2 — Confirm stable:**
-> 5. Reboot — accept any second-stage prompts
-> 6. Confirm fully booted and stable at desktop
-> 7. Power off completely
+> 9. Reboot — confirm fully booted and stable at desktop
+> 10. Power off completely
 >
 > **Then proceed with recovery mode below.**
 > SDK Manager flash will fail or loop if either boot is skipped.
@@ -413,7 +437,9 @@ lsusb | grep -i nvidia
 If APX device not detected: check jumper, try different USB port, confirm power is on.
 The jumper wire can be removed once recovery mode is confirmed.
 
-### 0.4 SDK Manager selections
+### 0.4 SDK Manager selections — complete pre-flash checklist
+
+> ⚠️ **Complete this checklist before clicking Flash. All settings must be confirmed before proceeding.**
 
 Launch SDK Manager on the host Ubuntu PC. Make exactly these selections:
 
@@ -424,24 +450,23 @@ Launch SDK Manager on the host Ubuntu PC. Make exactly these selections:
 | Target hardware | Jetson Orin NX 16GB |
 | JetPack version | **6.2.2** (not 6.2 or 6.2.1 — exactly 6.2.2) |
 | Jetson Linux (L4T 36.5) | ✅ Selected |
-| **Jetson SDK Components:** | ❌ **Deselect all** — installed via apt in Phase 1 |
+| **Jetson SDK Components:** | ❌ **Deselect ALL** — installed via apt in Phase 1 |
 | — CUDA | ❌ Deselect |
 | — CUDA-X AI | ❌ Deselect |
 | — Computer Vision | ❌ Deselect |
 | — Developer Tools | ❌ Deselect |
+| **Jetson Runtime Components:** | ❌ **Deselect ALL** — installed via apt in Phase 1 |
 | **Jetson Platform Services** | ❌ Deselect |
 | DeepStream | ❌ Not selected |
 | Holoscan / other additional SDKs | ❌ Not selected |
 | Storage device | **NVMe** (J401 boots from NVMe, not eMMC) |
+| **OEM config** | **Pre-config** |
+| **Username** | **`ipg`** |
+| **Password** | (set per deployment policy — not recorded here) |
 
-> **Why 6.2.2 over 6.2.1:** 6.2.2 (L4T 36.5) fixes a CUDA memory allocation bug
-> introduced in 6.2.1 — directly relevant to GPU inference workloads.
-> Same CUDA 12.6 / cuDNN 9.3 / Ubuntu 22.04 stack, no compatibility impact.
+> **Why deselect ALL SDK and runtime components in SDK Manager:** All SDK and runtime components are installed via `sudo apt install nvidia-jetpack` in Phase 1. This is NVIDIA's documented alternative installation method — identical result, more reliable, no network dependency during the SDK Manager flash session. This is the confirmed standard for Path A.
 >
-> **Why deselect SDK components in SDK Manager:** Component installation via SDK
-> Manager requires internet access on the Jetson during the flashing session,
-> which is unreliable on mixed networks. All SDK components are installed via
-> `sudo apt install nvidia-jetpack` in Phase 1.0.3 — identical result, more reliable.
+> **Why 6.2.2 over 6.2.1:** 6.2.2 (L4T 36.5) fixes a CUDA memory allocation bug introduced in 6.2.1 — directly relevant to GPU inference workloads. Same CUDA 12.6 / cuDNN 9.3 / Ubuntu 22.04 stack, no compatibility impact.
 
 ### 0.5 Flash and first-boot setup
 
@@ -595,18 +620,19 @@ cat /etc/hosts | grep trc
 > manual tracking or labelling scheme. All units share the same IP (192.168.1.22)
 > so the hostname is the only software-visible unit identity.
 
+> **Note:** The `sudo: unable to resolve host trc-XXXXXXX` warning that appears
+> immediately after setting the hostname is benign — the shell hasn't picked up
+> the new hostname yet. It resolves after reboot.
+
 ### 1.2 Passwordless sudo
 
+> ⚠️ **Do this before any apt or sudo commands.** Must be first.
+
 ```bash
-sudo visudo
-```
-Add at the bottom:
-```
-ipg ALL=(ALL) NOPASSWD: ALL
-```
-Save and exit (`:wq`). Verify:
-```bash
+sudo grep -q "ipg ALL=(ALL) NOPASSWD" /etc/sudoers || \
+    echo "ipg ALL=(ALL) NOPASSWD: ALL" | sudo tee -a /etc/sudoers
 sudo echo "sudo works"
+# Expect: sudo works
 ```
 
 ### 1.3 Create directory structure
@@ -620,7 +646,7 @@ ls ~/CV/
 
 ### 1.4 Hold L4T packages
 
-**Must be done before any apt install — including nvidia-jetpack.**
+> ⚠️ **Must be done before `apt install nvidia-jetpack` — do not skip or reorder.**
 
 ```bash
 sudo apt-mark hold \
@@ -632,7 +658,7 @@ sudo apt-mark hold \
     nvidia-l4t-init
 
 # Confirm — must show all 6
-apt-mark showhold
+apt-mark showhold | grep nvidia-l4t
 ```
 
 ### 1.5 Enable internet sharing and install compute stack
@@ -642,15 +668,17 @@ Connect Jetson Ethernet to Windows PC. Enable Windows ICS:
 2. Enable sharing → select wired NIC (connected to Jetson)
 3. Click OK
 
-Test connectivity on Jetson:
+Set gateway and test connectivity on Jetson:
 ```bash
+sudo ip route replace default via 192.168.1.208
 ping 8.8.8.8 -c 3
-ping google.com -c 3
+# Must succeed before continuing
 ```
 
-If `google.com` fails, fix DNS:
+If ping fails, fix DNS:
 ```bash
 echo "nameserver 8.8.8.8" | sudo tee /etc/resolv.conf
+ping 8.8.8.8 -c 3
 ```
 
 Install compute stack:
@@ -710,11 +738,24 @@ jtop --version
 # Expect: jtop 4.3.2
 ```
 
+> **Note — L4T 36.5.0:** jtop 4.3.2 will show this warning on every launch — it is cosmetic only and can be ignored. jtop is fully functional including the CTRL tab:
+> ```
+> [WARN] jetson-stats not supported for [L4T 36.5.0]
+> ```
+
 ### 1.8 Reboot
 
 ```bash
 sudo reboot
 ```
+
+> ⚠️ **After every reboot during the build — set gateway before any network activity:**
+> ```bash
+> sudo ip route replace default via 192.168.1.208
+> ```
+> The nmtui gateway will be left on `.208` for the duration of the build to maintain
+> internet access. It is changed to `.1` permanently at the end of Phase 8.
+> Every reboot reverts to `.1` until that change is made — always reset it manually.
 
 ---
 
@@ -832,16 +873,20 @@ sudo jetson_clocks --show | grep -E "cpu0|GPU"
 > ip link show | grep -v "lo\|can\|usb\|l4t"
 > ```
 
-### 3.1 Update gateway for deployment
+### 3.1 Update gateway for deployment — defer to end of build
 
-After internet sharing phase is complete, update the gateway from the Windows ICS
-address to the deployment network gateway:
+> ⚠️ **Do NOT change the gateway now.** Internet access via `.208` is required for
+> the remainder of the build (VimbaX download, OpenCV build, apt installs).
+> The gateway change from `.208` → `.1` is the final step at the end of Phase 8,
+> after all software is installed and verified.
+
+This step is documented here for completeness. Execute it only at the end of Phase 8:
 
 ```bash
 sudo nmtui
 ```
 - Edit a connection → Wired (`enP8p1s0`)
-- Gateway: change from `192.168.1.208` → `192.168.1.1` (or clear if no gateway needed)
+- Gateway: change from `192.168.1.208` → `192.168.1.1`
 - DNS: change from `8.8.8.8` → `192.168.1.33` (NTP appliance also serves DNS)
 - Save → Activate a connection → deactivate/reactivate
 
@@ -906,9 +951,10 @@ Reboot to apply:
 sudo reboot
 ```
 
----
-
-### ✅ CHECKPOINT 3 — Network and Timing
+> ⚠️ **After reboot — set gateway before any commands:**
+> ```bash
+> sudo ip route replace default via 192.168.1.208
+> ```
 
 ```bash
 # IP address
@@ -1008,6 +1054,11 @@ source ~/.bashrc
 ```bash
 sudo reboot
 ```
+
+> ⚠️ **After reboot — set gateway before any commands:**
+> ```bash
+> sudo ip route replace default via 192.168.1.208
+> ```
 
 ### 4.6 Verify camera detected
 
@@ -1224,8 +1275,13 @@ scp -r /path/to/TRC/* ipg@192.168.1.22:~/CV/TRC/
 ```bash
 cd ~/CV/TRC
 grep "VIMBAX_DIR" Makefile
-# Expect: VIMBAX_DIR := /opt/VimbaX_2025-1
+# Check the output before proceeding:
+# If showing VimbaX_2025-1 → run the sed below
+# If already showing VimbaX_2026-1 → skip the sed, proceed to 6.3
+```
 
+Only run if Makefile still shows `2025-1`:
+```bash
 sed -i 's|VimbaX_2025-1|VimbaX_2026-1|g' Makefile
 grep "VIMBAX_DIR" Makefile
 # Expect: VIMBAX_DIR := /opt/VimbaX_2026-1
@@ -1278,7 +1334,7 @@ ldd ./trc | grep -E "opencv_dnn|VmbC|Vmb"
 
 # Version string
 ./trc --version
-# Expect: TRC 3.0.2 <date> <time>
+# Expect: TRC 4.x.x <date> <time> — version will match current TRC source build
 
 # COCO inference probe
 python3 << 'EOF'
@@ -1325,9 +1381,9 @@ chmod +x ~/CV/SETUP/04_verify_all.sh
 chmod +x ~/CV/SETUP/cleanup_pre_image.sh
 ```
 
-> ⚠️ **Windows line endings:** Scripts transferred from Windows via SCP may contain
-> `\r\n` line endings which cause `/bin/bash^M: bad interpreter` errors on Linux.
-> Fix all scripts after every SCP transfer:
+> ⚠️ **Windows line endings — apply to ALL transferred scripts without exception:**
+> Scripts transferred from Windows via SCP contain `\r\n` line endings which cause
+> `/bin/bash^M: bad interpreter` errors on Linux. Fix all scripts after every SCP transfer:
 > ```bash
 > sed -i 's/\r//' ~/CV/TRC/trc_start.sh
 > sed -i 's/\r//' ~/CV/TRC/trc_start_bench.sh
@@ -1335,6 +1391,7 @@ chmod +x ~/CV/SETUP/cleanup_pre_image.sh
 > sed -i 's/\r//' ~/CV/SETUP/cleanup_pre_image.sh
 > sed -i 's/\r//' ~/CV/SETUP/install_opencv4.13.0_Jetpack6.2.2.sh
 > ```
+> This applies to every `.sh` file transferred from Windows — run the sed before `chmod +x`, every time.
 
 ### 7.2 Configure bench autostart — gold standard for image
 
@@ -1399,11 +1456,13 @@ ps aux | grep trc | grep -v grep
 
 tail -20 ~/CV/TRC/trc_bench.log
 # Must show TRC startup messages, no fatal errors
-
-# Confirm video stream active (unicast bench mode)
-sudo tcpdump -i enP8p1s0 -c 10 host 192.168.1.208 and port 5000
-# Should see UDP packets to THEIA
 ```
+
+**Confirm stream active — start Windows GStreamer receiver and confirm video visible:**
+```
+gst-launch-1.0.exe udpsrc address=192.168.1.208 port=5000 buffer-size=2097152 caps="application/x-rtp,media=video,encoding-name=H264,payload=96" ! rtpjitterbuffer latency=50 drop-on-latency=true ! rtph264depay ! h264parse ! nvh264dec ! videoconvert n-threads=4 ! fpsdisplaysink sync=false text-overlay=true signal-fps-measurements=true
+```
+**Pass:** Live video visible on Windows at `192.168.1.208:5000`.
 
 **All pass → proceed to Phase 8.**
 
@@ -1505,16 +1564,33 @@ chmod +x ~/CV/SETUP/cleanup_pre_image.sh
 
 ### 8.3 Final verification — two gates
 
+> ⛔ **Gate A MUST run BEFORE cleanup (§8.2). Gate B runs AFTER cleanup.**
+> Running cleanup before Gate A means you will never get a 54 PASS baseline record for this unit.
+> Do not proceed to §8.2 until Gate A shows 54 PASS, 0 FAIL.
+
+> ⚠️ **Before running Gate A — verify the TRC version check in `04_verify_all.sh` matches the current TRC major version.**
+> The script checks for a TRC version string prefix (e.g. `"TRC 4"`). If the TRC major version has changed since the last build, update the script first or Gate A will show 1 FAIL on the version check:
+> ```bash
+> grep "TRC " ~/CV/SETUP/04_verify_all.sh | grep -i "version\|expect"
+> # Confirm it matches current TRC major version — e.g. "TRC 4"
+> # If not, update:
+> sed -i 's/"TRC 3"/"TRC 4"/' ~/CV/SETUP/04_verify_all.sh
+> ```
+
 Run the verify script **twice** at different stages. Both results are expected and correct:
 
-**Gate A — Pre-cleanup (run before 8.2):**
+**Gate A — Pre-cleanup (run BEFORE 8.2):**
 ```bash
 cd ~/CV/SETUP/
 ./04_verify_all.sh
 ```
 Expected: **54 PASS, 0 FAIL** — Makefile present, all checks pass.
 
-**Gate B — Post-cleanup (run after 8.2):**
+> ⚠️ **If Gate A does not show 54 PASS, 0 FAIL — do not proceed to cleanup. Resolve all failures first.**
+
+**Then run §8.2 cleanup.**
+
+**Gate B — Post-cleanup (run AFTER 8.2):**
 ```bash
 cd ~/CV/SETUP/
 ./04_verify_all.sh
@@ -1529,6 +1605,11 @@ was intentionally removed by cleanup. This is correct pre-image state.
 
 The log is saved to `~/CV/SETUP/jetson_verified_YYYYMMDD_HHMMSS.txt` — keep the
 Gate B log as the definitive pre-image baseline record.
+
+The unit is now ready for inventory and deployment. Shut down cleanly:
+```bash
+sudo poweroff
+```
 
 ### Pass criteria reference
 
@@ -1682,7 +1763,9 @@ All deployed TRC units. Update this table when a unit is built, upgraded, or ret
 | `trc-1420825020046` | 1420825020046 | 4.0.2 | 6.2.2 | C | 2026-04-17 | — | Path C (4.4→5.0) |
 | `trc-1420825022024` | 1420825022024 | 4.0.2 | 6.2.2 | C | 2026-04-17 | Home Lab | Path C (4.4→5.0) |
 | `trc-1422124347828` | 1422124347828 | 4.0.2 | 6.2.2 | C | 2026-04-18 | — | Path C validated (4.3→5.0) |
-| `trc-1420825018548` | 1420825018548 | 4.0.3 | 6.2.2 | A | 2026-04-19 | — | Path A — was JetPack 5.x, reflashed |
+| `trc-1420825018548` | 1420825018548 | 4.0.3 | 6.2.2 | A | 2026-04-19 | Inventory | Path A — was JetPack 5.x (R35), reflashed. Tracker WIP |
+| `trc-1423624313027` | 1423624313027 | 4.1.2 | 6.2.2 | A | 2026-04-24 | Inventory | Path A — was JetPack 5.x (R35), reflashed. Tracker WIP |
+| `trc-1420825014551` | 1420825014551 | 4.1.3 | 6.2.2 | A | 2026-04-24 | Inventory | Path A — fresh unit. |
 
 > **`04_verify_all.sh` TRC version check:** The script checks for a TRC version string prefix (e.g. `"TRC 4"`). After any TRC major version change, update the check in the script and push the updated script to all units:
 > ```bash
@@ -1712,6 +1795,8 @@ All deployed TRC units. Update this table when a unit is built, upgraded, or ret
 
 | Version | Date | Notes |
 |---------|------|-------|
+| 2.3.3 | 2026-04-24 | §0.3 Boot 1 split into Boot 1A (EULA, no Chromium) and Boot 1B (reject Canonical/Ubuntu Pro prompts) — two sub-steps now explicit before Boot 2. §6 Checkpoint: TRC version string expected output updated from `TRC 3.0.2` to `TRC 4.x.x` — version matches current TRC source build, not hardcoded. §8.3: added explicit pre-Gate A step to verify and update `04_verify_all.sh` TRC version check before running Gate A (prevents false FAIL on version string mismatch). Fleet Registry: `trc-1420825014551` added (Unit 14, TRC 4.1.3, Path A, Inventory). |
+| 2.3.2 | 2026-04-24 | Added FOLLOW EXACTLY instruction block at top. §0.4: consolidated all SDK Manager settings (including OEM config, username, Pre-config, NVMe, deselect ALL SDK and runtime components) into single pre-flash checklist. Phase 1 reordered: sudo (1.2) → hold (1.4) → nvidia-jetpack (1.5) → PATH → packages → jtop. Passwordless sudo updated to use tee method (no visudo). Added hostname `sudo: unable to resolve host` warning as expected. §1.7: jtop L4T 36.5.0 warning documented as cosmetic. §1.8 and all reboot steps: post-reboot gateway reminder added. §3.1: deferred to end of Phase 8 — gateway stays on .208 for entire build. §6.2: check Makefile before sed — skip if already 2026-1. §7.1: `sed -i 's/\r//'` now explicitly required for ALL transferred scripts before chmod. Checkpoint 7: tcpdump replaced with Windows GStreamer stream verification. §8.3: Gate A BEFORE cleanup — explicit warning added. Gateway change removed from build close-out — set on-site at deployment only. Fleet Registry: `trc-1420825018548` location updated to Inventory; `trc-1423624313027` added (Unit 13, Path A, TRC 4.1.2, Inventory). `04_verify_all.sh` TRC version check note: update from TRC 3 → TRC 4. |
 | 2.3.1 | 2026-04-19 | TRC 4.1.0 introduced. Makefile note: new source transfers from Windows may reset VIMBAX_DIR to `VimbaX_2025-1` — always run `sed -i 's|VimbaX_2025-1|VimbaX_2026-1|g' Makefile` after transfer. Scripts need `chmod +x` after transfer (both `trc_start.sh` and `trc_start_bench.sh`). Hot-reload procedure: `pkill trc_start_bench.sh && pkill ./trc` → fix line endings → rebuild → restart. |
 | 2.3.0 | 2026-04-19 | Fleet Registry: `trc-1420825018548` added — JetPack 5.x (R35) unit, required full Path A reflash. TRC 4.0.3 introduced. R35 warning added to Path C. |
 | 2.2.9 | 2026-04-18 | Path C validated on REVISION 4.3 → 5.0. Fleet Registry: `trc-1422124347828` added (11 units). |

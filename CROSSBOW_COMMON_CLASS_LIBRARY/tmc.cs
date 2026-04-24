@@ -28,6 +28,59 @@ namespace CROSSBOW
     // -----------------------------------------------------------------------
     public class TMC
     {
+        // ── TMC-specific enums (moved from defines.cs — DEF-2) ───────────────────
+        // 0xE8 TMS_SET_DAC_VALUE — dac payload byte 0
+        // Also used by ENG GUI to send direct DAC channel commands.
+        // Authoritative here — absent from pin_defs_tmc.hpp (FW) and defines.hpp (C++).
+        public enum DAC_CHANNELS
+        {
+            LCM1 = 0x00,
+            LCM2 = 0x02,
+            PUMP = 0x04,
+            HEATER = 0x06,
+            MCP4728_WIPER = 0x0B,
+            MCP4728_CHANNEL_A_NV = 0x10,
+            MCP4728_CHANNEL_B_NV = 0x12,
+            MCP4728_CHANNEL_C_NV = 0x14,
+            MCP4728_CHANNEL_D_NV = 0x16,
+        };
+
+        // TMC_PUMP_SPEEDS — V1 only.
+        // V1 Vicors accept a DAC trim voltage to set pump motor speed.
+        // V2 TRACO PSUs are fixed-voltage on/off — no speed control.
+        // Guard removed (DEF-2): enum is TMC-internal only; no cross-controller
+        // call sites exist. frmTMC.cs gates visibility via ApplyHwRevLayout().
+        public enum PUMP_SPEEDS
+        {
+            OFF = 0,    // also turns off vicor
+            LO = 350,   // 9.6V  — NOTE: too low for sustained operation, use MED+
+            MED = 500,  // 12.0V
+            HI = 800,   // 20.0V
+        }
+
+        public enum LCM_SPEEDS
+        {
+            OFF = 0,    // 
+            LO = 1024,  //
+            MED = 2048, //
+            HI = 4095,  //
+        }
+        public enum VICORS
+        {
+            LCM1 = 0,
+            LCM2 = 1,
+            PUMP = 2,   // V1 — single Vicor, both pumps in parallel
+            PUMP1 = 2,   // V2 — TRACO PSU pump 1 (same wire value as PUMP)
+            HEAT = 3,   // V1 only — heater Vicor
+            PUMP2 = 4,   // V2 only — TRACO PSU pump 2
+        }
+
+        public enum LCMS
+        {
+            LCM1 = 0,    // 
+            LCM2 = 1,  //
+        }
+
         // -------------------------------------------------------------------
         // Configuration
         // -------------------------------------------------------------------
@@ -310,10 +363,10 @@ namespace CROSSBOW
         // 0xE8 TMS_SET_DAC_VALUE — payload: uint8 channel, uint16 LE value
         // PUMP (0x04) and HEATER (0x06) channels are V1 only — TRACO PSUs have no analog input
         // and heater hardware is removed in V2. Suppressed silently on V2 to prevent reject errors.
-        public void SetDAC(TMC_DAC_CHANNELS ch, ushort val)
+        public void SetDAC(DAC_CHANNELS ch, ushort val)
         {
             if (LatestMSG.IsV2 &&
-                (ch == TMC_DAC_CHANNELS.PUMP || ch == TMC_DAC_CHANNELS.HEATER))
+                (ch == DAC_CHANNELS.PUMP || ch == DAC_CHANNELS.HEATER))
             {
                 Debug.WriteLine($"TMC.SetDAC: channel {ch} not valid on V2 hardware — suppressed");
                 return;
@@ -332,10 +385,10 @@ namespace CROSSBOW
         // GUI code must use LatestMSG.IsV1 / IsV2 to determine which overload to call.
         // Sending an invalid channel (e.g. HEAT on V2) is silently rejected by firmware
         // (STATUS_CMD_REJECTED), but this guard prevents accidental sends entirely.
-        public void EnableVicor(TMC_VICORS v, bool en)
+        public void EnableVicor(VICORS v, bool en)
         {
             // Block V1-only channels on V2 hardware
-            if (LatestMSG.IsV2 && ((byte)v == (byte)TMC_VICORS.HEAT))
+            if (LatestMSG.IsV2 && ((byte)v == (byte)VICORS.HEAT))
             {
                 Debug.WriteLine($"TMC.EnableVicor: HEAT channel not valid on V2 hardware — suppressed");
                 return;
@@ -353,13 +406,13 @@ namespace CROSSBOW
                 return;
             }
             Send(BuildA2Frame((byte)ICD.TMS_SET_VICOR_ENABLE,
-                new[] { (byte)TMC_VICORS.PUMP1, (byte)(en ? 1 : 0) }));
+                new[] { (byte)VICORS.PUMP1, (byte)(en ? 1 : 0) }));
             Send(BuildA2Frame((byte)ICD.TMS_SET_VICOR_ENABLE,
-                new[] { (byte)TMC_VICORS.PUMP2, (byte)(en ? 1 : 0) }));
+                new[] { (byte)VICORS.PUMP2, (byte)(en ? 1 : 0) }));
         }
 
         // 0xEA TMS_SET_LCM_ENABLE — payload: uint8 lcm enum, uint8 0/1
-        public void EnableLCM(TMC_LCMS lcm, bool en)
+        public void EnableLCM(LCMS lcm, bool en)
         {
             Send(BuildA2Frame((byte)ICD.TMS_SET_LCM_ENABLE,
                 new[] { (byte)lcm, (byte)(en ? 1 : 0) }));

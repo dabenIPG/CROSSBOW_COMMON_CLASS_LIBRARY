@@ -2,12 +2,19 @@
 
 **Document:** `CROSSBOW_ICD_INT_OPS`
 **Doc #:** IPGD-0004
-**Version:** 3.6.1
+**Version:** 3.6.2
 **Date:** 2026-04-16 (CB-20260416 — AWB assigned, charger V2 fix)
 
 ---
 
 ## Version History
+
+**v3.6.2 changes (scope audit — whitelist-verified — 2026-04-22):**
+- `0xD1 ORIN_ACAM_COCO_ENABLE` — **removed from INT_OPS.** Firmware audit confirmed absent from `EXT_CMDS_BDC[]` — A3 access was never implemented. Scope corrected to INT_ENG (A2 only). See `CROSSBOW_ICD_INT_ENG` v4.2.1.
+- `0xF6 BDC_SET_FSM_TRACK_ENABLE` — **removed from INT_OPS.** Absent from `EXT_CMDS_BDC[]`. Scope corrected to INT_ENG.
+- `0xFA BDC_SET_STAGE_HOME` — **removed from INT_OPS.** Absent from `EXT_CMDS_BDC[]`. Scope corrected to INT_ENG.
+
+---
 
 **v3.6.1 changes (CB-20260416 — AWB assigned, charger V2 fix):**
 - `0xC4 CMD_VIS_AWB` assigned — trigger VIS auto white balance once on active camera. No payload. Accessible via A3 (in `EXT_CMDS_BDC[]` whitelist). BDC routes to TRC.
@@ -29,7 +36,7 @@ A block fully INT_OPS — all 16 slots active. Changes affecting INT_OPS clients
 - `0xAA SET_DEVICES_ENABLE` — new unified device enable/disable. Replaces `0xBE` (INT_ENG, not in this doc) and `0xE1` (MCC). Routing implicit by destination IP. Payload: `uint8 device; uint8 0/1`.
 - `0xAB SET_FIRE_VOTE` — laser fire vote. Moved from `0xE6` (INT_ENG). Promoted to INT_OPS. Heartbeat required — vote drops on disconnect.
 - `0xAF SET_CHARGER` — new merged charger command. Replaces `0xE3` (PMS_CHARGER_ENABLE) and `0xED` (PMS_SET_CHARGER_LEVEL, was INT_ENG). Level required on every call. V1 only.
-- `0xD1 ORIN_ACAM_COCO_ENABLE` — moved from `0xDF`. Now accessible at `0xD1`.
+- `0xD1 ORIN_ACAM_COCO_ENABLE` — moved from `0xDF`. Now accessible at `0xD1`. *(Subsequently corrected to INT_ENG v3.6.2 — absent from `EXT_CMDS_BDC[]`.)*
 
 **⚠️ HMI implementation note:** `defines.cs` enum values for the following names change. Code using enum names is unaffected — only recompile required. Changed: `SET_HEL_TRAINING_MODE` (`0xAF`→`0xA1`), `ORIN_ACAM_COCO_ENABLE` (`0xDF`→`0xD1`). New: `SET_REINIT`, `SET_DEVICES_ENABLE`, `SET_FIRE_VOTE`, `SET_CHARGER`, `SET_TIMESRC`. Removed: `SET_BDC_REINIT`, `SET_MCC_REINIT`, `SET_MCC_DEVICES_ENABLE`, `PMS_CHARGER_ENABLE`, `PMS_SET_FIRE_REQUESTED_VOTE`. See DEF-1 (IPGD-0019) for full list.
 
@@ -326,7 +333,6 @@ For EXT_OPS interface definition see `CROSSBOW_ICD_EXT_OPS` (IPGD-0005).
 | Byte | Enum | Description | Payload | INT_OPS Target |
 |------|------|-------------|---------|----------------|
 | 0xD0 | ORIN_CAM_SET_ACTIVE | Set active camera | uint8 BDC_CAM_IDS (0=VIS, 1=MWIR) | BDC |
-| 0xD1 | ORIN_ACAM_COCO_ENABLE | Enable/disable COCO intra-trackbox inference. **Moved from `0xDF` (v3.6.0).** Model must be loaded (ISR lifecycle). Camera switch auto-disables COCO. | uint8 op [, uint8 param]: 0=off, 1=on, 2=load, 3=unload, 4=set_drift, 5=set_interval | BDC |
 | 0xD3 | ORIN_SET_STREAM_OVERLAYS | Set HUD overlay bitmask. bit0=Reticle, bit1=TrackPreview, bit2=TrackBox, bit3=CueChevrons, bit4=AC_Projections, bit5=AC_LeaderLines, bit6=FocusScore, bit7=OSD | uint8 bitmask | BDC |
 | 0xD4 | ORIN_ACAM_SET_CUE_FLAG | Set cue flag indicator (HUD chevrons) | uint8 0/1 | BDC |
 | 0xD5 | ORIN_ACAM_SET_TRACKGATE_SIZE | Set track gate width/height | uint8 w, uint8 h (pixels, min 16) | BDC |
@@ -356,8 +362,6 @@ For EXT_OPS interface definition see `CROSSBOW_ICD_EXT_OPS` (IPGD-0005).
 | 0xF1 | BDC_SET_FSM_HOME | FSM set home position | int16 x, int16 y | BDC |
 | 0xF2 | BDC_SET_FSM_IFOVS | FSM set iFOV scaling | float x, float y | BDC |
 | 0xF3 | FMC_SET_FSM_POS | FSM set position | int16 x, int16 y | BDC |
-| 0xF6 | BDC_SET_FSM_TRACK_ENABLE | FSM track mode enable | uint8 0/1 | BDC |
-| 0xFA | BDC_SET_STAGE_HOME | Focus stage waist home | uint32 position | BDC |
 | 0xFB | FMC_SET_STAGE_POS | Focus stage set position | uint32 position | BDC |
 
 ---
