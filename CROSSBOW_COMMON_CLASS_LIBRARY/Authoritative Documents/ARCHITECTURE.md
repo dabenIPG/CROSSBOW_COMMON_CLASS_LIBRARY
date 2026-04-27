@@ -1,9 +1,29 @@
 # CROSSBOW System Architecture
 
-**Document Version:** 4.0.4
-**Date:** 2026-04-19
-**ICD Reference:** ICD v4.1.0
-**Status:** CB-20260419b TRC ENG GUI pass complete.
+**Document Version:** 4.0.7
+**Date:** 2026-04-25
+**ICD Reference:** ICD v4.2.2
+**Status:** CB-20260425 FW-C5-FRAME-CLEANUP + DOC-1 closed.
+
+**v4.0.7 changes (FW-C5-FRAME-CLEANUP + DOC-1 closures — 2026-04-25):**
+- §17: FW-C5-FRAME-CLEANUP closed — `frame.hpp` dead `A1_DEST_*_IP` block deleted; `tmc.hpp`/`fmc.hpp` stale comments corrected.
+- §17: DOC-1 closed — §2.5 TRC Timing already contains full NTP configuration (`timesyncd.conf`, `timedatectl`, JETSON_SETUP.md cross-reference).
+- ICD Reference updated: v4.2.1 → v4.2.2.
+
+**v4.0.6 changes (MCC/TMC/FMC/TRC codebase review — 2026-04-25):**
+- §2.2a fleet socket table: TMC row — FW-B4 confirmed from TMC source; "verify against TMC source" qualifier removed. Footer note corrected: all four controllers (`ptp.INIT()` gated by `isPTP_Enabled` — MCC, BDC, TMC, FMC).
+- §6.6 A1 ARP backoff: note revised — W5500 `endPacket()` is non-blocking (ARP miss drops and returns 0 immediately); backoff limits SPI traffic, not blocking. TRC Linux stack noted — no backoff needed. Authoritative standard pattern documented.
+- §9.3 SEND_FIRE_STATUS gate: `isBDC_Ready` → `isBDC_Enabled`; `isBDC_Ready` now set exclusively by `endPacket()` result; ARP backoff added (`BDC_A1_FAIL_MAX=3`, `BDC_A1_BACKOFF_TICKS=5` × 5 ms = 25 ms).
+- §17 Open items: FW-C4 closed (BDC A1 backoff confirmed correct). FW-FUJI-1 and THEIA-POS-JOG-1 opened.
+
+**v4.0.5 changes (BDC/TRC doc corrections — 2026-04-25):**
+- §8.4 TRC REG1: Jetson health fields updated to ICD v4.2.0 layout — `jetsonTemp`/`jetsonCpuLoad`/`jetsonGpuLoad` int16→uint8 at [45]/[46]/[47]; `jetsonGpuTemp` uint8 [48] added; RESERVED expands [59–63]→[57–63]; Defined 59→57, Reserved 5→7.
+- §9.4 Vote Aggregation: `0xAB SET_BCAST_FIRECONTROL_STATUS` → `0xE0 SET_BCAST_FIRECONTROL_STATUS` (ICD v3.6.0 restructuring).
+- §13.3 Fire Control Chain / Xbox table: `0xE6` → `0xAB SET_FIRE_REQUESTED_VOTE` (ICD v3.6.0 restructuring).
+- §14 Fire State HUD: `0xAB SET_BCAST_FIRECONTROL_STATUS` → `0xE0 SET_BCAST_FIRECONTROL_STATUS`.
+- §2.2a fleet socket table: BDC row corrected — ptp.INIT() IS gated (FW-B4 closed CB-20260412); socket budget corrected to 5/8 (PTP disabled) / 7/8 (PTP enabled). TMC row updated pending source verification. Footer note corrected.
+- §6.7 C# client connect sequence: registration burst (`0xA4 ×3`) replaced with single `0xA4` to match §4.2 authoritative standard. `SET_UNSOLICITED` auto-subscribe removed — user-controlled via checkbox.
+- ICD Reference updated: v4.1.0 → v4.2.1.
 
 **v4.0.4 changes (TRC ENG GUI update pass — 2026-04-19):**
 - §3 Codebase inventory: `TRC_ENG_GUI_PRESERVE` → `CROSSBOW_ENG_GUIS` throughout. Inventory row expanded with full MDI child form list (`frmMCC`, `frmBDC`, `frmTMC`, `frmFMC`, `frmTRC`, `frmHEL`, `frmNTP_PTP`, `frmFWProgrammer`). CROSSBOW lib row updated.
@@ -13,7 +33,7 @@
 
 **v4.0.3 changes (TRC COCO ambient, OSD redesign, GPU telemetry — 2026-04-19):**
 - §8 TRC — COCO ambient scan: compositor bug fix (push/poll now outside tracker block); ambient detection hold; `--coco-ambient` launch flag; COCO NMS + min/max area filter (runtime-tunable ASCII commands); OSD redesign (STATE/MODE/FC top-right, COCO rows below TRACK, colour coding); GPU load telemetry (sysfs → REG1 [57–58] → OSD JGPU); CPU/GPU complementary filter at alpha=0.3 1Hz poll; trackbox W/H reset on tracker off and COCO RESET.
-- §8.4 TRC REG1: `jetsonGpuLoad int16` at [57–58]; RESERVED shrinks [7]→[5] at [59–63]. Defined: 57→59. Reserved: 7→5.
+- §8.4 TRC REG1: `jetsonGpuLoad int16` at [57–58]; RESERVED shrinks [7]→[5] at [59–63]. Defined: 57→59. Reserved: 7→5. **Superseded by ICD v4.2.0 (CB-20260419c) — all four Jetson health fields compacted to uint8; jetsonGpuTemp added at [48]; see current §8.4 table.**
 - §8.2 Thread table: stats thread corrected to 1Hz (was 1Hz temp / 5Hz CPU — now both CPU+GPU at 1Hz).
 
 **v4.0.2 changes (BDC HB subsystem wiring — 2026-04-13):**
@@ -261,8 +281,8 @@ Authoritative reference for all embedded controllers. Verified from source files
 | Controller | PTP disabled (default) | PTP enabled | Spare (PTP disabled) | Notes |
 |------------|----------------------|-------------|----------------------|-------|
 | MCC | 6/8 | 8/8 | 2 | ptp.INIT() gated — FW-B3/FW-B4 |
-| BDC | 7/8 | 7/8 | 1 | ptp.INIT() unconditional ⚠️ needs gate — FW-B3 pending |
-| TMC | 4/8 | 4/8 | 4 | ptp.INIT() unconditional ⚠️ needs gate — FW-B3 pending |
+| BDC | 5/8 | 7/8 | 3 | ptp.INIT() gated by isPTP_Enabled ✅ FW-B4 closed CB-20260412 — FW-B3 still pending fleet-wide |
+| TMC | 4/8 | 4/8 | 4 | ptp.INIT() gated by isPTP_Enabled ✅ FW-B4 confirmed from TMC source (CB-20260425) |
 | FMC | 2/8 | 4/8 | 6 | ptp.INIT() gated — FW-B3/FW-B4 |
 | TRC | N/A | N/A | N/A | Linux kernel sockets — no W5500 hardware limit |
 
@@ -270,7 +290,7 @@ Authoritative reference for all embedded controllers. Verified from source files
 - NTP uses `&udpA2` on all four controllers — zero additional sockets
 - BDC TRC/FMC command TX borrows `&udpA2` — zero additional sockets
 - `isPTP_Enabled` gates `ptp.UPDATE()` on all controllers
-- `ptp.INIT()` gated by `isPTP_Enabled` on MCC and FMC (FW-B3 multicast contention). BDC and TMC still unconditional — pending gate (FW-B3 fleet-wide fix required first).
+- `ptp.INIT()` gated by `isPTP_Enabled` on all four embedded controllers — MCC, BDC, TMC, FMC (FW-B4 confirmed all controllers CB-20260425).
 
 ### 2.3 Internal Network Topology
 
@@ -742,7 +762,7 @@ Sub-controllers boot and immediately begin streaming REG1 to their upper-level c
 Liveness timeout: if no A1 packet received within `2 × expected_interval` (200 ms), the
 `DEVICE_READY` bit for that source clears. Stream resumes automatically on reconnect.
 
-**A1 ARP backoff (session 36):** When the peer is offline, W5500 ARP resolution blocks for ~40 ms per send attempt, saturating the main loop. After `A1_FAIL_MAX = 3` consecutive send failures, the A1 send is suppressed for `A1_BACKOFF_TICKS` cycles (~2 s at the controller's stream rate). Recovery is instant — first successful send clears both counters. Serial command `A1 ON|OFF` allows disabling the A1 stream for bench testing without a connected peer.
+**A1 ARP backoff (session 36, revised CB-20260425):** Non-blocking — `endPacket()` on W5500 returns immediately on ARP miss (drops packet, returns 0). Backoff purpose is to limit SPI bus traffic when peer is offline, not to prevent blocking. After `A1_FAIL_MAX = 3` consecutive send failures, the A1 send is suppressed for `A1_BACKOFF_TICKS` cycles (~2 s at the controller's stream rate). Recovery is instant — first successful send clears both counters. Gate uses the device *enabled* flag (not the ready flag); peer-ready flag set exclusively by `endPacket()` result. Serial command `A1 ON|OFF` allows disabling the A1 stream for bench testing. TRC (Jetson/Linux) requires no backoff — Linux kernel handles ARP asynchronously.
 
 ### 6.7 A2 — Internal Engineering (Bidirectional, All Controllers)
 
@@ -761,10 +781,10 @@ Liveness timeout: if no A1 packet received within `2 × expected_interval` (200 
 
 **C# client connect sequence (A2):**
 ```
-Start() → registration burst: FRAME_KEEPALIVE {0x01} ×3  (advances past stale replay window)
-        → SET_UNSOLICITED {0x01}                          (subscribe to 50/100 Hz stream)
-KeepaliveLoop() → FRAME_KEEPALIVE {} every 30 s           (maintain slot liveness)
+Start() → FRAME_KEEPALIVE {}         (single registration frame — burst retired, firmware replay fix handles reconnects)
+KeepaliveLoop() → FRAME_KEEPALIVE {} every 30 s  (maintain slot liveness)
 ```
+Registration burst (`0xA4 ×3`) retired — see §4.2 for authoritative standard. `SET_UNSOLICITED` is user-controlled via checkbox, not sent automatically on connect.
 
 ENG GUI is the primary A2 client. BDC also uses A2 to issue commands to TRC.
 
@@ -1123,7 +1143,7 @@ Authoritative definition: `CROSSBOW_ICD_EXT_OPS` (IPGD-0005).
    Dual-loop: gimbal (slow) + FSM (fast) close on tracker tx/ty
       │
 7. Fire control (if authorised):
-   Left + Right trigger → 0xE6 fire vote → MCC → vote aggregation → laser
+   Left + Right trigger → 0xAB SET_FIRE_REQUESTED_VOTE → MCC → vote aggregation → laser
 ```
 
 Xbox controller is the THEIA operator's primary input at steps 4–7. HYPERION and THEIA
@@ -1201,13 +1221,14 @@ Tracker enable/disable per-ID via `0xDB ORIN_ACAM_ENABLE_TRACKERS`.
 | 41 | 1 | uint8 | voteBitsMcc | MCC fire control vote bits (relay from 0xAB) |
 | 42 | 1 | uint8 | voteBitsBdc | BDC geometry vote bits (relay from 0xAB) |
 | 43 | 2 | int16 | nccScore | NCC quality × 10000 |
-| 45 | 2 | int16 | jetsonTemp | Jetson CPU temp °C |
-| 47 | 2 | int16 | jetsonCpuLoad | Jetson CPU load % (complementary filtered, alpha=0.3) |
+| 45 | 1 | uint8 | jetsonTemp | Jetson CPU temp °C — `/sys/devices/virtual/thermal/thermal_zone0/temp` ÷ 1000 — v4.2.0 (was int16 [45–46]) |
+| 46 | 1 | uint8 | jetsonCpuLoad | Jetson CPU load % — `/proc/stat` delta — v4.2.0 (was int16 [47–48]) |
+| 47 | 1 | uint8 | jetsonGpuLoad | Jetson GPU load % — `/sys/devices/platform/gpu.0/load` ÷ 10 — v4.2.0 (moved from [57–58]) |
+| 48 | 1 | uint8 | jetsonGpuTemp | Jetson GPU temp °C — `/sys/devices/virtual/thermal/thermal_zone1/temp` ÷ 1000, polled 5s — v4.2.0 (NEW) |
 | 49 | 8 | uint64 | som_serial | Jetson SOM serial — `/proc/device-tree/serial-number` — v4.0.0 |
-| 57 | 2 | int16 | jetsonGpuLoad | Jetson GPU load % — `/sys/devices/platform/gpu.0/load` ÷ 10 (complementary filtered, alpha=0.3) — v4.0.3 |
-| 59 | 5 | uint8[] | RESERVED | 0x00 |
+| 57 | 7 | uint8[] | RESERVED | 0x00 |
 
-**Defined: 59 bytes. Reserved: 5 bytes. Fixed block: 64 bytes.**
+**Defined: 57 bytes. Reserved: 7 bytes. Fixed block: 64 bytes.**
 
 **BDC embedding:** TRC REG1 occupies bytes [60–123] of BDC REG1 payload (64-byte fixed block).
 
@@ -1428,7 +1449,7 @@ MCC REG1 (256-byte payload) embeds:
 ### 9.3 A1 TX → BDC
 
 MCC sends REG1 and fire control vote (0xAB) to BDC via A1 at 50 Hz and 100 Hz respectively.
-`SEND_FIRE_STATUS` gate: `isPwr_LaserRelay && isBDC_Ready` (both revisions). Replaces V1's `isSolenoid2_Enabled` gate — laser power is the correct semantic gate on both hardware variants.
+`SEND_FIRE_STATUS` gate: `isPwr_LaserRelay && isBDC_Enabled` (all revisions). `isBDC_Ready` is set exclusively by `endPacket()` result — the only real-time feedback on BDC reachability. ARP backoff added (`BDC_A1_FAIL_MAX=3`, `BDC_A1_BACKOFF_TICKS=5` × 5 ms = 25 ms suppression). Replaces V1's `isSolenoid2_Enabled` gate — laser power is the correct semantic gate on all hardware variants.
 
 ### 9.4 Vote Aggregation
 
@@ -1441,7 +1462,7 @@ MCC aggregates fire control votes:
   ARMED vote     (operator armed)
   notAbort vote  (no abort condition — inverted, safe-by-default)
   EMON           (energy monitor)
-  → 0xAB SET_BCAST_FIRECONTROL_STATUS → BDC @ 100 Hz
+  → 0xE0 SET_BCAST_FIRECONTROL_STATUS → BDC @ 100 Hz
 ```
 
 ### 9.5 Time Source Architecture
@@ -1925,7 +1946,7 @@ frmMain (WinForms)
 |-------|--------|-----------------|
 | Right trigger (short press) | ADVANCE MODE | — |
 | Right shoulder (short press) | REGRESS MODE | — |
-| Left + Right trigger (simultaneous) | FIRE vote (heartbeat via `0xE6`) | — |
+| Left + Right trigger (simultaneous) | FIRE vote (heartbeat via `0xAB`) | — |
 | Either trigger released | Cancel fire vote | — |
 | Left thumbstick ↕↔ | Track gate size (W/H) | Track gate position (center) |
 | Left hat click | Reset gate to 640×360, 100×100 | — |
@@ -1944,7 +1965,7 @@ frmMain (WinForms)
 
 ```
 Operator: Left + Right trigger simultaneously
-  └── 0xE6 PMS_SET_FIRE_REQUESTED_VOTE {1} → MCC (heartbeat, continuous, via A3)
+  └── 0xAB SET_FIRE_REQUESTED_VOTE {1} → MCC (heartbeat, continuous, via A3)
         └── MCC aggregates: HORIZON + KIZ + LCH + BDA + ARMED + notAbort votes
               └── BDCTotalVote() → fire authorized if all votes pass
                     └── 0xAB → BDC @ 100 Hz → TRC (reticle color)
@@ -1954,7 +1975,7 @@ Operator: Left + Right trigger simultaneously
 
 ## 14. Fire State HUD
 
-TRC receives `0xAB SET_BCAST_FIRECONTROL_STATUS` on A1 port 10019 (raw 5-byte, no frame
+TRC receives `0xE0 SET_BCAST_FIRECONTROL_STATUS` on A1 port 10019 (raw 5-byte, no frame
 wrapper) and stores vote bits in `state_.voteBitsMcc` / `state_.voteBitsBdc`. Compositor
 renders reticle color and interlock messages every frame.
 
@@ -2063,11 +2084,13 @@ Quick reference — selected items as of CB-20260416:
 | ~~HW-FMC-1~~ | ~~FMC/BDC shared power via serial connection — brownout risk on USB power in test. Use dedicated supply for FMC. Verify power rail isolation in production harness.~~ | ✅ **Closed CB-20260413** (HW fix bench-verified by user) |
 | ~~GUI-8~~ | ~~TRC C# client model — apply standardized pattern from session 29~~ | ✅ **Closed CB-20260419b** — `trc.cs` fully rewritten: port 10018, INT framing, `BuildA2Frame`/`CrcHelper`/`CrossbowNic`, single `0xA4` registration, `KeepaliveLoop`, frame-driven `isConnected`, `DropCount`, `LatestMSG`. Verified on live HW. |
 | FW-C3 | BDC Fuji boot status — `fuji.SETUP()` deferred post-boot, FUJI_WAIT always times out | 🟡 Medium |
-| FW-C4 | BDC A1 ARP backoff not working — `A1 OFF` workaround when TRC offline | 🟡 Medium |
-| ~~FW-C5~~ | ~~Audit/consolidate IP defines in `defines.hpp` — remove remaining hardcoded IPs~~ | ✅ **Closed CB-20260413** |
+| ~~FW-C4~~ | ~~BDC A1 ARP backoff not working — `A1 OFF` workaround when TRC offline~~ | ✅ **Closed CB-20260425** — backoff confirmed correct; W5500 `endPacket()` is non-blocking (ARP miss drops packet, returns 0 immediately). Pattern verified fleet-wide. |
+| FW-FUJI-1 | BDC `FUJI_WAIT` timeout 10 s vs ARCH 5 s — hold pending HW stability investigation | 🔴 HW |
+| THEIA-POS-JOG-1 | POS mode gimbal unresponsive — `XBOX_FOV_SCALE=0` when `VIS_FOV=0`; add `Debug.WriteLine(vx, vy, XBOX_FOV_SCALE, VIS_FOV)` at failure point | 🔴 HW |
+| ~~FW-C5-FRAME-CLEANUP~~ | ~~Retire dead `A1_DEST_*_IP` defines from `frame.hpp`; update stale comments in `tmc.hpp` and `fmc.hpp`~~ | ✅ **Closed CB-20260425** — `frame.hpp` `A1_DEST_*_IP` block deleted; `tmc.hpp` comment updated to `IP_MCC_BYTES`; `fmc.hpp` stale TODO removed. |
 | ~~BDC-FSM-VOTE-LATCH~~ | ~~`isFSMNotLimited` only updated inside ATRACK/FTRACK case body — vote bit latched stale on track exit until next track entry~~ | ✅ **Closed CB-20260413** (readback-based fix at top of `BDC::PidUpdate()` ahead of TICK_PID gate; ATRACK/FTRACK still overwrites with predictive value) |
 | FW-14 | GNSS socket bug — MCC `RUNONCE` case 6 and `EXEC_UDP` use wrong socket | 🟡 Medium |
 | NEW-38d | TRC PTP integration — TIME_BITS, MSG_TRC.cs, `ptp4l` | 🟡 Medium |
-| DOC-1 | Add TRC NTP setup reference to ARCHITECTURE.md §2.5 | 🟡 Medium |
+| ~~DOC-1~~ | ~~Add TRC NTP setup reference to ARCHITECTURE.md §2.5~~ | ✅ **Closed CB-20260425** — §2.5 already contains full `timesyncd.conf` config, `timedatectl` verification commands, and JETSON_SETUP.md cross-reference. |
 | ~~DOC-2~~ | ~~Create JETSON_SETUP.md — full Jetson Orin NX setup procedure~~ | ✅ **Closed** — JETSON_SETUP.md complete at v2.2.1 (IPGD-0020). |
 | DOC-3 | Add file format specs (horizon, KIZ/LCH, survey) to ICD INT_ENG and INT_OPS | 🟡 Medium |

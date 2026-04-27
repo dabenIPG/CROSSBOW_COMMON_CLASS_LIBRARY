@@ -293,9 +293,9 @@ namespace   CROSSBOW
                 payload[2] = (byte)_aCB.Active_CAM;
 
                 // LatestMSG is null until Parse() is called — default to zero if not yet populated
-                payload[3] = _aCB.aMCC?.LatestMSG?.VoteBits ?? 0;
-                payload[4] = _aCB.aBDC?.LatestMSG?.VoteBits1 ?? 0;
-                payload[5] = _aCB.aBDC?.LatestMSG?.VoteBits2 ?? 0;
+                payload[3] = _aCB.aMCC?.LatestMSG?.VOTE_BITS_MCC ?? 0;
+                payload[4] = _aCB.aBDC?.LatestMSG?.VOTE_BITS_BDC ?? 0;
+                payload[5] = _aCB.aBDC?.LatestMSG?.VOTE_BITS_BDC2 ?? 0;
 
                 ExtOpsFrame.WriteFloat(payload, 6, _aCB.aBDC?.LatestMSG?.LOS_GIM.X ?? 0f);
                 ExtOpsFrame.WriteFloat(payload, 10, _aCB.aBDC?.LatestMSG?.LOS_GIM.Y ?? 0f);

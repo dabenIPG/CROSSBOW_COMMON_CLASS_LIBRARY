@@ -34,7 +34,9 @@
 //   [47]     jetsonGpuLoad   uint8   GPU load %
 //   [48]     jetsonGpuTemp   uint8   GPU temp °C — thermal_zone1 — v4.1.0
 //   [49–56]  somSerial       uint64  Jetson SOM serial — from /proc/device-tree/serial-number
-//   [57–63]  RESERVED        7 bytes
+//   [57]     voteBitsMcc2    uint8   MCC_VOTES2 detail (CB-20260426)
+//   [58]     voteBitsBdc2    uint8   BDC_VOTES2 detail (CB-20260426)
+//   [59–63]  RESERVED        5 bytes
 
 using System;
 using System.Diagnostics;
@@ -140,11 +142,16 @@ namespace CROSSBOW
 
         // Overlay mask — HUD_OVERLAY_FLAGS bitmask
         public byte overlayMask { get; private set; } = 0;
-        public bool isStreaming  { get { return IsBitSet(Cameras[(int)BDC_CAM_IDS.VIS].StatusBits, 2); } }
+        public bool isStreaming => streamFPS > 0;                                     // H.264 RTP encoder outputting frames to THEIA
+        // After — go through CAMERA typed accessor, not raw bit
+        public bool isVIS_Capturing => Cameras[(int)BDC_CAM_IDS.VIS].isCapturing;   // Alvium capture pipeline running
+        public bool isMWIR_Capturing => Cameras[(int)BDC_CAM_IDS.MWIR].isCapturing;  // MWIR capture pipeline running
 
         // Fire control vote readbacks from TRC telemetry
         public byte voteBitsMcc { get; private set; } = 0;
         public byte voteBitsBdc { get; private set; } = 0;
+        public byte voteBitsMcc2 { get; private set; } = 0;
+        public byte voteBitsBdc2 { get; private set; } = 0;
 
         // NCC quality score ×10000, unpack: value / 10000.0
         public Int16 nccScoreRaw { get; private set; } = 0;
@@ -254,13 +261,15 @@ namespace CROSSBOW
             _ntpTime        = BitConverter.ToInt64(rxBuff, ndx);  ndx += sizeof(Int64);    // [33–40]
             voteBitsMcc     = rxBuff[ndx]; ndx++;                                           // [41]
             voteBitsBdc     = rxBuff[ndx]; ndx++;                                           // [42]
-            nccScoreRaw   = BitConverter.ToInt16(rxBuff, ndx); ndx += sizeof(Int16);     // [43–44]
+            nccScoreRaw   = BitConverter.ToInt16(rxBuff, ndx); ndx += sizeof(Int16);      // [43–44]
             jetsonTemp    = rxBuff[ndx]; ndx++;                                           // [45]
             jetsonCpuLoad = rxBuff[ndx]; ndx++;                                           // [46]
             jetsonGpuLoad = rxBuff[ndx]; ndx++;                                           // [47]
             jetsonGpuTemp = rxBuff[ndx]; ndx++;                                           // [48] v4.1.0
-            SomSerial     = BitConverter.ToUInt64(rxBuff, ndx); ndx += sizeof(UInt64);   // [49–56]
-            ndx += 7;                                                                     // [57–63] RESERVED
+            SomSerial = BitConverter.ToUInt64(rxBuff, ndx); ndx += sizeof(UInt64);        // [49–56]
+            voteBitsMcc2 = rxBuff[ndx]; ndx++;                                            // [57] MCC_VOTES2
+            voteBitsBdc2 = rxBuff[ndx]; ndx++;                                            // [58] BDC_VOTES2
+            ndx += 5;                                                                     // [57–63] RESERVED
 
             return ndx;
         }

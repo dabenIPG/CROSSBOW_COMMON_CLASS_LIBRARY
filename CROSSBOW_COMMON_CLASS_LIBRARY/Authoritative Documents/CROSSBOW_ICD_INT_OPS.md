@@ -2,223 +2,116 @@
 
 **Document:** `CROSSBOW_ICD_INT_OPS`
 **Doc #:** IPGD-0004
-**Version:** 3.6.2
-**Date:** 2026-04-16 (CB-20260416 — AWB assigned, charger V2 fix)
+**Version:** 4.0.0
+**Date:** 2026-04-26 (CB-20260426 — vote byte overhaul, device health, STATUS_BITS)
 
 ---
 
 ## Version History
 
-**v3.6.2 changes (scope audit — whitelist-verified — 2026-04-22):**
-- `0xD1 ORIN_ACAM_COCO_ENABLE` — **removed from INT_OPS.** Firmware audit confirmed absent from `EXT_CMDS_BDC[]` — A3 access was never implemented. Scope corrected to INT_ENG (A2 only). See `CROSSBOW_ICD_INT_ENG` v4.2.1.
-- `0xF6 BDC_SET_FSM_TRACK_ENABLE` — **removed from INT_OPS.** Absent from `EXT_CMDS_BDC[]`. Scope corrected to INT_ENG.
-- `0xFA BDC_SET_STAGE_HOME` — **removed from INT_OPS.** Absent from `EXT_CMDS_BDC[]`. Scope corrected to INT_ENG.
+**v4.0.0 changes (CB-20260426 — vote byte overhaul, device health, STATUS_BITS):**
+
+This release merges `CROSSBOW_FIRECONTROL_REGISTERS.md`, `CROSSBOW_DEVICE_STATUS_BITS_WORKING.md`,
+and accumulated session changes into the ICD. All changes are wire-level breaking.
+
+**MCC REG1 — byte [11] `VOTE_BITS_MCC` — complete bit layout replacement:**
+Previous layout had incorrect gate-chain ordering and stale field names. New layout follows the physical AND chain b0→b7:
+`b0:NOT_ABORT(INVERTED)` `b1:ARMED` `b2:BDC_VOTE` `b3:LASER_TOTAL_HW` `b4:SW_VOTE` `b5:TRIGGER` `b6:FIRE_STATE` `b7:EMON`
+Old bit names `isBDA_Vote_rb` → `isBDC_Vote_rb` throughout. `isCombat_Vote_rb` moved to `VOTE_BITS_MCC2`.
+
+**MCC REG1 — 8 new bytes [256–263]:**
+- `[256]` `VOTE_BITS_MCC2` — MCC detail/diagnostic byte. `b0:BAT_NOT_LOW` `b1:TRAINING_MODE` `b2:COMBAT` `b3:EMON_MISSING` `b4:EMON_UNEXPECTED` `b5:FIRE_INTERLOCKED`
+- `[257]` `MCC DEVICE_WARN_BITS` — parallel to ENABLED [7] and READY [8]. Same bit layout; bit N set when device N is enabled AND degraded.
+- `[258]` `MCC_TMC_STATUS_BITS`
+- `[259]` `MCC_HEL_STATUS_BITS`
+- `[260]` `MCC_BAT_STATUS_BITS`
+- `[261]` `MCC_CRG_STATUS_BITS`
+- `[262]` `MCC_GNSS_STATUS_BITS`
+- `[263]` `MCC_BDC_STATUS_BITS`
+
+MCC REG1 defined byte count: 256 → 264. Reserved: 248 bytes [264–511].
+
+**BDC REG1 — vote bytes [164–166] renamed and updated:**
+- `[164]` renamed `VOTE_BITS_BDC2` (was `BDC VOTE BITS1`). New bit layout: `b0:HORIZ_VOTE_OVERRIDE` `b1:KIZ_VOTE_OVERRIDE` `b2:LCH_VOTE_OVERRIDE` `b3:BDC_VOTE_OVERRIDE` `b4:IS_BELOW_HORIZ` `b5:IS_IN_KIZ` `b6:IS_IN_LCH`
+- `[165]` renamed `VOTE_BITS_BDC` (was `BDC VOTE BITS2`). Bit b7 corrected: `isFSMLimited` → `FSM_NOT_LIMITED` (bit SET = FSM clear — was inverted). Layout: `b0:BELOW_HORIZ_VOTE` `b1:IN_KIZ_VOTE` `b2:IN_LCH_VOTE` `b3:BDC_TOTAL_VOTE` `b5:HORIZ_LOADED` `b7:FSM_NOT_LIMITED`
+- `[166]` renamed `VOTE_BITS_MCC_RB` (was `MCC VOTE BITS RB`). Updated to new `VOTE_BITS_MCC` gate-chain layout.
+
+**BDC REG1 — 8 new bytes [404–411]:**
+- `[404]` `VOTE_BITS_MCC2_RB` — MCC detail byte readback
+- `[405]` `BDC DEVICE_WARN_BITS`
+- `[406]` `BDC_GIM_STATUS_BITS`
+- `[407]` `BDC_VIS_STATUS_BITS`
+- `[408]` `BDC_MWIR_STATUS_BITS`
+- `[409]` `BDC_FSM_STATUS_BITS`
+- `[410]` `BDC_JET_STATUS_BITS`
+- `[411]` `BDC_INCL_STATUS_BITS`
+
+BDC REG1 defined byte count: 404 → 412. Reserved: 100 bytes [412–511].
+
+**`0xE0 SET_BCAST_FIRECONTROL_STATUS` payload updated:**
+- MCC→BDC: `[VOTE_BITS_MCC][VOTE_BITS_MCC2][sysState][bdcMode]` — 4 bytes (was 2)
+- BDC→TRC: `[VOTE_BITS_MCC][VOTE_BITS_BDC][sysState][bdcMode][VOTE_BITS_MCC2][VOTE_BITS_BDC2]` — 7 bytes (was 2)
+
+**FC-CONSISTENCY-1 closed:** `EMON_MISSING`, `EMON_UNEXPECTED`, `FIRE_INTERLOCKED` implemented in `VOTE_BITS_MCC2` bits 3–5 and mirrored in `MCC_HEL_STATUS_BITS` bits 5–7. `FIRE_VOTE_BYTE` concept superseded — `VOTE_BITS_MCC` + `VOTE_BITS_MCC2` together carry the complete fire readiness state.
+
+**New status code:** `STATUS_PREREQ_FAIL = 0x07` — returned when `SET_SYSTEM_STATE` or `SET_GIMBAL_MODE` is rejected due to unmet device health prerequisites.
+
+**New section: Device Health** — advancement prerequisites, device criticality matrix, state/mode rules. Previously in working document only.
+
+**C# client impact:**
+- `icd.cs`: `MCC_VOTES`, `MCC_VOTES2`, `BDC_VOTES`, `BDC_VOTES2` enums fully updated.
+- `MSG_MCC.cs`: `VOTE_BITS_MCC` / `VOTE_BITS_MCC2` properties replace `VoteBits` / `VoteBits2`. New `DeviceWarnBits` + per-device STATUS_BITS accessors.
+- `MSG_BDC.cs`: `VOTE_BITS_BDC` / `VOTE_BITS_BDC2` / `VOTE_BITS_MCC_RB` / `VOTE_BITS_MCC2_RB` replace previous `VoteBits1–4`. New `DeviceWarnBits` + per-device STATUS_BITS accessors.
+- `isNotBatLowVoltage` and `isHEL_TrainingMode` in `MSG_MCC.cs` now redirect to `VOTE_BITS_MCC2` (authoritative source).
 
 ---
+
+**v3.6.2 changes (scope audit — whitelist-verified — 2026-04-22):**
+- `0xD1 ORIN_ACAM_COCO_ENABLE` — removed from INT_OPS. Absent from `EXT_CMDS_BDC[]`. Scope corrected to INT_ENG.
+- `0xF6 BDC_SET_FSM_TRACK_ENABLE` — removed from INT_OPS. Absent from `EXT_CMDS_BDC[]`. Scope corrected to INT_ENG.
+- `0xFA BDC_SET_STAGE_HOME` — removed from INT_OPS. Absent from `EXT_CMDS_BDC[]`. Scope corrected to INT_ENG.
 
 **v3.6.1 changes (CB-20260416 — AWB assigned, charger V2 fix):**
-- `0xC4 CMD_VIS_AWB` assigned — trigger VIS auto white balance once on active camera. No payload. Accessible via A3 (in `EXT_CMDS_BDC[]` whitelist). BDC routes to TRC.
-- `0xAF SET_CHARGER` description corrected: V2 hardware now GPIO-enable only (not full rejection). V1: GPIO enable + I2C level control. V2: GPIO enable only — level `0`=disable, non-zero=enable. FW-CRG-V2 fix CB-20260416.
+- `0xC4 CMD_VIS_AWB` assigned. `0xAF SET_CHARGER` V2 description corrected.
 
----
-
-**v3.6.0 changes (ICD command space restructuring — 2026-04-12 CB-20260412):**
-A block fully INT_OPS — all 16 slots active. Changes affecting INT_OPS clients:
-
-**CB-20260412 firmware version:** All five controllers target `VERSION_PACK(4,0,0)`. Clients gate v4.0.0 behaviour using `FW_VERSION >> 24 >= 4` (IsV4 / SW_MAJOR >= 4).
-
-**FW-C10 — REG1 CMD_BYTE change:** REG1 frame byte [3] (CMD_BYTE) changes from `0xA1` to `0x00` in v4.0.0 firmware. INT_OPS clients must accept both `0x00` (v4.0.0+) and `0xA1` (legacy) as valid REG1 frames.
-
-- `0xA1 SET_HEL_TRAINING_MODE` — moved from `0xAF`. Now accessible at `0xA1`. Promoted INT_ENG→INT_OPS — safety enforced in firmware (10% power clamp), not scope restriction.
-- `0xA2 SET_NTP_CONFIG` — promoted INT_ENG→INT_OPS. Now accessible via A3. 0 bytes=resync; 1 byte=set primary octet; 2 bytes=set primary+fallback. Routing by destination IP.
-- `0xA3 SET_TIMESRC` — new command. INT_OPS, all five controllers, routing by IP. Controls PTP/NTP time source selection. Payload: `0=OFF, 1=NTP, 2=PTP, 3=AUTO`. ⚠ Pending FW-C8 (rejection handler removal) before live in firmware.
-- `0xA9 SET_REINIT` — new unified reinitialise command. Replaces `0xB0` (BDC) and `0xE0` (MCC). Routing implicit by destination IP. Payload: `uint8 subsystem` (controller-specific).
-- `0xAA SET_DEVICES_ENABLE` — new unified device enable/disable. Replaces `0xBE` (INT_ENG, not in this doc) and `0xE1` (MCC). Routing implicit by destination IP. Payload: `uint8 device; uint8 0/1`.
-- `0xAB SET_FIRE_VOTE` — laser fire vote. Moved from `0xE6` (INT_ENG). Promoted to INT_OPS. Heartbeat required — vote drops on disconnect.
-- `0xAF SET_CHARGER` — new merged charger command. Replaces `0xE3` (PMS_CHARGER_ENABLE) and `0xED` (PMS_SET_CHARGER_LEVEL, was INT_ENG). Level required on every call. V1 only.
-- `0xD1 ORIN_ACAM_COCO_ENABLE` — moved from `0xDF`. Now accessible at `0xD1`. *(Subsequently corrected to INT_ENG v3.6.2 — absent from `EXT_CMDS_BDC[]`.)*
-
-**⚠️ HMI implementation note:** `defines.cs` enum values for the following names change. Code using enum names is unaffected — only recompile required. Changed: `SET_HEL_TRAINING_MODE` (`0xAF`→`0xA1`), `ORIN_ACAM_COCO_ENABLE` (`0xDF`→`0xD1`). New: `SET_REINIT`, `SET_DEVICES_ENABLE`, `SET_FIRE_VOTE`, `SET_CHARGER`, `SET_TIMESRC`. Removed: `SET_BDC_REINIT`, `SET_MCC_REINIT`, `SET_MCC_DEVICES_ENABLE`, `PMS_CHARGER_ENABLE`, `PMS_SET_FIRE_REQUESTED_VOTE`. See DEF-1 (IPGD-0019) for full list.
-
-Retired from INT_OPS (removed from this document):
-- `0xB0 SET_BDC_REINIT` — superseded by `0xA9 SET_REINIT`
-- `0xD8 ORIN_SET_TESTPATTERN` — retired; ASCII `TESTSRC` covers ENG use
-- `0xDF ORIN_ACAM_COCO_ENABLE` — moved to `0xD1`
-- `0xE0 SET_MCC_REINIT` — superseded by `0xA9 SET_REINIT`
-- `0xE1 SET_MCC_DEVICES_ENABLE` — superseded by `0xAA SET_DEVICES_ENABLE`
-- `0xE3 PMS_CHARGER_ENABLE` — merged into `0xAF SET_CHARGER`
-- `0xED PMS_SET_CHARGER_LEVEL` — merged into `0xAF SET_CHARGER`
-
-**v3.5.1 changes (BDC unification — 2026-04-11):**
-- BDC FW version bumped: `3.2.0` → `3.3.0`.
-- BDC REG1 byte [10] **BREAKING CHANGE** — renamed `BDC STAT BITS` → `HEALTH_BITS`. New layout: 0:isReady; 1:isSwitchEnabled(V2 only, 0 on V1); 2–7:RES. Old layout: 0:isReady; 1–7:RES.
-- BDC REG1 byte [11] — renamed `BDC STAT BITS2` → `POWER_BITS`. Bit layout unchanged — rename only.
-- BDC REG1 byte [392]: `RESERVED` → `HW_REV` (`0x01`=V1, `0x02`=V2). Read before interpreting HEALTH_BITS bit 1.
-- BDC REG1 bytes [393–395]: `RESERVED` → `TEMP_RELAY` / `TEMP_BAT` / `TEMP_USB` (int8 °C, V2 live; V1 always `0x00`). Backward-compatible — old clients reading these bytes previously received `0x00`.
-- Defined byte count updated: 392 → 396. Reserved: 120 → 116.
-
-**v3.5.0 changes (IPG 6K integration — 2026-04-10):**
-- `0xAF SET_HEL_TRAINING_MODE` added to A3 command whitelist — now accessible to INT_OPS clients. `uint8 0=COMBAT, 1=TRAINING`. Sets MCC training mode — power clamped to 10% when active.
-- MCC REG1 byte [9] `HEALTH_BITS` bit 3: `RES` → `isTrainingMode`. INT_OPS clients may read to confirm training mode state.
-- MCC REG1 byte [131] `HEL HB` — now live (was always 0). Reflects laser TCP response interval in s/10 units. Stale > 2.0s indicates laser comms loss.
-- MCC REG1 byte [254]: `RESERVED` → `HW_REV` (`0x01`=V1, `0x02`=V2). Read before interpreting byte [9] and byte [10].
-- MCC REG1 byte [255]: `RESERVED` → `LASER_MODEL` (`0x00`=UNKNOWN, `0x01`=YLM_3K, `0x02`=YLM_6K). Populated after laser auto-sense on connect.
-- `LASER_MODEL` enum: `YLR_6K` renamed → `YLM_6K` to match actual wire model string `YLM-6000-U3-SM`.
-
-**v3.4.0 changes (MCC unification — 2026-04-08):**
-- MCC REG1 byte [9] **BREAKING CHANGE** — renamed `MCC STAT BITS` → `HEALTH_BITS`. New layout: 0:isReady; 1:isChargerEnabled; 2:isNotBatLowVoltage; 3–7:RES. Old layout: 0:isReady; 1:isSolenoid1_En; 2:isSolenoid2_En; 3:isLaserPower_En; 4:isChargerEnabled; 5:isNotBatLowVoltage.
-- MCC REG1 byte [10] **BREAKING CHANGE** — renamed `MCC STAT BITS2` → `POWER_BITS`. Bit N = `MCC_POWER` value N. Revision-independent — unused outputs always 0. Old layout: 3:isVicorEnabled; 4:isRelay1En; 5:isRelay2En; 6:isRelay3En; 7:isRelay4En.
-- MCC REG1 byte [254]: `RESERVED` → `HW_REV`. Read before interpreting bytes [9] and [10].
-
-**v3.3.8 changes (session 30 — 2026-04-07):**
-- TMC REG1 embedded block (MCC REG1 bytes [66–129]) updated — layout changes are transparent to INT_OPS clients that treat the TMC block as opaque, but THEIA/HMI clients parsing TMC sub-fields must be aware:
-  - Byte [7] STAT BITS1: bit 5 is now `isPump2Enabled` on V2 hardware (was RES); bit 6 is now `isSingleLoop` (was RES). Read byte [62] HW_REV first.
-  - Byte [17–18] Pump Speed: V1=DAC counts [0–800]; V2=0x0000 reserved.
-  - Bytes [39–40] tv3/tv4: V1=live temps; V2=0x00 reserved.
-  - Byte [62]: promoted from RESERVED → HW_REV (0x01=V1, 0x02=V2).
-- TMC FW version: `3.2.3` → `3.3.0` (`VERSION_PACK(3,3,0)` = `0x03003000`).
-
-**v3.3.7 changes (session 29 — 2026-04-06):**
-- Firmware replay window fix (A3 reconnection): new client detection moved before `frameCheckReplay()` in MCC `handleA3Frame` and BDC `handleA3Frame`. THEIA reconnects cleanly after slot expiry — no longer permanently locked out until controller reboot. Symptom was `drop #2 after 0.0s` immediately on reconnect with all subsequent commands rejected.
-- A3 unsolicited subscription on connect removed from C# client — THEIA now sends single `0xA4` registration only. `SET_UNSOLICITED` (`0xA0`) must be sent explicitly to subscribe. This matches user-controlled model on all other transports.
-
----
-
-**v3.3.6 changes (session 35/36 — 2026-04-04):**
-- `0xA4` renamed `EXT_FRAME_PING` → `FRAME_KEEPALIVE`; extended to A2 and all controllers. Empty payload = ACK only. Payload `{0x01}` = solicited REG1 (rate-gated 1 Hz per slot; suppressed if already subscribed).
-- `0xA1 GET_REGISTER1` **retired inbound** — returns `STATUS_CMD_REJECTED`. `0xA1` remains the outbound `CMD_BYTE` in all REG1 frames.
-- `0xA3 GET_REGISTER3` **retired** — returns `STATUS_CMD_REJECTED`.
-- `0xA0 SET_UNSOLICITED` updated — per-slot `wantsUnsolicited` flag; `isUnSolicitedEnabled` global retired.
-- `STATUS_BITS` bit 7 (`isUnsolicitedModeEnabled`) retired on MCC (byte 9) and BDC (byte 10) — always `0`.
-- `GetCurrentTime()` holdover active on all controllers — `activeTimeSource = NONE` during holdover; time continues advancing from last good value.
-- `isPTP_Enabled` defaults to `false` (FW-B3 deferred). C# `activeTimeSourceLabel` will show `"NONE"` until `TIMESRC PTP` is issued.
-- FMC PTP integration complete; FMC socket budget 4/8
-- FMC REG1 byte 28 epoch: `NTP epoch Time` → `epoch Time (PTP/NTP)` — field is now PTP-sourced when synched
-- FMC REG1 byte 7 `FSM STAT BITS` bits 2–3: `ntp.isSynched/ntpUsingFallback` → `RES` (moved to TIME_BITS)
-- FMC REG1 byte 44: `TIME_BITS` added — same decode as MCC byte 253, BDC byte 391, TMC byte 61
-- BDC socket fix: PTP now initialises correctly (9→7 sockets); no OPS register impact
-
-**v3.3.4 changes (session 32 — 2026-04-04):**
-- `0xB0 SET_BDC_REINIT` payload: `7=RTC` → `7=PTP`
-- BDC REG1 byte 8 `DEVICE_ENABLED_BITS` bit 7: `RES` → `PTP (isPTP_Enabled)`
-- BDC REG1 byte 9 `DEVICE_READY_BITS` bit 7: `RES` → `PTP (ptp.isSynched)`
-- BDC REG1 byte 10 `STAT BITS` bits 1–2: `ntpUsingFallback/ntpHasFallback` → `RES` (moved to TIME_BITS byte 391)
-- BDC REG1 byte 12 epoch field: `NTP epoch Time` → `epoch Time (PTP/NTP)`
-- BDC REG1 byte 391: `RESERVED (121)` → `TIME_BITS (1)` + `RESERVED (120)`
-- MCC REG1 byte 10 `STAT BITS2` bits 0–2: `ntpUsingFallback/ntpHasFallback/usingPTP` → `RES` (moved to TIME_BITS byte 253)
-- MCC REG1 byte 253: `RESERVED (3)` → `TIME_BITS (1)` + `RESERVED (2)`
-- `TIME_BITS` layout (bits 0–5): isPTP_Enabled; ptp.isSynched; usingPTP; ntp.isSynched; ntpUsingFallback; ntpHasFallback
-- HMI time source decode updated — see TIME_BITS note below each register table
-- TMC REG1 byte 61 reassigned: RESERVED → `TMC STAT BITS3` — PTP+NTP time status
-- TMC STAT BITS1 bits 5/6 vacated (moved to BITS3)
-- TMC FW version: `3.0.5` (session 30/31 PTP integration)
-
-**v3.3.2 changes (session 30 — 2026-04-04):**
-- `MCC_DEVICES` slot 4 renamed `RTCLOCK` → `PTP` in firmware and C# (`defines.hpp`, `defines.cs`)
-- `0xE0 SET_MCC_REINIT` / `0xE1 SET_MCC_DEVICES_ENABLE` payload corrected: `0=NTP` (NTP only), `4=PTP` (PTP only)
-- New MCC serial commands: `REINIT <device>`, `ENABLE <device> <0|1>`, `PTPDEBUG <0-3>`
-
-**v3.3.1 changes (session 29 — 2026-03-28):**
-- NEW-36 closed: PTP HW verified — `offset_us=12µs`, correct time, ENG GUI confirmed
-- NEW-37 closed: `MSG_MCC.cs` + ENG GUI verified
-- `0xE0 SET_MCC_REINIT` / `0xE1 SET_MCC_DEVICES_ENABLE` payload: device index 0 = `NTP/PTP` (controls both), index 4 = RES (was RTCLOCK, deprecated)
-- `SEND_REG_01` bug fixed: epoch time field now routes through `GetCurrentTime()` — was `ntp.GetCurrentTime()` (ENG GUI received wrong time when PTP active)
-
-**v3.3.0 changes (session 28 — 2026-03-28):**
-- MCC FW version updated: `3.0.6` → `3.1.0` (PTP integration); VERSION WORD at byte 245 = `0x03001000`
-- MCC REG1 byte 7 `DEVICE_ENABLED_BITS` bit 4: `RES` → `isPTP_Enabled`
-- MCC REG1 byte 8 `DEVICE_READY_BITS` bit 4: `RES` → `isPTP_Ready` (`ptp.isSynched`)
-- MCC REG1 byte 10 `STAT BITS2` bit 2: `RES` → `usingPTP` — set when PTP is the active time source
-- Time source decode (HMI reference):
-  - `DEVICE_ENABLED[4]=1` + `DEVICE_READY[4]=1` + `STAT_BITS2[2]=1` → PTP active (running on GNSS time)
-  - `DEVICE_READY[4]=0` + `DEVICE_READY[0]=1` → NTP serving (PTP not yet synched or lost)
-  - `DEVICE_READY[4]=0` + `DEVICE_READY[0]=1` + `STAT_BITS2[0]=1` → NTP fallback serving
-  - `DEVICE_READY[4]=0` + `DEVICE_READY[0]=0` → No time source — check GNSS / network
-- NEW-37: `MSG_MCC.cs` — unpack PTP bits for THEIA/ENG GUI (see Action Items)
-- NEW-38: Propagate PTP pattern to BDC, TMC, FMC, TRC in a follow-on session (see Action Items)
-
-**v3.2.0 changes (session 27 — 2026-03-26):**
-- `0xA2 GET_REGISTER2` removed from INT_OPS command table — replaced by `SET_NTP_CONFIG` which is INT_ENG only (not on A3 EXT whitelist; see INT_ENG for full specification)
-- MCC REG1 byte 10 `STAT BITS2` updated: bits 0/1 now carry NTP fallback state
-  - bit 0: `ntpUsingFallback` — system is currently syncing from fallback server
-  - bit 1: `ntpHasFallback` — a fallback server is configured
-- BDC REG1 byte 10 `STAT BITS` updated: bits 1/2 now carry NTP fallback state (replaces RES)
-  - bit 1: `ntpUsingFallback`
-  - bit 2: `ntpHasFallback`
-
-**v3.1.0 changes (session 22 — 2026-03-16):**
-- Document renamed from `ICD_EXTERNAL_OPS` to `ICD_EXTERNAL_INT` — scope label alignment
-- Scope clarified: INT_OPS is the full A3 operator control interface and reference spec
-  for THEIA and vendor HMI implementations
-- EXT_OPS content (0xAF, 0xAB response layouts, UDP:10009 framing) moved to
-  `CROSSBOW_ICD_EXT_OPS` (IPGD-0005)
-- Tier Overview section added — A1/A2/A3 model, INT_OPS boundary clarification
-- Network Reference section updated — THEIA .208, HYPERION .206, IPG reserved .200–.209,
-  third-party .210–.254, NTP .33
-- Relationship to EXT_OPS section added
-- THEIA IP updated throughout: 192.168.1.8 → 192.168.1.208
-- TRC3 renamed to TRC throughout
-- PixelShift corrected: −20 px → −420 px
-- Doc numbers added per CROSSBOW Document Register (IPGD-0001)
-
-**v3.0.2 changes (session 20 — 2026-03-16):**
-- `## Video Stream` section added. Documents H.264 RTP stream from TRC (192.168.1.22):
-  port 5000, 1280×720, 60 fps, 10 Mbps. Receive requirements (decoder, UDP buffer,
-  jitter, PixelShift −420 px correction). Framerate control via `0xD2` (pending).
-  Multicast via `0xD1` (pending, group 239.127.1.21).
-
-**v3.0.1 changes (session 17):**
-- EXT_OPS framing protocol defined — `0xCB 0x48` magic, CRC-16/CCITT, SEQ_NUM
-- THEIA Status Response (CMD `0xAF`) added — 30-byte payload, 39-byte total frame
-- THEIA POS/ATT Report (CMD `0xAB`) added — 32-byte payload, 41-byte total frame;
-  altitude corrected to HAE
-- Network Reference updated with UDP:10009
+**v3.6.0 changes (ICD command space restructuring — 2026-04-12):**
+A block fully assigned. See archived INT_OPS v3.6.2 for full history.
 
 ---
 
 > **Document policy:** This document contains only `INT_OPS`-scoped commands.
-> Engineering-only (`INT_ENG`) commands, FMC/TMC internals, and reserved bytes are
-> omitted. For the full command set see `CROSSBOW_ICD_INT_ENG` (IPGD-0003).
+> Engineering-only (`INT_ENG`) commands and full STATUS_BITS decode tables are in `CROSSBOW_ICD_INT_ENG` (IPGD-0003).
 
 > **Framing and transport:** A3 port (10050), magic `0xCB 0x58`, 521 bytes total.
-> Full protocol specification in **ARCHITECTURE.md** (IPGD-0006) §6. STATUS byte
-> codes and payload layout in the **Framing Reference** section of this document.
 
-> **Targets:** A3 clients may address **MCC** (192.168.1.10) and **BDC**
-> (192.168.1.20) directly via A3. **TRC** is accessible via BDC routing only —
-> send TRC commands (0xD0–0xDF) to BDC; BDC forwards internally. TMC and FMC
-> are internal to their respective controllers and not accessible via A3.
+> **Targets:** A3 clients may address **MCC** (192.168.1.10) and **BDC** (192.168.1.20) directly via A3.
+> **TRC** is accessible via BDC routing only — send TRC commands (0xD0–0xDF) to BDC; BDC forwards internally.
 
 ---
 
 ## Network and Interface Tier Overview
 
-CROSSBOW uses a three-tier interface model. INT_OPS clients operate at Tier 1 — full
-A3 operator control access.
+CROSSBOW uses a three-tier interface model. INT_OPS clients operate at Tier 1.
 
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  A1 — Controller Bus                                    │
-│  Internal controller-to-controller interface.           │
-│  No external access.                                    │
+│  Internal controller-to-controller. No external access. │
 ├─────────────────────────────────────────────────────────┤
 │  A2 — Engineering and Maintenance Interface             │
-│  IPG engineering use: firmware deployment, diagnostics, │
-│  full register access. Not available to integrators.    │
-│  Exception: planned auth/service pathway (in scope).    │
+│  IPG engineering: firmware deployment, full diagnostics.│
 └───────────────────────┬─────────────────────────────────┘
                         │ A3 boundary
 ┌───────────────────────▼─────────────────────────────────┐
 │  A3 — INT_OPS — Tier 1 (this document)                  │
 │  A3 port 10050, magic 0xCB 0x58                         │
 │  Full operator command set — MCC, BDC, TRC via BDC      │
-│                                                         │
 │   THEIA (.208) — IPG reference HMI                      │
 │   Vendor HMI (.210–.254) — bespoke implementations      │
 └───────────────────────┬─────────────────────────────────┘
                         │ EXT_OPS boundary
 ┌───────────────────────▼─────────────────────────────────┐
-│  EXT_OPS — Tier 2 (CROSSBOW_ICD_EXT_OPS, IPGD-0005)        │
+│  EXT_OPS — Tier 2 (CROSSBOW_ICD_EXT_OPS, IPGD-0005)    │
 │  UDP:10009, magic 0xCB 0x48                             │
 │  CUE input — HYPERION or third-party providers          │
 └─────────────────────────────────────────────────────────┘
@@ -226,34 +119,10 @@ A3 operator control access.
 
 | Tier | Transport | Magic | Audience |
 |------|-----------|-------|----------|
-| A1 — Controller Bus | Internal only | — | Controller firmware only — no external access |
-| A2 — Engineering | Internal ports | — | IPG engineering via ENG GUI — planned auth/service pathway |
+| A1 — Controller Bus | Internal only | — | Controller firmware only |
+| A2 — Engineering | Internal ports | — | IPG engineering via ENG GUI |
 | A3 — INT_OPS — Tier 1 | A3 port 10050 | `0xCB 0x58` | THEIA, vendor HMI integrators — this document |
 | EXT_OPS — Tier 2 | UDP:10009 | `0xCB 0x48` | CUE providers, HYPERION — see IPGD-0005 |
-
----
-
-## Relationship to EXT_OPS
-
-INT_OPS is the operator control plane — it provides full A3 access to MCC, BDC, and
-TRC (via BDC). EXT_OPS is the complementary cueing input interface — it feeds track
-data into whichever INT_OPS client is running.
-
-THEIA is IPG's reference INT_OPS implementation. A vendor may build a bespoke HMI
-using this ICD to replace THEIA entirely — in that case the vendor implements both:
-INT_OPS for system control and EXT_OPS (IPGD-0005) to receive CUE input.
-
-```
-EXT_OPS (cueing input — CROSSBOW_ICD_EXT_OPS, IPGD-0005)
-    ↓
-INT_OPS client — THEIA or vendor HMI (this document)
-    ↓
-A3 — MCC, BDC, TRC (via BDC)
-    ↓
-A1/A2 — internal controllers
-```
-
-For EXT_OPS interface definition see `CROSSBOW_ICD_EXT_OPS` (IPGD-0005).
 
 ---
 
@@ -262,8 +131,8 @@ For EXT_OPS interface definition see `CROSSBOW_ICD_EXT_OPS` (IPGD-0005).
 | Scope | Meaning |
 |-------|---------|
 | `INT_OPS` | Operator-accessible — this document. Sent via A3 port (10050, magic `0xCB 0x58`). |
-| `INT_ENG` | Engineering only — A2 port (10018). Omitted from this document. See `CROSSBOW_ICD_INT_ENG` (IPGD-0003). |
-| `EXT_OPS` | Cueing input interface — CUE providers and HYPERION → INT_OPS client. See `CROSSBOW_ICD_EXT_OPS` (IPGD-0005). |
+| `INT_ENG` | Engineering only — A2 port. Omitted from this document. See `CROSSBOW_ICD_INT_ENG` (IPGD-0003). |
+| `EXT_OPS` | Cueing input interface — see `CROSSBOW_ICD_EXT_OPS` (IPGD-0005). |
 
 ---
 
@@ -271,22 +140,22 @@ For EXT_OPS interface definition see `CROSSBOW_ICD_EXT_OPS` (IPGD-0005).
 
 | Byte | Enum | Description | Payload | INT_OPS Target |
 |------|------|-------------|---------|----------------|
-| 0xA0 | SET_UNSOLICITED | Subscribe/unsubscribe to unsolicited telemetry push. Sets per-slot `wantsUnsolicited` on the sender's client table entry. `{0x01}` = subscribe; `{0x00}` = unsubscribe. | uint8 0=off, 1=on | MCC, BDC |
-| 0xA1 | SET_HEL_TRAINING_MODE | Set training/combat mode — training clamps laser power to 10% regardless of `SET_HEL_POWER`. **Moved from `0xAF` (v3.6.0). Promoted to INT_OPS** — safety enforced in firmware, not scope. | uint8 0=COMBAT, 1=TRAINING | MCC |
-| 0xA2 | SET_NTP_CONFIG | Configure NTP server and/or force resync. **Promoted INT_ENG→INT_OPS (v3.6.0).** 0 bytes = force resync on current server. 1 byte `[p]` = set primary server to `192.168.1.p` + resync. 2 bytes `[p, f]` = set primary + fallback + resync. Routing by destination IP. | 0–2 bytes (see description) | MCC, BDC |
-| 0xA3 | SET_TIMESRC | Set active time source. **New v3.6.0.** Controls PTP/NTP selection. Routing by destination IP — each controller applies independently. ⚠ Pending FW-C8 (handler removal) before live. | uint8 0=OFF, 1=NTP, 2=PTP, 3=AUTO | MCC, BDC |
-| 0xA4 | FRAME_KEEPALIVE | Register/keepalive. Empty payload = ACK only (byte 0=`0x01`, bytes 1–2=echo SEQ_NUM, bytes 3–6=uptime_ms). Payload `{0x01}` = ACK + solicited REG1 (rate-gated 1 Hz per slot; suppressed if subscribed). Any accepted frame auto-registers sender and refreshes 60-second liveness. | 0 or 1 byte | MCC, BDC |
-| 0xA5 | SET_SYSTEM_STATE | Set system state | uint8 (SYSTEM_STATES enum) | MCC, BDC |
-| 0xA6 | SET_GIMBAL_MODE | Set gimbal/tracker mode | uint8 (BDC_MODES enum) | MCC, BDC |
+| 0xA0 | SET_UNSOLICITED | Subscribe/unsubscribe to unsolicited telemetry push. `{0x01}` = subscribe; `{0x00}` = unsubscribe. | uint8 0=off, 1=on | MCC, BDC |
+| 0xA1 | SET_HEL_TRAINING_MODE | Set training/combat mode — training clamps laser power to 10% regardless of `SET_HEL_POWER`. Promoted to INT_OPS v3.6.0. | uint8 0=COMBAT, 1=TRAINING | MCC |
+| 0xA2 | SET_NTP_CONFIG | Configure NTP server and/or force resync. Promoted INT_ENG→INT_OPS v3.6.0. 0 bytes = resync. 1 byte `[p]` = set primary `192.168.1.p`. 2 bytes `[p,f]` = set primary+fallback. Routing by destination IP. | 0–2 bytes | MCC, BDC |
+| 0xA3 | SET_TIMESRC | Set active time source. New v3.6.0. Routing by destination IP. ⚠ Pending FW-C8 before live. | uint8 0=OFF, 1=NTP, 2=PTP, 3=AUTO | MCC, BDC |
+| 0xA4 | FRAME_KEEPALIVE | Register/keepalive. Empty = ACK only. Payload `{0x01}` = ACK + solicited REG1 (rate-gated 1 Hz per slot; suppressed if subscribed). | 0 or 1 byte | MCC, BDC |
+| 0xA5 | SET_SYSTEM_STATE | Set system state. Returns `STATUS_PREREQ_FAIL (0x07)` if device health prerequisites not met. | uint8 (SYSTEM_STATES enum) | MCC, BDC |
+| 0xA6 | SET_GIMBAL_MODE | Set gimbal/tracker mode. Returns `STATUS_PREREQ_FAIL (0x07)` if prerequisites not met. | uint8 (BDC_MODES enum) | MCC, BDC |
 | 0xA7 | SET_LCH_MISSION_DATA | Load LCH/KIZ mission data, clear all windows | uint8 which (0=KIZ,1=LCH); uint8 isValid; uint64 startTimeMission_min; uint64 stopTimeMission_max; int16 az1; int16 el1; int16 az2; int16 el2; uint16 nTargets; uint16 nTotalWindows | BDC |
 | 0xA8 | SET_LCH_TARGET_DATA | Load LCH/KIZ target with windows | uint8 which (0=KIZ,1=LCH); uint16 nWindows; uint16 startTimeTarget_min; uint16 stopTimeTarget_max; uint16 az1; uint16 el1; uint16 az2; uint16 el2; nWindows×[uint16 wt1, uint16 wt2] | BDC |
-| 0xA9 | SET_REINIT | Unified controller reinitialise. **New v3.6.0. Replaces `0xB0` (BDC) and `0xE0` (MCC).** Routing implicit by destination IP/port. TMC and FMC not supported. Note: PTP subsystem index differs (BDC=7, MCC=4). | uint8 subsystem (BDC: 0=NTP,1=GIM,2=FUJI,3=MWIR,4=FSM,5=JET,6=INCL,7=PTP; MCC: 0=NTP,1=TMC,2=HEL,3=BAT,4=PTP,5=CRG,6=GNSS,7=BDC) | MCC, BDC |
-| 0xAA | SET_DEVICES_ENABLE | Unified device enable/disable. **New v3.6.0. Replaces `0xE1` (MCC).** Routing implicit by destination IP/port. TMC and FMC not supported. | uint8 device (BDC: 0=NTP,1=GIM,2=FUJI,3=MWIR,4=FSM,5=JET,6=INCL,7=PTP; MCC: 0=NTP,1=TMC,2=HEL,3=BAT,4=PTP,5=CRG,6=GNSS,7=BDC); uint8 0/1 | MCC, BDC |
-| 0xAB | SET_FIRE_VOTE | Laser fire requested vote. **New v3.6.0. Moved from `0xE6` (INT_ENG), promoted to INT_OPS.** Continuous heartbeat required — vote drops on client disconnect. Heartbeat is the safety gate. | uint8 0/1 | MCC |
+| 0xA9 | SET_REINIT | Unified controller reinitialise. Replaces `0xB0` (BDC) and `0xE0` (MCC). Routing by destination IP. TMC/FMC not supported. | uint8 subsystem (BDC: 0=NTP,1=GIM,2=FUJI,3=MWIR,4=FSM,5=JET,6=INCL,7=PTP; MCC: 0=NTP,1=TMC,2=HEL,3=BAT,4=PTP,5=CRG,6=GNSS,7=BDC) | MCC, BDC |
+| 0xAA | SET_DEVICES_ENABLE | Unified device enable/disable. Replaces `0xE1` (MCC). Routing by destination IP. | uint8 device (same index as SET_REINIT); uint8 0/1 | MCC, BDC |
+| 0xAB | SET_FIRE_REQUESTED_VOTE | Laser fire requested vote. Promoted to INT_OPS v3.6.0. Continuous heartbeat required — vote drops on disconnect. | uint8 0/1 | MCC |
 | 0xAC | SET_BDC_HORIZ | Set horizon elevation vector | float[360] | BDC |
 | 0xAD | SET_HEL_POWER | Set laser power level | uint8 [0–100] % | MCC |
 | 0xAE | CLEAR_HEL_ERROR | Clear laser error state | none | MCC |
-| 0xAF | SET_CHARGER | Set charger state and current level. **New v3.6.0. Merges `0xE3` and `0xED`.** Level required on every call — enables and sets level simultaneously. Cannot enable without specifying level; if already enabled, changes level immediately. **V1:** GPIO enable + I2C level control. **V2:** GPIO enable only — level `0`=disable, non-zero=enable. FW-CRG-V2 fix CB-20260416. | uint8 level: 0=disable, 10=low, 30=med, 55=high | MCC |
+| 0xAF | SET_CHARGER | Set charger state and level. Merges `0xE3` and `0xED`. Level required on every call. **V1/V3:** GPIO enable + I2C level control (DBU3200). **V2:** GPIO enable only — level `0`=disable, non-zero=enable. | uint8 level: 0=disable, 10=low, 30=med, 55=high | MCC |
 
 ---
 
@@ -299,8 +168,8 @@ For EXT_OPS interface definition see `CROSSBOW_ICD_EXT_OPS` (IPGD-0005).
 | 0xB4 | SET_CUE_OFFSET | Set cue track offset (AZ, EL) | float az_deg, float el_deg | BDC |
 | 0xB5 | CMD_GIM_PARK | Park gimbal at home | none | BDC |
 | 0xB6 | SET_GIM_LIMITS | Set gimbal wrap limits | int32 panMin, int32 panMax, int32 tiltMin, int32 tiltMax | BDC |
-| 0xB7 | SET_PID_GAINS | Set PID gains (cue or AT loop) | uint8 which (0=cue, 1=AT); float kpp, kip, kdp, kpt, kit, kdt | BDC |
-| 0xB8 | SET_PID_TARGET | Set PID target setpoint. Sub-cmd 0x00: x=NED az (deg), y=NED el (deg); BDC applies CUE_OFFSET then full NED→gimbal rotation. Sub-cmd 0x01: x=tx (pixels), y=ty (pixels). THEIA sends sub-cmd 0x00 only. | uint8 sub-cmd (0=CUE NED, 1=video px); float x LE; float y LE; float pidScale LE | BDC |
+| 0xB7 | SET_PID_GAINS | Set PID gains | uint8 which (0=cue, 1=AT); float kpp, kip, kdp, kpt, kit, kdt | BDC |
+| 0xB8 | SET_PID_TARGET | Set PID target setpoint | uint8 sub-cmd (0=CUE NED, 1=video px); float x; float y; float pidScale | BDC |
 | 0xB9 | SET_PID_ENABLE | Enable/disable PID loop | uint8 which (0=cue, 1=video); uint8 0/1 | BDC |
 | 0xBA | SET_SYS_LLA | Set platform geodetic position | float lat, float lng, float alt | BDC |
 | 0xBB | SET_SYS_ATT | Set platform attitude (RPY) | float roll, float pitch, float yaw | BDC |
@@ -313,7 +182,7 @@ For EXT_OPS interface definition see `CROSSBOW_ICD_EXT_OPS` (IPGD-0005).
 |------|------|-------------|---------|----------------|
 | 0xC1 | SET_CAM_MAG | VIS camera zoom | uint8 mag index | BDC |
 | 0xC2 | SET_CAM_FOCUS | VIS camera focus | uint16 focus position | BDC |
-| 0xC4 | CMD_VIS_AWB | Trigger VIS auto white balance once. No payload. BDC routes to TRC. **Assigned CB-20260416e.** | none | BDC |
+| 0xC4 | CMD_VIS_AWB | Trigger VIS auto white balance once. BDC routes to TRC. | none | BDC |
 | 0xC7 | SET_CAM_IRIS | VIS camera iris position | uint8 upper nibble of iris position | BDC |
 | 0xC8 | CMD_VIS_FILTER_ENABLE | VIS ND filter enable | uint8 0/1 | BDC |
 | 0xC9 | SET_BDC_PALOS_VOTE | Set operator/position valid vote | uint8 which (0=KIZ, 1=LCH); uint8 operatorValid; uint8 positionValid; uint8 forExec | BDC |
@@ -327,21 +196,20 @@ For EXT_OPS interface definition see `CROSSBOW_ICD_EXT_OPS` (IPGD-0005).
 
 ## 0xD0–0xDF — TRC/Orin Commands (routed via BDC)
 
-> TRC commands are routed through BDC over A3. The INT_OPS Target column shows `BDC` — BDC
-> forwards to TRC internally. Direct TRC A2 access is engineering-only.
+> TRC commands are routed through BDC over A3. The INT_OPS Target shows `BDC` — BDC forwards to TRC internally.
 
 | Byte | Enum | Description | Payload | INT_OPS Target |
 |------|------|-------------|---------|----------------|
 | 0xD0 | ORIN_CAM_SET_ACTIVE | Set active camera | uint8 BDC_CAM_IDS (0=VIS, 1=MWIR) | BDC |
-| 0xD3 | ORIN_SET_STREAM_OVERLAYS | Set HUD overlay bitmask. bit0=Reticle, bit1=TrackPreview, bit2=TrackBox, bit3=CueChevrons, bit4=AC_Projections, bit5=AC_LeaderLines, bit6=FocusScore, bit7=OSD | uint8 bitmask | BDC |
-| 0xD4 | ORIN_ACAM_SET_CUE_FLAG | Set cue flag indicator (HUD chevrons) | uint8 0/1 | BDC |
+| 0xD3 | ORIN_SET_STREAM_OVERLAYS | Set HUD overlay bitmask (HUD_OVERLAY_BITS enum). b0=Reticle, b1=TrackPreview, b2=TrackBox, b3=CueChevrons, b4=AC_Projections, b5=AC_LeaderLines, b6=FocusScore, b7=OSD | uint8 bitmask | BDC |
+| 0xD4 | ORIN_ACAM_SET_CUE_FLAG | Set cue flag indicator | uint8 0/1 | BDC |
 | 0xD5 | ORIN_ACAM_SET_TRACKGATE_SIZE | Set track gate width/height | uint8 w, uint8 h (pixels, min 16) | BDC |
 | 0xD6 | ORIN_ACAM_ENABLE_FOCUSSCORE | Enable focus score computation | uint8 0/1 | BDC |
-| 0xD7 | ORIN_ACAM_SET_TRACKGATE_CENTER | Set track gate preview center (no tracker init) | uint16 x, uint16 y (pixels) | BDC |
+| 0xD7 | ORIN_ACAM_SET_TRACKGATE_CENTER | Set track gate preview center | uint16 x, uint16 y (pixels) | BDC |
 | 0xDA | ORIN_ACAM_RESET_TRACKB | Reset MOSSE tracker to current preview gate | none | BDC |
-| 0xDB | ORIN_ACAM_ENABLE_TRACKERS | Enable/disable tracker for active camera | uint8 tracker_id (0=AI, 1=MOSSE, 2=Centroid, 3=Kalman); uint8 0/1 | BDC |
+| 0xDB | ORIN_ACAM_ENABLE_TRACKERS | Enable/disable tracker | uint8 tracker_id (0=AI, 1=MOSSE, 2=Centroid, 4=LK); uint8 0/1; [uint8 mosseReseed 0x01/0x00] | BDC |
 | 0xDC | ORIN_ACAM_SET_ATOFFSET | Set AT reticle offset | int8 dx, int8 dy (pixels, −128 to 127) | BDC |
-| 0xDD | ORIN_ACAM_SET_FTOFFSET | Set FT (fine-track) offset | int8 dx, int8 dy (pixels, −128 to 127) | BDC |
+| 0xDD | ORIN_ACAM_SET_FTOFFSET | Set FT offset | int8 dx, int8 dy (pixels, −128 to 127) | BDC |
 | 0xDE | ORIN_SET_VIEW_MODE | Set compositor output view | uint8 (0=CAM1, 1=CAM2, 2=PIP4, 3=PIP8) | BDC |
 
 ---
@@ -368,8 +236,9 @@ For EXT_OPS interface definition see `CROSSBOW_ICD_EXT_OPS` (IPGD-0005).
 
 ## MCC Register 1 (REG1)
 
-Sent by MCC on an unsolicited basis (when subscribed via `0xA0 SET_UNSOLICITED`) or in response to a solicited request (`0xA4 {0x01}`, rate-gated 1 Hz per slot). Frame CMD_BYTE is `0xA1` — legacy protocol constant, not a command (pending migration to `0x00` per FW-C10).
-Fixed block size: **256 bytes** in payload, always padded to 512-byte payload.
+Sent by MCC unsolicited (when subscribed via `0xA0`) or on solicited request (`0xA4 {0x01}`, rate-gated 1 Hz per slot).
+Frame CMD_BYTE is `0xA1` — legacy constant, pending migration to `0x00` (FW-C10).
+Fixed block size: **512-byte payload** (256 defined + 248 reserved).
 
 | Byte | From | To | nBytes | Name | Type | Notes |
 |------|------|----|--------|------|------|-------|
@@ -378,19 +247,19 @@ Fixed block size: **256 bytes** in payload, always padded to 512-byte payload.
 | 2 | 2 | 3 | 1 | System Mode | uint8 | BDC_MODES enum |
 | 3 | 3 | 5 | 2 | HB_ms | uint16 | ms between sends |
 | 5 | 5 | 7 | 2 | dt_us | uint16 | µs in processing loop |
-| 7 | 7 | 8 | 1 | MCC DEVICE_ENABLED_BITS | uint8 | 0:NTP; 1:TMC; 2:HEL; 3:BAT; 4:PTP; 5:CRG; 6:GNSS; 7:BDC |
-| 8 | 8 | 9 | 1 | MCC DEVICE_READY_BITS | uint8 | 0:NTP; 1:TMC; 2:HEL; 3:BAT; 4:PTP; 5:CRG; 6:GNSS; 7:BDC |
-| 9 | 9 | 10 | 1 | MCC HEALTH_BITS | uint8 | 0:isReady; 1:isChargerEnabled; 2:isNotBatLowVoltage; 3:isTrainingMode (v3.5.0); 4–7:RES ⚠ **Breaking change v3.4.0** — old layout: 0:isReady; 1:isSolenoid1_En; 2:isSolenoid2_En; 3:isLaserPower_En; 4:isChargerEnabled; 5:isNotBatLowVoltage. Read HW_REV [254] to confirm version. |
-| 10 | 10 | 11 | 1 | MCC POWER_BITS | uint8 | Bit N = MCC_POWER value N. Revision-independent — unused outputs always 0. 0:isPwr_GpsRelay(V1); 1:isPwr_VicorBus(V1); 2:isPwr_LaserRelay(both); 3:isPwr_GimVicor(V2); 4:isPwr_TmsVicor(V2); 5:isPwr_SolHel(V1); 6:isPwr_SolBda(V1); 7:RES ⚠ **Breaking change v3.4.0** — old layout: 3:isVicorEnabled; 4:isRelay1En; 5:isRelay2En; 6:isRelay3En; 7:isRelay4En. |
-| 11 | 11 | 12 | 1 | MCC VOTE BITS | uint8 | 0:isLaserTotalHW_Vote_rb; 1:isNotAbort_Vote_rb; 2:isArmed_Vote_rb; 3:isBDA_Vote_rb; 4:isEMON_rb; 5:isLaserFireRequested_Vote; 6:isLaserTotal_Vote_rb; 7:isCombat_Vote_rb |
+| 7 | 7 | 8 | 1 | MCC DEVICE_ENABLED_BITS | uint8 | b0:NTP; b1:TMC; b2:HEL; b3:BAT; b4:PTP; b5:CRG; b6:GNSS; b7:BDC |
+| 8 | 8 | 9 | 1 | MCC DEVICE_READY_BITS | uint8 | b0:NTP; b1:TMC; b2:HEL; b3:BAT; b4:PTP; b5:CRG; b6:GNSS; b7:BDC |
+| 9 | 9 | 10 | 1 | MCC HEALTH_BITS | uint8 | b0:isReady; b1:isChargerEnabled; b2:isNotBatLowVoltage(→VOTE_BITS_MCC2.BAT_NOT_LOW); b3:isTrainingMode(→VOTE_BITS_MCC2.TRAINING_MODE); b4:isLaserModelMatch; b5–7:RES. ⚠ Breaking change v3.4.0. |
+| 10 | 10 | 11 | 1 | MCC POWER_BITS | uint8 | Bit N = MCC_POWER enum value N. b0:RELAY_GPS(V1/V3); b1:VICOR_BUS(V1/V3-3kW); b2:RELAY_LASER(all); b3:VICOR_GIM(V2/V3-6kW); b4:VICOR_TMS(V2/V3-6kW); b5:SOL_HEL(V1/V3-3kW); b6:SOL_BDA(V1/V3-3kW); b7:RELAY_NTP(V3 only). ⚠ Breaking change v3.4.0. |
+| 11 | 11 | 12 | 1 | **VOTE_BITS_MCC** | uint8 | Gate-chain order b0→b7. **b0:NOT_ABORT(INVERTED — CLEAR=abort ACTIVE)**; b1:ARMED; b2:BDC_VOTE; b3:LASER_TOTAL_HW; b4:SW_VOTE(Combat&&BatNotLow); b5:TRIGGER; b6:FIRE_STATE; b7:EMON(display only). Composites: ARMED_NOMINAL=0x03; READY_TO_FIRE=0x1F; FULL_FIRE_CHAIN=0x7F. ⚠ **Breaking change v4.0.0** — previous layout had incorrect bit ordering and stale field names. |
 | 12 | 12 | 20 | 8 | epoch Time (PTP/NTP) | uint64 | ms since epoch — PTP when synched, NTP otherwise |
 | 20 | 20 | 21 | 1 | Temp 1 (Charger) | int8 | °C |
 | 21 | 21 | 22 | 1 | Temp 2 (AIR) | int8 | °C |
 | 22 | 22 | 26 | 4 | TPH: Temp | float | °C |
 | 26 | 26 | 30 | 4 | TPH: Pressure | float | Pa |
 | 30 | 30 | 34 | 4 | TPH: Humidity | float | % |
-| 34 | 34 | 36 | 2 | Battery Pack Voltage | uint16 | centi-volts (e.g. 1260 = 12.60 V) |
-| 36 | 36 | 38 | 2 | Battery Pack Current | int16 | centi-amps (e.g. −450 = −4.50 A) |
+| 34 | 34 | 36 | 2 | Battery Pack Voltage | uint16 | centi-volts |
+| 36 | 36 | 38 | 2 | Battery Pack Current | int16 | centi-amps |
 | 38 | 38 | 40 | 2 | Battery Bus Voltage | uint16 | centi-volts |
 | 40 | 40 | 41 | 1 | Battery Pack Temp | int8 | °C |
 | 41 | 41 | 42 | 1 | Battery ASOC | uint8 | % |
@@ -403,12 +272,12 @@ Fixed block size: **256 bytes** in payload, always padded to 512-byte payload.
 | 54 | 54 | 58 | 4 | Laser Error Word | uint32 | |
 | 58 | 58 | 62 | 4 | Laser SetPoint | float | % |
 | 62 | 62 | 66 | 4 | Laser Output Power | float | W |
-| 66 | 66 | 130 | 64 | TMC FULL REG | TMC_REG | 64-byte block — thermal status. Byte [62] within this block = HW_REV (0x01=V1, 0x02=V2). THEIA clients parsing TMC sub-fields must read HW_REV before decoding STAT BITS1 bit 5 and bytes [17–18], [39–40] — layout differs by hardware revision. See INT_ENG TMC REG1 section for full decode. |
-| 130 | 130 | 131 | 1 | TIME HB | uint8 | s/10 — NTP receive interval. ⚠ Pending: also stamp on PTP sync. |
-| 131 | 131 | 132 | 1 | HEL HB | uint8 | s/10 — laser TCP response interval. Live v3.5.0. Stale > 2.0s = comms loss. |
-| 132 | 132 | 133 | 1 | BAT HB | uint8 | s/10 — ⚠ always 0, pending implementation |
-| 133 | 133 | 134 | 1 | CRG HB | uint8 | s/10 — ⚠ always 0, V1 only, pending implementation |
-| 134 | 134 | 135 | 1 | GNSS HB | uint8 | s/10 — ⚠ always 0, pending implementation |
+| 66 | 66 | 130 | 64 | TMC FULL REG | TMC_REG | 64-byte block. Byte [62] within block = HW_REV (0x01=V1, 0x02=V2). See INT_ENG for full decode. |
+| 130 | 130 | 131 | 1 | TIME HB | uint8 | s/10 — NTP receive interval |
+| 131 | 131 | 132 | 1 | HEL HB | uint8 | s/10 — laser TCP response interval. Stale > 2.0s = comms loss. |
+| 132 | 132 | 133 | 1 | BAT HB | uint8 | s/10 |
+| 133 | 133 | 134 | 1 | CRG HB | uint8 | s/10 — V1/V3 only |
+| 134 | 134 | 135 | 1 | GNSS HB | uint8 | s/10 |
 | 135 | 135 | 136 | 1 | GNSS SOLN STATUS | uint8 | enum |
 | 136 | 136 | 137 | 1 | GNSS POS TYPE | uint8 | enum |
 | 137 | 137 | 138 | 1 | INS SOLN STATUS | uint8 | enum |
@@ -439,28 +308,38 @@ Fixed block size: **256 bytes** in payload, always padded to 512-byte payload.
 | 235 | 235 | 236 | 1 | CHARGE LEVEL | uint8 | enum |
 | 236 | 236 | 240 | 4 | Current Limit | float | A |
 | 240 | 240 | 244 | 4 | Voltage Limit | float | V |
-| 244 | 244 | 245 | 1 | CHARGER STATUS BITS | uint8 | bit0:isConnected; 1:isHealthy; 2:isCharging; 3:isFullyCharged; 4:isHighCharge; 5:is220V |
+| 244 | 244 | 245 | 1 | CHARGER STATUS BITS | uint8 | b0:isConnected; b1:isHealthy; b2:isCharging; b3:isFullyCharged; b4:isHighCharge; b5:is220V |
 | 245 | 245 | 249 | 4 | MCC VERSION WORD | uint32 | VERSION_PACK(major, minor, patch) |
 | 249 | 249 | 253 | 4 | MCU Temp | float | °C |
-| 253 | 253 | 254 | 1 | TIME_BITS | uint8 | bit0:isPTP_Enabled; bit1:ptp.isSynched; bit2:usingPTP; bit3:ntp.isSynched; bit4:ntpUsingFallback; bit5:ntpHasFallback; bit6–7:RES |
-| 254 | 254 | 255 | 1 | HW_REV | uint8 | 0x01=V1 (relay bus/solenoids/charger I2C); 0x02=V2 (dual Vicor/no solenoids/no I2C). Read before interpreting HEALTH_BITS [9] and POWER_BITS [10]. — v3.4.0 |
-| 255 | 255 | 256 | 1 | LASER_MODEL | uint8 | `0x00`=UNKNOWN/not sensed; `0x01`=YLM_3K (YLM-3000-SM-VV, 3000W); `0x02`=YLM_6K (YLM-6000-U3-SM, 6000W). Populated after laser auto-sense on TCP connect. — v3.5.0 |
-| 256 | 256 | 512 | 256 | RESERVED | — | 0x00 — padded to 512 |
+| 253 | 253 | 254 | 1 | TIME_BITS | uint8 | b0:isPTP_Enabled; b1:ptp.isSynched; b2:usingPTP; b3:ntp.isSynched; b4:ntpUsingFallback; b5:ntpHasFallback; b6–7:RES |
+| 254 | 254 | 255 | 1 | HW_REV | uint8 | 0x01=V1; 0x02=V2; 0x03=V3. Read before interpreting HEALTH_BITS [9] and POWER_BITS [10]. |
+| 255 | 255 | 256 | 1 | LASER_MODEL | uint8 | 0x00=UNKNOWN; 0x01=YLM_3K; 0x02=YLM_6K. Populated after laser auto-sense on connect. |
+| 256 | 256 | 257 | 1 | **VOTE_BITS_MCC2** | uint8 | MCC detail byte. b0:BAT_NOT_LOW; b1:TRAINING_MODE; b2:COMBAT; b3:EMON_MISSING; b4:EMON_UNEXPECTED; b5:FIRE_INTERLOCKED; b6–7:RES. SW_VOTE in [11]b4 = b2 AND b0. **New v4.0.0.** |
+| 257 | 257 | 258 | 1 | **MCC DEVICE_WARN_BITS** | uint8 | Parallel to ENABLED [7] and READY [8]. Same bit layout. Bit N set when device N is enabled AND degraded but operational. WARN does not block advancement. **New v4.0.0.** |
+| 258 | 258 | 259 | 1 | **MCC_TMC_STATUS_BITS** | uint8 | b0:isConnected; b1:isPump1Enabled; b2:isPump2Enabled(V2/V3, 0 on V1); b3:isLCM1_Error; b4:isFlow1_Error; b5:isLCM2_Error; b6:isFlow2_Error; b7:RES. **New v4.0.0.** |
+| 259 | 259 | 260 | 1 | **MCC_HEL_STATUS_BITS** | uint8 | b0:isSensed; b1:isHB_OK; b2:isNOTREADY(set=error); b3:isModelMatch; b4:isEMON(display); b5:isEMON_Unexpected; b6:isEMON_Missing; b7:isFireInterlocked. **New v4.0.0.** |
+| 260 | 260 | 261 | 1 | **MCC_BAT_STATUS_BITS** | uint8 | b0:isConnected; b1:isNotLowVoltage; b2:isCharging(display); b3:isDischarging(display); b4:isSOC_OK; b5:isTempOK; b6:isError; b7:isAlarm. **New v4.0.0.** |
+| 261 | 261 | 262 | 1 | **MCC_CRG_STATUS_BITS** | uint8 | b0:isConnected; b1:isEnabled; b2:isVIN_OK; b3:isCharging(display); b4:isAtMaxLevel(display); b5–7:RES. **New v4.0.0.** |
+| 262 | 262 | 263 | 1 | **MCC_GNSS_STATUS_BITS** | uint8 | b0:isConnected; b1:isHB_OK; b2:isPositionValid; b3:isSIV_OK; b4:isHeadingValid; b5:isINS_Converged; b6:isTerraStar_OK(display); b7:RES. **New v4.0.0.** |
+| 263 | 263 | 264 | 1 | **MCC_BDC_STATUS_BITS** | uint8 | b0:isEnabled; b1:isReachable; b2:isVoteActive; b3–7:RES. **New v4.0.0.** |
+| 264 | 264 | 512 | 248 | RESERVED | — | 0x00 |
 
-**Defined: 256 bytes. Padded to 512 bytes. Always followed by A3 frame overhead.**
+**Defined: 264 bytes. Reserved: 248 bytes. Padded to 512-byte payload.**
 
-> **Time source decode (HMI — session 32):** Read `TIME_BITS` at byte 253.
-> `TIME_BITS[2]=1` → PTP active (GNSS time). `TIME_BITS[2]=0` + `TIME_BITS[3]=1` → NTP serving.
-> `TIME_BITS[4]=1` → NTP on fallback server. All zeros → no time source.
+> **Time source decode:** Read `TIME_BITS` [253]. `b2=1` → PTP active. `b2=0` + `b3=1` → NTP serving. `b4=1` → NTP on fallback. All zeros → no time source.
+
+> **Device health decode:** `DEVICE_ENABLED_BITS[N]=1` → device in service. `DEVICE_READY_BITS[N]=0` → ERROR (blocks or regresses state). `DEVICE_WARN_BITS[N]=1` → WARN (degraded but operational). `DEVICE_READY_BITS[N]=1` + `DEVICE_WARN_BITS[N]=0` → READY. See Device Health section.
+
+> **VOTE_BITS_MCC2 note:** `isNotBatLowVoltage` and `isTrainingMode` (previously in HEALTH_BITS [9] bits 2–3) now redirect to `VOTE_BITS_MCC2.BAT_NOT_LOW` and `VOTE_BITS_MCC2.TRAINING_MODE` as the authoritative source. HEALTH_BITS bits 2–3 remain populated by firmware for backward compatibility.
 
 ---
 
 ## BDC Register 1 (REG1)
 
-Sent by BDC on an unsolicited basis (when subscribed via `0xA0 SET_UNSOLICITED`) or in response to a solicited request (`0xA4 {0x01}`, rate-gated 1 Hz per slot). Frame CMD_BYTE is `0xA1` — legacy protocol constant, not a command (pending migration to `0x00` per FW-C10).
-Fixed block size: **512 bytes**.
+Sent by BDC unsolicited (when subscribed via `0xA0`) or on solicited request (`0xA4 {0x01}`, rate-gated 1 Hz per slot).
+Frame CMD_BYTE is `0xA1`. Fixed block size: **512 bytes**.
 
-Embedded sub-registers (opaque to INT_OPS clients — field detail in full ICD):
+Embedded sub-registers (opaque to INT_OPS clients):
 - **TRC_REG** (64-byte block) at bytes **60–123**
 - **FMC_REG** (64-byte block) at bytes **169–232**
 
@@ -472,26 +351,26 @@ Embedded sub-registers (opaque to INT_OPS clients — field detail in full ICD):
 | 3 | 3 | 4 | 1 | Active CAM ID | uint8 | VIS=0, MWIR=1 |
 | 4 | 4 | 6 | 2 | HB_ms | uint16 | ms between sends |
 | 6 | 6 | 8 | 2 | dt_us | uint16 | µs in processing loop |
-| 8 | 8 | 9 | 1 | BDC DEVICE_ENABLED_BITS | uint8 | 0:NTP; 1:GIMBAL; 2:FUJI; 3:MWIR; 4:FSM; 5:JETSON; 6:INCL; 7:PTP *(session 32)* |
-| 9 | 9 | 10 | 1 | BDC DEVICE_READY_BITS | uint8 | 0:NTP; 1:GIMBAL; 2:FUJI; 3:MWIR; 4:FSM; 5:JETSON; 6:INCL; 7:PTP *(ptp.isSynched — session 32)* |
-| 10 | 10 | 11 | 1 | BDC HEALTH_BITS | uint8 | 0:isReady; 1:isSwitchEnabled(V2 only, 0 on V1); 2–7:RES ⚠ **Renamed v3.5.1** from `BDC STAT BITS`. Read HW_REV [392] before interpreting bit 1. |
-| 11 | 11 | 12 | 1 | BDC POWER_BITS | uint8 | 0:isPidEnabled; 1:isVPidEnabled; 2:isFTTrackEnabled; 3:isVicorEnabled; 4:isRelay1En; 5:isRelay2En; 6:isRelay3En; 7:isRelay4En ⚠ **Renamed v3.5.1** from `BDC STAT BITS2` — bit layout unchanged. |
-| 12 | 12 | 20 | 8 | epoch Time (PTP/NTP) | uint64 | ms since epoch — PTP when synched, NTP otherwise |
-| 20 | 20 | 21 | 1 | GIMBAL STATUS BITS | uint8 | 0:isReady; 1:isConnected; 2:isStarted; 3–7:RES |
-| 21 | 21 | 25 | 4 | Gimbal Pan Count | int32 | from galil (dr) |
-| 25 | 25 | 29 | 4 | Gimbal Tilt Count | int32 | from galil (dr) |
-| 29 | 29 | 33 | 4 | Gimbal Pan Speed | int32 | from galil (dr) |
-| 33 | 33 | 37 | 4 | Gimbal Tilt Speed | int32 | from galil (dr) |
-| 37 | 37 | 38 | 1 | Gimbal Pan Stop Code | uint8 | from galil (dr) |
-| 38 | 38 | 39 | 1 | Gimbal Tilt Stop Code | uint8 | from galil (dr) |
-| 39 | 39 | 41 | 2 | Gimbal Pan Status | uint16 | from galil (dr) |
-| 41 | 41 | 43 | 2 | Gimbal Tilt Status | uint16 | from galil (dr) |
+| 8 | 8 | 9 | 1 | BDC DEVICE_ENABLED_BITS | uint8 | b0:NTP; b1:GIMBAL; b2:FUJI; b3:MWIR; b4:FSM; b5:JETSON; b6:INCL; b7:PTP |
+| 9 | 9 | 10 | 1 | BDC DEVICE_READY_BITS | uint8 | b0:NTP; b1:GIMBAL; b2:FUJI; b3:MWIR; b4:FSM; b5:JETSON; b6:INCL; b7:PTP |
+| 10 | 10 | 11 | 1 | BDC HEALTH_BITS | uint8 | b0:isReady; b1:isSwitchEnabled(V2 only); b2–7:RES. ⚠ Renamed v3.5.1. |
+| 11 | 11 | 12 | 1 | BDC POWER_BITS | uint8 | b0:isPidEnabled; b1:isVPidEnabled; b2:isFTTrackEnabled; b3:isVicorEnabled; b4:isRelay1En; b5:isRelay2En; b6:isRelay3En; b7:isRelay4En. ⚠ Renamed v3.5.1. |
+| 12 | 12 | 20 | 8 | epoch Time (PTP/NTP) | uint64 | ms since epoch |
+| 20 | 20 | 21 | 1 | GIMBAL STATUS BITS | uint8 | b0:isReady; b1:isConnected; b2:isStarted; b3–7:RES |
+| 21 | 21 | 25 | 4 | Gimbal Pan Count | int32 | from Galil (dr) |
+| 25 | 25 | 29 | 4 | Gimbal Tilt Count | int32 | from Galil (dr) |
+| 29 | 29 | 33 | 4 | Gimbal Pan Speed | int32 | from Galil (dr) |
+| 33 | 33 | 37 | 4 | Gimbal Tilt Speed | int32 | from Galil (dr) |
+| 37 | 37 | 38 | 1 | Gimbal Pan Stop Code | uint8 | from Galil (dr) |
+| 38 | 38 | 39 | 1 | Gimbal Tilt Stop Code | uint8 | from Galil (dr) |
+| 39 | 39 | 41 | 2 | Gimbal Pan Status | uint16 | from Galil (dr) |
+| 41 | 41 | 43 | 2 | Gimbal Tilt Status | uint16 | from Galil (dr) |
 | 43 | 43 | 47 | 4 | Gimbal Pan Rel Angle | float | deg from home |
 | 47 | 47 | 51 | 4 | Gimbal Tilt Rel Angle | float | deg from home |
 | 51 | 51 | 55 | 4 | Gimbal Az NED Angle | float | AZ NED deg |
 | 55 | 55 | 59 | 4 | Gimbal EL NED Angle | float | EL NED deg |
-| 59 | 59 | 60 | 1 | TRC STATUS BITS | uint8 | 0:isReady; 1:isConnected; 2:isStarted; 3–7:RES |
-| **60** | **60** | **124** | **64** | **TRC REGISTER** | **TRC_REG** | **64-byte block (opaque — see full ICD)** |
+| 59 | 59 | 60 | 1 | TRC STATUS BITS | uint8 | b0:isReady; b1:isConnected; b2:isStarted; b3–7:RES |
+| **60** | **60** | **124** | **64** | **TRC REGISTER** | **TRC_REG** | **64-byte block (opaque — see INT_ENG TRC REG1)** |
 | 124 | 124 | 128 | 4 | Gimbal Base Pitch | float | from inclinometer ° |
 | 128 | 128 | 132 | 4 | Gimbal Base Roll | float | from inclinometer ° |
 | 132 | 132 | 133 | 1 | Vicor Temp | int8 | °C |
@@ -505,12 +384,12 @@ Embedded sub-registers (opaque to INT_OPS clients — field detail in full ICD):
 | 155 | 155 | 159 | 4 | MWIR FOV | float | degrees |
 | 159 | 159 | 160 | 1 | VIS FOV Selection RB | uint8 | current FOV readback |
 | 160 | 160 | 164 | 4 | VIS FOV | float | degrees |
-| 164 | 164 | 165 | 1 | BDC VOTE BITS1 | uint8 | 0:isHorizVoteOverride; 1:isKIZVoteOverride; 2:isLCHVoteOverride; 3:isBDAVoteOverride; 4:isBelowHoriz; 5:isInKIZ; 6:isInLCH; 7:RES |
-| 165 | 165 | 166 | 1 | BDC VOTE BITS2 | uint8 | 0:BelowHorizVote; 1:InKIZVote; 2:InLCHVote; 3:BDCVote; 4:RES; 5:isHorizonLoaded; 6:RES; 7:isFSMLimited |
-| 166 | 166 | 167 | 1 | MCC VOTE BITS RB | uint8 | 0:isLaserTotalHW; 1:isNotAbort; 2:isArmed; 3:isBDA; 4:isEMON; 5:isLaserFireRequested; 6:isLaserTotal; 7:isCombat |
-| 167 | 167 | 168 | 1 | BDC VOTE BITS KIZ | uint8 | 0:isLoaded; 1:isEnabled; 2:isTimeValid; 3:isOperatorValid; 4:isPositionValid; 5:isForExec; 6:isInKIZ; 7:InKIZVote |
-| 168 | 168 | 169 | 1 | BDC VOTE BITS LCH | uint8 | 0:isLoaded; 1:isEnabled; 2:isTimeValid; 3:isOperatorValid; 4:isPositionValid; 5:isForExec; 6:isInLCH; 7:InLCHVote |
-| **169** | **169** | **233** | **64** | **FMC REGISTER** | **FMC_REG** | **64-byte block (opaque — see full ICD)** |
+| 164 | 164 | 165 | 1 | **VOTE_BITS_BDC2** | uint8 | BDC raw/override detail. b0:HORIZ_VOTE_OVERRIDE; b1:KIZ_VOTE_OVERRIDE; b2:LCH_VOTE_OVERRIDE; b3:BDC_VOTE_OVERRIDE; b4:IS_BELOW_HORIZ; b5:IS_IN_KIZ; b6:IS_IN_LCH; b7:RES. ⚠ **Renamed v4.0.0** (was BDC VOTE BITS1). |
+| 165 | 165 | 166 | 1 | **VOTE_BITS_BDC** | uint8 | BDC computed vote summary. b0:BELOW_HORIZ_VOTE; b1:IN_KIZ_VOTE; b2:IN_LCH_VOTE; b3:BDC_TOTAL_VOTE; b4:RES; b5:HORIZ_LOADED; b6:RES; b7:FSM_NOT_LIMITED(SET=clear). ⚠ **Renamed v4.0.0** (was BDC VOTE BITS2). b7 name corrected — was `isFSMLimited` (inverted sense). |
+| 166 | 166 | 167 | 1 | **VOTE_BITS_MCC_RB** | uint8 | MCC gate-chain readback. Same bit layout as VOTE_BITS_MCC [11]. b0:NOT_ABORT(INVERTED); b1:ARMED; b2:BDC_VOTE; b3:LASER_TOTAL_HW; b4:SW_VOTE; b5:TRIGGER; b6:FIRE_STATE; b7:EMON. ⚠ **Renamed v4.0.0** (was MCC VOTE BITS RB). |
+| 167 | 167 | 168 | 1 | VOTE_BITS_KIZ | uint8 | b0:isLoaded; b1:isEnabled; b2:isTimeValid; b3:isOperatorValid; b4:isPositionValid; b5:isForExec; b6:isInKIZ; b7:InKIZVote |
+| 168 | 168 | 169 | 1 | VOTE_BITS_LCH | uint8 | b0:isLoaded; b1:isEnabled; b2:isTimeValid; b3:isOperatorValid; b4:isPositionValid; b5:isForExec; b6:isInLCH; b7:InLCHVote |
+| **169** | **169** | **233** | **64** | **FMC REGISTER** | **FMC_REG** | **64-byte block (opaque — see INT_ENG FMC REG1)** |
 | 233 | 233 | 235 | 2 | FSM_X | int16 | commanded FSM X position |
 | 235 | 235 | 237 | 2 | FSM_Y | int16 | commanded FSM Y position |
 | 237 | 237 | 241 | 4 | Gimbal Home X | int32 | home encoder X (0 az) |
@@ -528,22 +407,137 @@ Embedded sub-registers (opaque to INT_OPS clients — field detail in full ICD):
 | 341 | 341 | 349 | 8 | iFOV_FSM_Y_DEG_COUNT | double | |
 | 349 | 349 | 355 | 6 | FSM home + signs | mixed | FSM_X0, FSM_Y0, FSM_X_SIGN, FSM_Y_SIGN |
 | 355 | 355 | 363 | 8 | Stage position/home | uint32 | STAGE_POSITION + STAGE_HOME |
-| 363 | 363 | 379 | 16 | FSM NED AZ/EL (RB + cmd) | float[4] | from readback (noisy) + from command |
+| 363 | 363 | 379 | 16 | FSM NED AZ/EL (RB + cmd) | float[4] | readback + commanded |
 | 379 | 379 | 383 | 4 | HORIZON_BUFFER | float | |
 | 383 | 383 | 387 | 4 | BDC VERSION WORD | uint32 | VERSION_PACK(major, minor, patch) |
 | 387 | 387 | 391 | 4 | MCU Temp | float | °C |
-| 391 | 391 | 392 | 1 | TIME_BITS | uint8 | bit0:isPTP_Enabled; bit1:ptp.isSynched; bit2:usingPTP; bit3:ntp.isSynched; bit4:ntpUsingFallback; bit5:ntpHasFallback; bit6–7:RES |
-| 392 | 392 | 393 | 1 | HW_REV | uint8 | `0x01`=V1; `0x02`=V2 (Controller 1.0 Rev A). Read before interpreting HEALTH_BITS [10] bit 1. — v3.5.1 |
-| 393 | 393 | 394 | 1 | TEMP_RELAY | int8 | Relay area temp °C. V2 live; V1 always `0x00`. — v3.5.1 |
-| 394 | 394 | 395 | 1 | TEMP_BAT | int8 | Battery-in area temp °C. V2 live; V1 always `0x00`. — v3.5.1 |
-| 395 | 395 | 396 | 1 | TEMP_USB | int8 | USB 5V area temp °C. V2 live; V1 always `0x00`. — v3.5.1 |
-| 396 | 396 | 512 | 116 | RESERVED | — | 0x00 |
+| 391 | 391 | 392 | 1 | TIME_BITS | uint8 | b0:isPTP_Enabled; b1:ptp.isSynched; b2:usingPTP; b3:ntp.isSynched; b4:ntpUsingFallback; b5:ntpHasFallback; b6–7:RES |
+| 392 | 392 | 393 | 1 | HW_REV | uint8 | 0x01=V1; 0x02=V2. Read before interpreting HEALTH_BITS [10] bit 1. |
+| 393 | 393 | 394 | 1 | TEMP_RELAY | int8 | Relay area temp °C. V2 live; V1 always 0x00. |
+| 394 | 394 | 395 | 1 | TEMP_BAT | int8 | Battery-in area temp °C. V2 live; V1 always 0x00. |
+| 395 | 395 | 396 | 1 | TEMP_USB | int8 | USB 5V area temp °C. V2 live; V1 always 0x00. |
+| 396 | 396 | 397 | 1 | HB_NTP | uint8 | x0.1s units (C# /10.0 → seconds) |
+| 397 | 397 | 398 | 1 | HB_FMC_ms | uint8 | raw ms, saturates at 255 |
+| 398 | 398 | 399 | 1 | HB_TRC_ms | uint8 | raw ms, saturates at 255 |
+| 399 | 399 | 400 | 1 | HB_MCC_ms | uint8 | raw ms since last 0xE0 RX, saturates at 255 |
+| 400 | 400 | 401 | 1 | HB_GIM_ms | uint8 | raw ms, saturates at 255 |
+| 401 | 401 | 402 | 1 | HB_FUJI_ms | uint8 | raw ms, saturates at 255 |
+| 402 | 402 | 403 | 1 | HB_MWIR_ms | uint8 | raw ms, saturates at 255 |
+| 403 | 403 | 404 | 1 | HB_INCL_ms | uint8 | raw ms, saturates at 255 ⚠ INCL-HB-SCALE: saturates at 255ms for 1s poll |
+| 404 | 404 | 405 | 1 | **VOTE_BITS_MCC2_RB** | uint8 | MCC detail byte readback. Same layout as VOTE_BITS_MCC2 [MCC 256]. **New v4.0.0.** |
+| 405 | 405 | 406 | 1 | **BDC DEVICE_WARN_BITS** | uint8 | Parallel to ENABLED [8] and READY [9]. Same bit layout. **New v4.0.0.** |
+| 406 | 406 | 407 | 1 | **BDC_GIM_STATUS_BITS** | uint8 | b0:isConnected; b1:isReady; b2:isStarted; b3:isAtSoftLimit; b4:isMoving(display); b5:isFault; b6–7:RES. **New v4.0.0.** |
+| 407 | 407 | 408 | 1 | **BDC_VIS_STATUS_BITS** | uint8 | b0:isFuji_Connected; b1:isFuji_HB_OK; b2:isFOV_Valid; b3:isAlvium_Powered; b4:isAlvium_Connected; b5:isCapturing; b6:isAlvium_TempOK; b7:RES. **New v4.0.0.** |
+| 408 | 408 | 409 | 1 | **BDC_MWIR_STATUS_BITS** | uint8 | b0:isMWIR_Connected; b1:isHB_OK; b2:isWarmupComplete; b3:isFOV_Valid; b4:isCapturing; b5:isFPA_TempOK; b6–7:RES. **New v4.0.0.** |
+| 409 | 409 | 410 | 1 | **BDC_FSM_STATUS_BITS** | uint8 | b0:isFMC_Connected; b1:isHB_OK; b2:isFSM_Powered; b3:isNotLimited; b4:isAtHome(display); b5–7:RES. **New v4.0.0.** |
+| 410 | 410 | 411 | 1 | **BDC_JET_STATUS_BITS** | uint8 | b0:isConnected; b1:isReady; b2:isStarted; b3:isStreaming; b4:isCPU_OK(≤90%); b5:isGPU_OK(≤90%); b6:isCPU_TempOK(≤85°C); b7:isGPU_TempOK(≤85°C). **New v4.0.0.** |
+| 411 | 411 | 412 | 1 | **BDC_INCL_STATUS_BITS** | uint8 | b0:isConnected; b1:isHB_OK; b2:isDataValid; b3:isLevel; b4–7:RES. **New v4.0.0.** |
+| 412 | 412 | 512 | 100 | RESERVED | — | 0x00 |
 
-**Defined: 396 bytes. Reserved: 116 bytes. Fixed block: 512 bytes.**
+**Defined: 412 bytes. Reserved: 100 bytes. Fixed block: 512 bytes.**
 
-> **Time source decode (HMI — session 32):** Read `TIME_BITS` at byte 391.
-> `TIME_BITS[2]=1` → PTP active (GNSS time). `TIME_BITS[2]=0` + `TIME_BITS[3]=1` → NTP serving.
-> `TIME_BITS[4]=1` → NTP on fallback server. All zeros → no time source.
+> **Time source decode:** Read `TIME_BITS` [391]. `b2=1` → PTP active. `b2=0` + `b3=1` → NTP serving. `b4=1` → NTP on fallback. All zeros → no time source.
+
+> **Device health decode:** Same pattern as MCC. Read ENABLED/READY/WARN in parallel — one register byte per severity level. Drill into STATUS_BITS only when a flag is set.
+
+> **Fire control decode (for a clean fire):** `VOTE_BITS_BDC b3 (BDC_TOTAL_VOTE) = 1` AND `VOTE_BITS_MCC_RB b6 (FIRE_STATE) = 1` AND `VOTE_BITS_MCC_RB b7 (EMON) = 1`.
+
+---
+
+## Device Health
+
+### Architecture
+
+Three register bytes per controller provide a layered health view:
+
+| Register | Meaning | Who sets |
+|----------|---------|----------|
+| `DEVICE_ENABLED_BITS` | Device is in service | Firmware config / operator |
+| `DEVICE_READY_BITS` | Device is fully operational | Derived from XXX_STATUS_BITS |
+| `DEVICE_WARN_BITS` | Device degraded but operational | Derived from XXX_STATUS_BITS |
+
+**Source of truth:** `XXX_STATUS_BITS` per device. READY and WARN are computed summaries.
+
+| Severity | `DEVICE_READY_BITS` | `DEVICE_WARN_BITS` | Definition |
+|----------|--------------------|--------------------|------------|
+| **READY** | 1 | 0 | All required conditions nominal. |
+| **READY+WARN** | 1 | 1 | Primary function available but degraded. |
+| **ERROR** | 0 | 0 | Cannot perform primary function. |
+| *(invalid)* | 0 | 1 | Should never occur. |
+
+**Key rules:**
+- READY+WARN satisfies all advancement prerequisites. Only ERROR blocks advancement.
+- `DEVICE_WARN_BITS` bit N is never set if `DEVICE_ENABLED_BITS` bit N is 0. Disabled devices have no warn state.
+
+---
+
+### State / Mode Rules
+
+#### Mid-operation regression
+
+| Severity | MCC device ERROR | BDC device ERROR | Recovery |
+|----------|-----------------|-----------------|---------|
+| **ERROR — critical** | `STATE→ISR`, `MODE→OFF` | `STATE→STNDBY`, `MODE→OFF` | Condition clears → operator re-advances |
+| **ERROR — non-critical** | No state/mode change | No state/mode change | Informational only |
+| **WARN — any** | No change | No change | `DEVICE_WARN_BITS` set; clears naturally |
+
+> MCC ERROR → ISR: laser safed; observation platform stays alive.
+> BDC ERROR → STNDBY: beam director compromised; safe idle with no engagement posture.
+> Non-critical devices (GNSS, INCL, NTP, PTP, CRG): ERROR is informational only. Fire chain drops naturally when ISR or STNDBY is entered.
+
+#### Advancement prerequisites
+
+`SET_SYSTEM_STATE` and `SET_GIMBAL_MODE` return `STATUS_PREREQ_FAIL (0x07)` if prerequisites are not met.
+THEIA should surface the blocking STATUS_BITS byte — operator resolves without source access.
+
+| Transition | All must be READY or READY+WARN |
+|-----------|--------------------------------|
+| `OFF → STNDBY` | MCC CommHealth · BDC CommHealth |
+| `STNDBY → ISR` | BDC_GIM · BDC_VIS · BDC_JET |
+| `ISR → COMBAT` | MCC_HEL · MCC_BAT `isNotLowVoltage` · BDC_FSM · MCC_TMC (cooling-required HW only — V2/V3·6kW) |
+
+| Mode | Minimum required |
+|------|-----------------|
+| `→ POS / RATE` | BDC_GIM · BDC_JET · (BDC_VIS OR BDC_MWIR) |
+| `→ CUE` | BDC_GIM · BDC_JET · (BDC_VIS OR BDC_MWIR) |
+| `→ ATRACK (VIS)` | BDC_GIM · BDC_JET · BDC_VIS |
+| `→ ATRACK (MWIR)` | BDC_GIM · BDC_JET · BDC_MWIR |
+| `ATRACK → FTRACK` | BDC_GIM · BDC_JET · BDC_FSM · (BDC_VIS OR BDC_MWIR) |
+
+#### Immediate MODE→OFF triggers
+
+```
+BDC_GIM ERROR                                → MODE→OFF (all modes)
+BDC_JET ERROR                                → MODE→OFF (all modes)
+BDC_VIS ERROR AND BDC_MWIR ERROR             → MODE→OFF (both cameras lost)
+BDC_VIS ERROR (while ATRACK on VIS)          → MODE→OFF
+BDC_MWIR ERROR (while ATRACK on MWIR)        → MODE→OFF
+```
+
+---
+
+### Device Criticality Matrix
+
+| Device | Mid-op STATE change | Mid-op MODE change | Blocks STATE > | Blocks MODE > |
+|--------|--------------------|--------------------|----------------|---------------|
+| **MCC_TMC** | COMBAT→ISR (cooling HW only) | →OFF | ISR→COMBAT (cooling HW only) | No |
+| **MCC_HEL** | COMBAT→ISR | →OFF | ISR→COMBAT | No |
+| **MCC_BAT** `!isNotLowVoltage` | COMBAT→ISR | →OFF | ISR→COMBAT | No |
+| **MCC_CRG** | No | No | No | No |
+| **MCC_GNSS** | No | No | No | No |
+| **MCC_BDC** | COMBAT→ISR | →OFF | ISR→COMBAT | No |
+| **BDC_GIM** | ISR/COMBAT→STNDBY | →OFF (all modes) | STNDBY→ISR | All modes |
+| **BDC_VIS** | ISR/COMBAT→STNDBY | →OFF (both lost or ATRACK VIS) | STNDBY→ISR | ATRACK(VIS) |
+| **BDC_MWIR** | No | →OFF (both lost or ATRACK MWIR) | No | ATRACK(MWIR) |
+| **BDC_FSM** | COMBAT→ISR | FTRACK/COMBAT→ATRACK | ISR→COMBAT | FTRACK |
+| **BDC_JET** | ISR/COMBAT→STNDBY | →OFF (all modes) | STNDBY→ISR | All modes |
+| **BDC_INCL** | No | No | No | No |
+| **NTP / PTP** | No | No | No | No |
+
+> ⚠️ **FSM:** Beam steering. Loss during COMBAT → STATE→ISR (laser safed). MODE regresses to ATRACK not OFF — coarse tracker remains viable.
+> ⚠️ **MCC_BDC:** Vote chain link only. BDC observable via A3. Does NOT block STNDBY→ISR.
+> ⚠️ **TMC:** COMBAT prerequisite on cooling-required HW only (V2/V3·6kW). Firmware determines from `LaserModel`.
+> ⚠️ **GNSS/INCL/NTP/PTP:** Informational only. Position/attitude latched on last valid data.
 
 ---
 
@@ -575,32 +569,62 @@ Embedded sub-registers (opaque to INT_OPS clients — field detail in full ICD):
 | 0 | VIS (Alvium) |
 | 1 | MWIR |
 
+### MCC_VOTES (icd.cs / icd.hpp)
+| Bit | Mask | Name | Notes |
+|-----|------|------|-------|
+| b0 | 0x01 | NOT_ABORT | INVERTED — CLEAR = abort ACTIVE |
+| b1 | 0x02 | ARMED | D3 HW readback |
+| b2 | 0x04 | BDC_VOTE | D4 hardwire from BDC |
+| b3 | 0x08 | LASER_TOTAL_HW | D7 AND gate: NotAbort && Armed && BDCVote |
+| b4 | 0x10 | SW_VOTE | Combat && BatNotLow |
+| b5 | 0x20 | TRIGGER | Fire requested heartbeat |
+| b6 | 0x40 | FIRE_STATE | D45 final gate output |
+| b7 | 0x80 | EMON | IPG energy confirmed — display only, excluded from composites |
+| — | 0x03 | ARMED_NOMINAL | NOT_ABORT \| ARMED |
+| — | 0x1F | READY_TO_FIRE | ARMED_NOMINAL \| BDC_VOTE \| LASER_TOTAL_HW \| SW_VOTE |
+| — | 0x7F | FULL_FIRE_CHAIN | READY_TO_FIRE \| TRIGGER \| FIRE_STATE |
+
+### MCC_VOTES2 (icd.cs / icd.hpp)
+| Bit | Mask | Name | Notes |
+|-----|------|------|-------|
+| b0 | 0x01 | BAT_NOT_LOW | Input to SW_VOTE |
+| b1 | 0x02 | TRAINING_MODE | Power clamped to 10%; status, not a gate |
+| b2 | 0x04 | COMBAT | System_State == COMBAT; input to SW_VOTE |
+| b3 | 0x08 | EMON_MISSING | FireState asserted, no EMON within timeout |
+| b4 | 0x10 | EMON_UNEXPECTED | EMON present without fire chain |
+| b5 | 0x20 | FIRE_INTERLOCKED | Trigger held but fire chain incomplete |
+
+### BDC_VOTES (icd.cs / icd.hpp)
+| Bit | Mask | Name |
+|-----|------|------|
+| b0 | 0x01 | BELOW_HORIZ_VOTE |
+| b1 | 0x02 | IN_KIZ_VOTE |
+| b2 | 0x04 | IN_LCH_VOTE |
+| b3 | 0x08 | BDC_TOTAL_VOTE |
+| b5 | 0x20 | HORIZ_LOADED |
+| b7 | 0x80 | FSM_NOT_LIMITED |
+
+### BDC_VOTES2 (icd.cs / icd.hpp)
+| Bit | Mask | Name |
+|-----|------|------|
+| b0 | 0x01 | HORIZ_VOTE_OVERRIDE |
+| b1 | 0x02 | KIZ_VOTE_OVERRIDE |
+| b2 | 0x04 | LCH_VOTE_OVERRIDE |
+| b3 | 0x08 | BDC_VOTE_OVERRIDE |
+| b4 | 0x10 | IS_BELOW_HORIZ |
+| b5 | 0x20 | IS_IN_KIZ |
+| b6 | 0x40 | IS_IN_LCH |
+
 ### VERSION_PACK Encoding
 ```
 uint32 bits[31:24] = major
 uint32 bits[23:12] = minor
 uint32 bits[11:0]  = patch
 ```
-Current firmware versions: MCC = `VERSION_PACK(3,3,0)` = `0x03003000`. BDC = `VERSION_PACK(3,3,0)` = `0x03003000`. TMC = `VERSION_PACK(3,3,0)` = `0x03003000`. FMC = `VERSION_PACK(3,2,0)` = `0x03002000`. TRC = `VERSION_PACK(3,0,1)` = `0x03000001`.
-
----
-
-## Action Items
-
-| ID | Item | Owner | Priority |
-|----|------|-------|----------|
-| ~~NEW-37~~ | `MSG_MCC.cs` PTP bits + ENG GUI display | ~~C# / HMI dev~~ | ✅ Closed session 28/29 |
-| ~~FW-1~~ | `PTPDEBUG <0-3>` serial command | ✅ Closed session 30 |
-| ~~NEW-38a~~ | TMC PTP integration | ✅ Closed session 30/31 |
-| NEW-38b | BDC PTP integration | ⏳ Next |
-| NEW-38c | FMC PTP integration | ⏳ Pending |
-| NEW-38d | TRC PTP integration | ⏳ Pending |
 
 ---
 
 ## Framing Reference
-
-> Full protocol specification: **ARCHITECTURE.md §6**
 
 ### A3 Frame Structure (521 bytes total)
 
@@ -614,9 +638,7 @@ Bytes 7–518: PAYLOAD   (512 bytes)
 Bytes 519–520: CRC16   uint16 LE (CRC-16/CCITT, poly=0x1021, init=0xFFFF, over bytes 0–518)
 ```
 
-THEIA strips the 9-byte frame header and 2-byte CRC before passing the 512-byte payload to `MSG_MCC.ParseA3()` or `MSG_BDC.ParseA3()`.
-
-### STATUS Byte Codes (byte 0 of response payload for commands other than 0xA1)
+### STATUS Byte Codes
 
 | Value | Name | Meaning |
 |-------|------|---------|
@@ -626,232 +648,121 @@ THEIA strips the 9-byte frame header and 2-byte CRC before passing the 512-byte 
 | `0x03` | `STATUS_BAD_CRC` | CRC check failed |
 | `0x04` | `STATUS_BAD_LEN` | `PAYLOAD_LEN` does not match expected |
 | `0x05` | `STATUS_SEQ_REPLAY` | SEQ_NUM within replay-rejection window |
-| `0x06` | `STATUS_NO_DATA` | Register not yet populated (device not ready) |
+| `0x06` | `STATUS_NO_DATA` | Register not yet populated |
+| `0x07` | `STATUS_PREREQ_FAIL` | State/mode transition rejected — device health prerequisites not met. **New v4.0.0.** |
 
-### 0xA4 — EXT_FRAME_PING Response Payload
+### 0xA4 — FRAME_KEEPALIVE Response Payload
 
 | Bytes | Field | Value |
 |-------|-------|-------|
 | 0 | `protocol_version` | `0x01` |
 | 1–2 | `echo_seq` | uint16 — echoes request SEQ_NUM |
-| 3–6 | `uptime_ms` | uint32 — server uptime in milliseconds |
+| 3–6 | `uptime_ms` | uint32 — server uptime ms |
 | 7–511 | reserved | `0x00` |
 
 ---
 
 ## Network Reference
 
-| Node | IP | A3 Port | UDP:10009 |
-|------|----|---------|-----------|
-| MCC | 192.168.1.10 | 10050 | — |
-| BDC | 192.168.1.20 | 10050 | — |
-| THEIA | 192.168.1.208 | — | Receives CUE inbound; sends status response to sender |
+| Node | IP | A3 Port |
+|------|----|---------|
+| MCC | 192.168.1.10 | 10050 |
+| BDC | 192.168.1.20 | 10050 |
+| THEIA | 192.168.1.208 | — |
 
 External integration clients: 192.168.1.200–.254 by convention.
-
-> Sub-controllers (TMC .12, TRC .22, FMC .23) are not addressable via A3.
-> For CUE inbound packet format and integration requirements, see `CROSSBOW_ICD_EXT_OPS`.
+Sub-controllers (TMC .12, TRC .22, FMC .23) are not addressable via A3.
 
 ---
 
 ## Video Stream
 
-TRC (Jetson Orin NX, 192.168.1.22) encodes and streams a single H.264 RTP video stream to the operator PC (THEIA, 192.168.1.208). The stream carries the compositor output — VIS standalone, MWIR standalone, or PIP composite — as selected by `0xD0 SET_ACTIVE_CAMERA` and `0xDE SET_VIEW_MODE`. There is **one stream** regardless of view mode.
+TRC (Jetson Orin NX, 192.168.1.22) streams H.264 RTP video to THEIA (192.168.1.208).
 
-### Stream Parameters
-
-| Parameter | Value | Notes |
-|-----------|-------|-------|
-| Transport | UDP RTP unicast | Production configuration |
-| Destination (unicast) | 192.168.1.208 : 5000 | THEIA operator PC |
-| Port | **5000** (UDP, fixed) | |
-| Protocol | RTP — payload type 96, encoding H264 | |
-| Codec | H.264 hardware encoded | Jetson `nvv4l2h264enc` |
-| Resolution | **1280 × 720** (fixed) | Must be configured explicitly — auto-detect produces invalid frames |
-| Framerate | **60 fps** (fixed) | Framerate and multicast are compile/launch time config — not runtime-controllable via ICD |
-| Bitrate | **10 Mbps** (fixed) | |
-| E2E latency (HW decode) | 30–80 ms | NVIDIA `nvh264dec` |
-| E2E latency (SW decode) | 50–100 ms | Software `avdec_h264` |
-
-### Receive Requirements
-
-| Requirement | Value | Notes |
-|-------------|-------|-------|
-| Decoder (recommended) | `nvh264dec` | NVIDIA hardware H.264 decode — GTX 900 series or newer, driver ≥452.39 |
-| Decoder (fallback) | `avdec_h264` | Software decode. CPU load ~25–35% at 60 fps, ~10–15% at 30 fps |
-| UDP receive buffer | 2 MB minimum | Default OS buffer insufficient at 60 fps |
-| Jitter buffer | 50 ms, `drop-on-latency=true` | Absorbs Jetson encoder timing jitter |
-| Resolution | Explicit 1280×720 | Auto-detect produces invalid frames |
-| PixelShift correction | −420 px horizontal | Fixed alignment artefact of Jetson encoder — must be applied in receiver |
-
----
-
-
-
-The bidirectional THEIA↔integrator interface on UDP:10009 uses a lightweight framing protocol
-consistent with the A3 internal port. All three message types (inbound CUE, status response,
-POS/ATT report) use this frame structure.
-
-### Frame Structure
-
-```
-Byte  0    : Magic HI  = 0xCB
-Byte  1    : Magic LO  = 0x48
-Byte  2    : CMD_BYTE
-Bytes 3–4  : SEQ_NUM   uint16 LE
-Bytes 5–6  : PAYLOAD_LEN uint16 LE (bytes of payload only, not including header or CRC)
-Bytes 7–(7+PAYLOAD_LEN-1) : PAYLOAD
-Bytes (7+PAYLOAD_LEN)–(8+PAYLOAD_LEN) : CRC16 uint16 LE
-```
-
-CRC covers bytes 0 through end of PAYLOAD (i.e. everything except the CRC itself).
-CRC algorithm: CRC-16/CCITT, poly=0x1021, init=0xFFFF. See ARCHITECTURE.md §6 for
-cross-platform verification note.
-
-### CMD_BYTE Assignments
-
-| CMD | Direction | Description | Payload | Total Frame |
-|-----|-----------|-------------|---------|-------------|
-| `0xAA` | Integrator → THEIA | CUE packet (inbound track data) | 62 bytes | 71 bytes |
-| `0xAF` | THEIA → Integrator | Status response (system + fire control state) | 30 bytes | 39 bytes |
-| `0xAB` | THEIA → Integrator | POS/ATT report (platform position/attitude) | 32 bytes | 41 bytes |
-
-THEIA sends the status response (`0xAF`) to the source IP of the most recently received CUE
-packet. THEIA sends the POS/ATT report (`0xAB`) on request via Track CMD = `3` (REPORT POS/ATT)
-in the inbound CUE packet, or continuously at 10 Hz when Track CMD = `254` (REPORT CONTINUOUS ON).
+| Parameter | Value |
+|-----------|-------|
+| Transport | UDP RTP unicast |
+| Port | 5000 (UDP, fixed) |
+| Codec | H.264 hardware encoded |
+| Resolution | 1280 × 720 (fixed — must be passed explicitly) |
+| Framerate | 60 fps (fixed) |
+| Bitrate | 10 Mbps |
+| E2E latency (HW decode) | 30–80 ms |
+| E2E latency (SW decode) | 50–100 ms |
+| UDP receive buffer | 2 MB minimum |
+| Jitter buffer | 50 ms, drop-on-latency=true |
+| PixelShift correction | **−420 px horizontal** (fixed Jetson encoder artefact) |
 
 ---
 
 ## THEIA Status Response — CMD `0xAF`
 
-THEIA transmits this message to the CUE source in response to each received CUE packet (or
-continuously at 10 Hz if requested). It provides full engagement state including fire control
-votes, gimbal LOS, and laser LOS.
-
-**Payload: 30 bytes. Total framed: 39 bytes.**
+Sent by THEIA to CUE source continuously at 10 Hz when requested. Payload: 30 bytes.
 
 | Payload Offset | Size | Type | Field | Notes |
 |----------------|------|------|-------|-------|
-| 0 | 1 | byte | System State | SYSTEM_STATES enum — see below |
-| 1 | 1 | byte | System Mode | BDC_MODES enum — see below |
+| 0 | 1 | byte | System State | SYSTEM_STATES enum |
+| 1 | 1 | byte | System Mode | BDC_MODES enum |
 | 2 | 1 | byte | Active CAM ID | VIS=0, MWIR=1 |
-| 3 | 1 | byte | MCC VOTE BITS | Fire control vote bits — see bit table |
-| 4 | 1 | byte | BDC VOTE BITS1 | Raw geometry bits — see bit table |
-| 5 | 1 | byte | BDC VOTE BITS2 | Computed geometry votes with override logic — see bit table |
-| 6 | 4 | float | Gimbal Az NED | Gimbal LOS azimuth, degrees NED — incorporates platform attitude |
-| 10 | 4 | float | Gimbal EL NED | Gimbal LOS elevation, degrees NED — incorporates platform attitude |
-| 14 | 4 | float | Laser Az NED | Laser LOS azimuth, degrees NED — gimbal LOS + FSM offset |
-| 18 | 4 | float | Laser EL NED | Laser LOS elevation, degrees NED — gimbal LOS + FSM offset |
+| 3 | 1 | byte | VOTE_BITS_MCC | Gate-chain summary — see MCC_VOTES enum |
+| 4 | 1 | byte | VOTE_BITS_BDC2 | BDC raw/override detail — see BDC_VOTES2 enum |
+| 5 | 1 | byte | VOTE_BITS_BDC | BDC computed votes — see BDC_VOTES enum |
+| 6 | 4 | float | Gimbal Az NED | degrees |
+| 10 | 4 | float | Gimbal EL NED | degrees |
+| 14 | 4 | float | Laser Az NED | degrees |
+| 18 | 4 | float | Laser EL NED | degrees |
 | 22 | 4 | uint32 | RESERVED | 0x00 |
 | 26 | 4 | uint32 | RESERVED | 0x00 |
 
-### SYSTEM_STATES Enum
-| Value | Name |
-|-------|------|
-| 0x00 | OFF |
-| 0x01 | STNDBY |
-| 0x02 | ISR |
-| 0x03 | COMBAT |
-| 0x04 | MAINT |
-| 0x05 | FAULT |
-
-### BDC_MODES Enum
-| Value | Name |
-|-------|------|
-| 0x00 | OFF |
-| 0x01 | POS |
-| 0x02 | RATE |
-| 0x03 | CUE |
-| 0x04 | ATRACK |
-| 0x05 | FTRACK |
-
-### MCC VOTE BITS (byte [3])
-| Bit | Name | Notes |
-|-----|------|-------|
-| 0 | isLaserTotalHW_Vote_rb | |
-| 1 | isNotAbort_Vote_rb | **Inverted** — 0 = abort ACTIVE |
-| 2 | isArmed_Vote_rb | |
-| 3 | isBDA_Vote_rb | |
-| 4 | isEMON_rb | |
-| 5 | isLaserFireRequested_Vote | |
-| 6 | isLaserTotal_Vote_rb | All MCC votes pass |
-| 7 | isCombat_Vote_rb | |
-
-### BDC VOTE BITS1 (byte [4]) — raw geometry
-| Bit | Name |
-|-----|------|
-| 0 | isHorizVoteOverride |
-| 1 | isKIZVoteOverride |
-| 2 | isLCHVoteOverride |
-| 3 | isBDAVoteOverride |
-| 4 | isBelowHoriz |
-| 5 | isInKIZ |
-| 6 | isInLCH |
-| 7 | RES |
-
-### BDC VOTE BITS2 (byte [5]) — computed votes with override logic
-| Bit | Name | Logic |
-|-----|------|-------|
-| 0 | BelowHorizVote | isHorizVoteOverride ? true : isBelowHoriz |
-| 1 | InKIZVote | isKIZVoteOverride ? true : isInKIZ |
-| 2 | InLCHVote | isLCHVoteOverride ? true : isInLCH |
-| 3 | BDCVote | isBDAVoteOverride ? true : (BelowHorizVote & InKIZVote & InLCHVote) |
-| 4 | RES | |
-| 5 | isHorizonLoaded | |
-| 6 | RES | |
-| 7 | `isFSMLimited` | |
-
-> For a clean fire: `BDCVote` (BITS2 bit 3) = 1 and `isLaserTotal_Vote_rb` (MCC VOTE BITS bit 6) = 1.
-
-### C Struct
-
-```c
-#pragma pack(push, 1)
-typedef struct {
-    uint8_t  system_state;     // payload [0]: SYSTEM_STATES
-    uint8_t  system_mode;      // payload [1]: BDC_MODES
-    uint8_t  active_cam_id;    // payload [2]: 0=VIS, 1=MWIR
-    uint8_t  mcc_vote_bits;    // payload [3]: fire control votes
-    uint8_t  bdc_vote_bits1;   // payload [4]: raw geometry
-    uint8_t  bdc_vote_bits2;   // payload [5]: computed votes
-    float    gimbal_az_ned;    // payload [6–9]: degrees
-    float    gimbal_el_ned;    // payload [10–13]: degrees
-    float    laser_az_ned;     // payload [14–17]: degrees
-    float    laser_el_ned;     // payload [18–21]: degrees
-    uint32_t reserved[2];      // payload [22–29]
-} TheiaStatusPayload_t;        // 30 bytes
-#pragma pack(pop)
-```
+> For a clean fire: `VOTE_BITS_BDC b3 (BDC_TOTAL_VOTE) = 1` AND `VOTE_BITS_MCC b6 (FIRE_STATE) = 1` AND `VOTE_BITS_MCC b7 (EMON) = 1`.
 
 ---
 
 ## THEIA POS/ATT Report — CMD `0xAB`
 
-Sent by THEIA on request (Track CMD=3) or continuously at 10 Hz (Track CMD=254).
-Reports current platform geodetic position and attitude as known to THEIA.
-
-**Payload: 32 bytes. Total framed: 41 bytes.**
+Payload: 32 bytes.
 
 | Payload Offset | Size | Type | Field | Notes |
 |----------------|------|------|-------|-------|
 | 0 | 8 | double | Latitude | WGS-84 decimal degrees |
 | 8 | 8 | double | Longitude | WGS-84 decimal degrees |
-| 16 | 4 | float | Altitude HAE | Height Above Ellipsoid, metres |
-| 20 | 4 | float | Roll | Degrees NED |
-| 24 | 4 | float | Pitch | Degrees NED |
-| 28 | 4 | float | Yaw | Degrees NED |
+| 16 | 4 | float | Altitude HAE | metres |
+| 20 | 4 | float | Roll | degrees NED |
+| 24 | 4 | float | Pitch | degrees NED |
+| 28 | 4 | float | Yaw | degrees NED |
 
-### C Struct
+---
 
-```c
-#pragma pack(push, 1)
-typedef struct {
-    double   latitude;    // payload [0–7]: WGS-84 degrees
-    double   longitude;   // payload [8–15]: WGS-84 degrees
-    float    altitude;    // payload [16–19]: metres HAE
-    float    roll;        // payload [20–23]: degrees NED
-    float    pitch;       // payload [24–27]: degrees NED
-    float    yaw;         // payload [28–31]: degrees NED
-} TheiaPosAttPayload_t;   // 32 bytes
-#pragma pack(pop)
-```
+## Open Items / TBDs
+
+| # | Device | Item |
+|---|--------|------|
+| 1 | TMC | Cooling requirement by HW — V2/V3·6kW vs V1/V3·3kW firmware rule |
+| 2 | HEL | IPGMsg StatusWord temperature bit positions — 3K and 6K full bit map |
+| 3 | BAT | MSG_BATTERY StatusWord bit map — error/alarm/protection bit definitions |
+| 4 | BAT | RSOC warn threshold (suggest 20%) |
+| 5 | BAT | PackTemp operational bounds from BMS datasheet |
+| 6 | CRG | VIN threshold (V) |
+| 7 | GNSS | `Heading_STDEV` threshold |
+| 8 | GNSS | INS converged PosType enum values — NovAtel classification |
+| 9 | GNSS | TerraStar availability — not all units equipped |
+| 10 | MCC_BDC | `isVoteActive` tracking mechanism |
+| 11 | GIM | Galil StatusX/Y and StopCode bit map — `isFault` vs `isAtSoftLimit` |
+| 12 | MWIR | FPA operating temperature range from datasheet |
+| 13 | FSM | Home position tolerance (counts) |
+| 14 | VIS | Alvium max operating temperature — confirm from datasheet (suggest 60°C) |
+| 15 | INCL | Operational attitude bounds (degrees) for `isLevel` |
+| 16 | JET | Dual WARN/ERROR threshold tracking — confirm firmware approach for load/temp |
+
+---
+
+## Action Items
+
+| ID | Item | Status |
+|----|------|--------|
+| ~~NEW-37~~ | `MSG_MCC.cs` PTP bits + ENG GUI display | ✅ Closed |
+| ~~FC-CONSISTENCY-1~~ | EMON_MISSING / EMON_UNEXPECTED / FIRE_INTERLOCKED | ✅ Closed v4.0.0 — in VOTE_BITS_MCC2 |
+| NEW-38b | BDC PTP integration | ⏳ Pending |
+| NEW-38c | FMC PTP integration | ⏳ Pending |
+| NEW-38d | TRC PTP integration | ⏳ Pending |
+| TBD-1–16 | Open items listed above | ⏳ Pending |

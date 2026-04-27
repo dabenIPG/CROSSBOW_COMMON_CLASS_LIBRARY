@@ -21,7 +21,6 @@ namespace CROSSBOW
 {
     public class BDC
     {
-        public enum READY_STATUS { ALIVE, READY, WARN, ERROR, NA }
         public enum BDC_FOCUS_DIR { NEAR = -1, FAR = 1 }
 
         // ── Frame constants ───────────────────────────────────────────────────
@@ -149,6 +148,9 @@ namespace CROSSBOW
                 Send(BuildFrame((byte)ICD.FRAME_KEEPALIVE));
                 _lastKeepalive = DateTime.UtcNow;
                 Debug.WriteLine("BDC: A3 registration sent (0xA4)");
+                Thread.Sleep(20);  // brief pause to allow firmware to process registration before we start receiving frames
+                Send((byte)ICD.SET_UNSOLICITED, new byte[] { 0x01 });
+                Log?.Information("BDC: unsolicited subscribed (0xA0)");
             }
 
             Log?.Information("BDC UDP connected ({LocalIp}:{Port} → {RemoteIp})",
@@ -347,22 +349,7 @@ namespace CROSSBOW
 
         // ── Status aggregates ─────────────────────────────────────────────────
         public DateTime BDC_TIME_UTC { get { return LatestMSG.epochTime.ToUniversalTime(); } }
-        public bool BDC_STATUS  { get { return LatestMSG.RX_HB > 10 && LatestMSG.RX_HB < 60.0; } }
-        public bool GIM_STATUS  { get { return LatestMSG.gimbalMSG.isReady && LatestMSG.gimbalMSG.isStarted && LatestMSG.gimbalMSG.isConnected; } }
-        public bool FMC_STATUS  { get { return LatestMSG.fmcMSG.isReady && LatestMSG.fmcMSG.HB_ms > 10 && LatestMSG.fmcMSG.HB_ms < 30; } }
-        public bool VIS_STATUS  { get { return LatestMSG.trcMSG.Cameras[(int)BDC_CAM_IDS.VIS].isCapturing; } }
-        public bool MWIR_STATUS { get { return LatestMSG.trcMSG.Cameras[(int)BDC_CAM_IDS.MWIR].isCapturing; } }
-
-        public bool TRC_STATUS
-        {
-            get
-            {
-                return (LatestMSG.trcMSG.HB_TX_ms > 5.0 && LatestMSG.trcMSG.HB_TX_ms < 20.0)
-                    && (LatestMSG.trcMSG.deviceTemperature <= 70 && LatestMSG.trcMSG.jetsonTemp <= 85)
-                    && (LatestMSG.trcMSG.isReady && LatestMSG.trcMSG.isStarted && LatestMSG.trcMSG.isConnected);
-            }
-        }
-
+       
         // ── INT_OPS commands — available on both A2 and A3 ───────────────────
         // 0xA2 SET_NTP_CONFIG (INT only, A2 path only)
         // 0 bytes  = force resync on current server
@@ -558,7 +545,7 @@ namespace CROSSBOW
         public void SetOSD(bool enable)
         {
             byte current = LatestMSG.trcMSG.overlayMask;
-            byte updated = HudOverlay.Set(current, HUD_OVERLAY_FLAGS.OSD, enable);
+            byte updated = HudOverlay.Set(current, HUD_OVERLAY_BITS.OSD, enable);
             SetOverlayBitmask(updated);
         }
 

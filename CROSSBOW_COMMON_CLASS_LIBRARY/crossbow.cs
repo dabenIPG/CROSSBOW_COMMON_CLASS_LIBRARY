@@ -35,7 +35,6 @@ namespace CROSSBOW
 
         public RADAR aLORA { get; set; } = new RADAR();
 
-
         public int ADSB_IP_PORT { get; set; } = 30002;
 
         public string ECHO_IP_ADDRESS { get; set; } = "192.168.1.150";
@@ -258,42 +257,6 @@ namespace CROSSBOW
                 return aMCC.LatestMSG.CommHealth;
             }
         }
-        public READY_STATUS TMC_STATUS
-        {
-            get
-            {
-                if (System_State < SYSTEM_STATES.STNDBY)
-                {
-                    // ping only
-                    return (PING_STATUS_TMC ? READY_STATUS.ALIVE : READY_STATUS.ERROR);
-                }
-                else if (System_State >= SYSTEM_STATES.STNDBY)
-                {
-                    return PING_STATUS_TMC ? (aMCC.TMC_STATUS ? READY_STATUS.READY : READY_STATUS.WARN) : READY_STATUS.ERROR;
-                }
-                else
-                    return READY_STATUS.NA;
-            }
-        }
-        public READY_STATUS GNSS_STATUS
-        {
-            get
-            {
-                if (System_State < SYSTEM_STATES.STNDBY)
-                {
-                    // ping only
-                    return (PING_STATUS_GNSS ? READY_STATUS.ALIVE : READY_STATUS.ERROR);
-                }
-                else if (System_State >= SYSTEM_STATES.STNDBY)
-                {
-                    return PING_STATUS_GNSS ? (aMCC.GPS_STATUS ? READY_STATUS.READY : READY_STATUS.WARN) : READY_STATUS.ERROR;
-                }
-                else
-                    return READY_STATUS.NA;
-            }
-        }
-        public READY_STATUS HEL_STATUS { get { return (READY_STATUS)aMCC.HEL_STATUS; } }
-
         public READY_STATUS BDC_STATUS
         {
             get
@@ -303,58 +266,31 @@ namespace CROSSBOW
                 return aBDC.LatestMSG.CommHealth;
             }
         }
-        public READY_STATUS GIM_STATUS
-        {
-            get
-            {
-                if (System_State < SYSTEM_STATES.STNDBY)
-                {
-                    // ping only
-                    return (PING_STATUS_GIM ? READY_STATUS.ALIVE : READY_STATUS.ERROR);
-                }
-                else if (System_State >= SYSTEM_STATES.STNDBY)
-                {
-                    return PING_STATUS_GIM ? (aBDC.GIM_STATUS ? READY_STATUS.READY : READY_STATUS.WARN) : READY_STATUS.ERROR;
-                }
-                else
-                    return READY_STATUS.NA;
-            }
-        }
-        public READY_STATUS TRC_STATUS
-        {
-            get
-            {
-                if (System_State < SYSTEM_STATES.STNDBY)
-                {
-                    // ping only
-                    return (PING_STATUS_TRC ? READY_STATUS.ALIVE : READY_STATUS.ERROR);
-                }
-                else if (System_State >= SYSTEM_STATES.STNDBY)
-                {
-                    return PING_STATUS_TRC ? (aBDC.TRC_STATUS ? READY_STATUS.READY : READY_STATUS.WARN) : READY_STATUS.ERROR;
-                }
-                else
-                    return READY_STATUS.NA;
-            }
-        }
-        public READY_STATUS FMC_STATUS
-        {
-            get
-            {
-                if (System_State < SYSTEM_STATES.STNDBY)
-                {
-                    // ping only
-                    return (PING_STATUS_FMC ? READY_STATUS.ALIVE : READY_STATUS.ERROR);
-                }
-                else if (System_State >= SYSTEM_STATES.STNDBY)
-                {
-                    return PING_STATUS_FMC ? (aBDC.FMC_STATUS ? READY_STATUS.READY : READY_STATUS.WARN) : READY_STATUS.ERROR;
-                }
-                else
-                    return READY_STATUS.NA;
-            }
-        }
+
         public bool NTP_STATUS { get { return true; } }
+
+
+        public READY_STATUS DeviceStatus(MCC_DEVICES dev)
+        {
+            bool enabled = (aMCC.LatestMSG.DeviceEnabledBits & (1 << (int)dev)) != 0;
+            bool ready = (aMCC.LatestMSG.DeviceReadyBits & (1 << (int)dev)) != 0;
+            bool warn = (aMCC.LatestMSG.DeviceWarnBits & (1 << (int)dev)) != 0;
+            if (!enabled && aMCC.isConnected) return READY_STATUS.NA;
+            if (!ready) return READY_STATUS.ERROR;
+            if (warn) return READY_STATUS.WARN;
+            return READY_STATUS.READY;
+        }
+
+        public READY_STATUS DeviceStatus(BDC_DEVICES dev)
+        {
+            bool enabled = (aBDC.LatestMSG.DeviceEnabledBits & (1 << (int)dev)) != 0;
+            bool ready = (aBDC.LatestMSG.DeviceReadyBits & (1 << (int)dev)) != 0;
+            bool warn = (aBDC.LatestMSG.DeviceWarnBits & (1 << (int)dev)) != 0;
+            if (!enabled && aBDC.isConnected) return READY_STATUS.NA;
+            if (!ready) return READY_STATUS.ERROR;
+            if (warn) return READY_STATUS.WARN;
+            return READY_STATUS.READY;
+        }
 
         public Color COLOR_FROM_STATUS(READY_STATUS status)
         {
@@ -373,6 +309,7 @@ namespace CROSSBOW
                     return Color.Red;
             }
         }
+
         public READY_STATUS WorstStatus(READY_STATUS a, READY_STATUS b)
         {
             int Rank(READY_STATUS s) => s switch
@@ -385,6 +322,33 @@ namespace CROSSBOW
                 _ => 5
             };
             return Rank(a) <= Rank(b) ? a : b;
+        }
+
+        public async Task PingLoop()
+        {
+            while (!aMCC.isConnected && !aBDC.isConnected)
+            {
+                PING_STATUS_MCC = (await new Ping().SendPingAsync(IPS.MCC, 1000)).Status == IPStatus.Success;
+                PING_STATUS_TMC = (await new Ping().SendPingAsync(IPS.TMC, 1000)).Status == IPStatus.Success;
+                PING_STATUS_HEL = (await new Ping().SendPingAsync(IPS.HEL, 1000)).Status == IPStatus.Success;
+                PING_STATUS_GNSS = (await new Ping().SendPingAsync(IPS.GNSS, 1000)).Status == IPStatus.Success;
+                PING_STATUS_BDC = (await new Ping().SendPingAsync(IPS.BDC, 1000)).Status == IPStatus.Success;
+                PING_STATUS_GIM = (await new Ping().SendPingAsync(IPS.GIMBAL, 1000)).Status == IPStatus.Success;
+                PING_STATUS_TRC = (await new Ping().SendPingAsync(IPS.TRC, 1000)).Status == IPStatus.Success;
+                PING_STATUS_FMC = (await new Ping().SendPingAsync(IPS.FMC, 1000)).Status == IPStatus.Success;
+                PING_STATUS_NTP = (await new Ping().SendPingAsync(IPS.NTP_PRIMARY, 1000)).Status == IPStatus.Success;
+
+                // populate device bits so DeviceStatus() works consistently pre-connect
+                aMCC.LatestMSG.SetDeviceReady(MCC_DEVICES.TMC, PING_STATUS_TMC);
+                aMCC.LatestMSG.SetDeviceReady(MCC_DEVICES.HEL, PING_STATUS_HEL);
+                aMCC.LatestMSG.SetDeviceReady(MCC_DEVICES.GNSS, PING_STATUS_GNSS);
+
+                aBDC.LatestMSG.SetDeviceReady(BDC_DEVICES.GIMBAL, PING_STATUS_GIM);
+                aBDC.LatestMSG.SetDeviceReady(BDC_DEVICES.JETSON, PING_STATUS_TRC);
+                aBDC.LatestMSG.SetDeviceReady(BDC_DEVICES.FSM, PING_STATUS_FMC);
+
+                await Task.Delay(5000);
+            }
         }
 
         // this will be on the BDC

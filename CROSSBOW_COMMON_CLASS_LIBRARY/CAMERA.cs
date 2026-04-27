@@ -13,10 +13,10 @@ namespace CROSSBOW
     {
         public BDC_CAM_IDS CamID { get; private set; }
 
-        // Set by TRC_MSG.ParseMsg() — ICD v1.7 TRC REG1 [17,19]
+        // Set by TRC_MSG.ParseMsg() — ICD v4.2.2 TRC REG1 [17,19]
         public byte StatusBits { get; set; } = 0;
 
-        // Set by TRC_MSG.ParseMsg() — ICD v1.7 TRC REG1 [18,20]
+        // Set by TRC_MSG.ParseMsg() — ICD v4.2.2 TRC REG1 [18,20]
         public byte TrackBits { get; set; } = 0;
 
         // StatusBits accessors

@@ -343,11 +343,14 @@ namespace CROSSBOW
         }
 
         // 0xE0 SET_BCAST_FIRECONTROL_STATUS — fire control vote bytes (INT_ENG)
-        // voteBitsMcc: VOTE_BITS_MCC bitmask; voteBitsBdc: VOTE_BITS_BDC bitmask
-        public void SetFireStatus(byte voteBitsMcc, byte voteBitsBdc = 0)
+        // CB-20260426: payload extended to 6 bytes — firmware rejects < 7 total.
+        public void SetFireStatus(byte voteBitsMcc, byte voteBitsBdc = 0,
+                                  byte sysState = 0, byte bdcMode = 0,
+                                  byte voteBitsMcc2 = 0, byte voteBitsBdc2 = 0)
         {
             Send(BuildA2Frame((byte)ICD.SET_BCAST_FIRECONTROL_STATUS,
-                new[] { voteBitsMcc, voteBitsBdc }));
+                new[] { voteBitsMcc, voteBitsBdc, sysState, bdcMode,
+                        voteBitsMcc2, voteBitsBdc2 }));
         }
     }
 }

@@ -95,47 +95,59 @@ namespace CROSSBOW
 
         public bool isVerboseLogEnabled { get; set; } = true;
 
-        // ── Vote bits with change logging ─────────────────────────────────────
-        private byte _voteBits1 { get; set; } = 0;
-        public  byte LastVoteBits1 { get; private set; } = 0;
-        public  byte VoteBits1
+        private byte _voteBitsBDC2 { get; set; } = 0;
+        public byte LastVOTE_BITS_BDC2 { get; private set; } = 0;
+        public byte VOTE_BITS_BDC2  // [164] BDC raw/override detail
         {
-            get { return _voteBits1; }
+            get { return _voteBitsBDC2; }
             set
             {
-                if (isVerboseLogEnabled && _voteBits1 != value)
-                    Log?.Information($"BDC VOTE 1 CHANGED {Convert.ToString(_voteBits1, 2).PadLeft(8, '0')} -> {Convert.ToString(value, 2).PadLeft(8, '0')}");
-                LastVoteBits1 = value;
-                _voteBits1    = value;
+                if (isVerboseLogEnabled && _voteBitsBDC2 != value)
+                    Log?.Information($"VOTE_BITS_BDC2 CHANGED {Convert.ToString(_voteBitsBDC2, 2).PadLeft(8, '0')} -> {Convert.ToString(value, 2).PadLeft(8, '0')}");
+                LastVOTE_BITS_BDC2 = value;
+                _voteBitsBDC2 = value;
             }
         }
 
-        private byte _voteBits2 { get; set; } = 0;
-        public  byte LastVoteBits2 { get; private set; } = 0;
-        public  byte VoteBits2
+        private byte _voteBitsBDC { get; set; } = 0;
+        public byte LastVOTE_BITS_BDC { get; private set; } = 0;
+        public byte VOTE_BITS_BDC  // [165] BDC computed vote summary
         {
-            get { return _voteBits2; }
+            get { return _voteBitsBDC; }
             set
             {
-                if (isVerboseLogEnabled && _voteBits2 != value)
-                    Log?.Information($"BDC VOTE 2 CHANGED {Convert.ToString(_voteBits2, 2).PadLeft(8, '0')} -> {Convert.ToString(value, 2).PadLeft(8, '0')}");
-                LastVoteBits2 = value;
-                _voteBits2    = value;
+                if (isVerboseLogEnabled && _voteBitsBDC != value)
+                    Log?.Information($"VOTE_BITS_BDC CHANGED {Convert.ToString(_voteBitsBDC, 2).PadLeft(8, '0')} -> {Convert.ToString(value, 2).PadLeft(8, '0')}");
+                LastVOTE_BITS_BDC = value;
+                _voteBitsBDC = value;
             }
         }
 
-        // VoteBits3 = MCC vote bits readback (ICD: MCC VOTE BITS RB at [166])
-        private byte _voteBits3 { get; set; } = 0;
-        public  byte LastVoteBits3 { get; private set; } = 0;
-        public  byte VoteBits3
+        private byte _voteBitsMCC_RB { get; set; } = 0;
+        public byte LastVOTE_BITS_MCC_RB { get; private set; } = 0;
+        public byte VOTE_BITS_MCC_RB  // [166] MCC_VOTES readback
         {
-            get { return _voteBits3; }
+            get { return _voteBitsMCC_RB; }
             set
             {
-                if (isVerboseLogEnabled && _voteBits3 != value)
-                    Log?.Information($"BDC [MCC] VOTE CHANGED {Convert.ToString(_voteBits3, 2).PadLeft(8, '0')} -> {Convert.ToString(value, 2).PadLeft(8, '0')}");
-                LastVoteBits3 = value;
-                _voteBits3    = value;
+                if (isVerboseLogEnabled && _voteBitsMCC_RB != value)
+                    Log?.Information($"VOTE_BITS_MCC_RB CHANGED {Convert.ToString(_voteBitsMCC_RB, 2).PadLeft(8, '0')} -> {Convert.ToString(value, 2).PadLeft(8, '0')}");
+                LastVOTE_BITS_MCC_RB = value;
+                _voteBitsMCC_RB = value;
+            }
+        }
+
+        private byte _voteBitsMCC2_RB { get; set; } = 0;
+        public byte LastVOTE_BITS_MCC2_RB { get; private set; } = 0;
+        public byte VOTE_BITS_MCC2_RB  // [404] MCC_VOTES2 readback
+        {
+            get { return _voteBitsMCC2_RB; }
+            set
+            {
+                if (isVerboseLogEnabled && _voteBitsMCC2_RB != value)
+                    Log?.Information($"VOTE_BITS_MCC2_RB CHANGED {Convert.ToString(_voteBitsMCC2_RB, 2).PadLeft(8, '0')} -> {Convert.ToString(value, 2).PadLeft(8, '0')}");
+                LastVOTE_BITS_MCC2_RB = value;
+                _voteBitsMCC2_RB = value;
             }
         }
 
@@ -207,6 +219,60 @@ namespace CROSSBOW
         public int HB_FUJI_ms { get; private set; } = 0;   // raw ms
         public int HB_MWIR_ms { get; private set; } = 0;   // raw ms
         public int HB_INCL_ms { get; private set; } = 0;   // raw ms
+                                                           
+        // Device STATUS_BITS bytes [404-411] — per-device health packed by firmware
+        public byte DeviceWarnBits { get; private set; } = 0;  // [405] DEVICE_WARN_BITS
+        public byte GIM_StatusBits { get; private set; } = 0;  // [406] BDC_GIM_STATUS_BITS
+        public byte VIS_StatusBits { get; private set; } = 0;  // [407] BDC_VIS_STATUS_BITS
+        public byte MWIR_StatusBits { get; private set; } = 0;  // [408] BDC_MWIR_STATUS_BITS
+        public byte FSM_StatusBits { get; private set; } = 0;  // [409] BDC_FSM_STATUS_BITS
+        public byte JET_StatusBits { get; private set; } = 0;  // [410] BDC_JET_STATUS_BITS
+        public byte INCL_StatusBits { get; private set; } = 0;  // [411] BDC_INCL_STATUS_BITS
+
+        // =========================================================================
+        // Device STATUS_BITS accessors — mirror firmware bdc.hpp bit layout
+        // =========================================================================
+
+        // GIM_StatusBits [406]
+        public bool isGIM_Connected { get { return (GIM_StatusBits & 0x01) != 0; } }  // b0
+        public bool isGIM_Ready { get { return (GIM_StatusBits & 0x02) != 0; } }  // b1
+        public bool isGIM_Started { get { return (GIM_StatusBits & 0x04) != 0; } }  // b2
+        public bool isGIM_Moving { get { return (GIM_StatusBits & 0x10) != 0; } }  // b4 — display only
+
+        // VIS_StatusBits [407]
+        public bool isVIS_FujiConnected { get { return (VIS_StatusBits & 0x01) != 0; } }  // b0
+        public bool isVIS_FujiHB_OK { get { return (VIS_StatusBits & 0x02) != 0; } }  // b1
+        public bool isVIS_FOV_Valid { get { return (VIS_StatusBits & 0x04) != 0; } }  // b2
+        public bool isVIS_AlviumPowered { get { return (VIS_StatusBits & 0x08) != 0; } }  // b3
+        public bool isVIS_AlviumConnected { get { return (VIS_StatusBits & 0x10) != 0; } }  // b4
+        public bool isVIS_Capturing { get { return (VIS_StatusBits & 0x20) != 0; } }  // b5
+
+        // MWIR_StatusBits [408]
+        public bool isMWIR_Connected { get { return (MWIR_StatusBits & 0x01) != 0; } }  // b0
+        public bool isMWIR_HB_OK { get { return (MWIR_StatusBits & 0x02) != 0; } }  // b1
+        public bool isMWIR_WarmupComplete { get { return (MWIR_StatusBits & 0x04) != 0; } }  // b2
+        public bool isMWIR_FOV_Valid { get { return (MWIR_StatusBits & 0x08) != 0; } }  // b3
+        public bool isMWIR_Capturing { get { return (MWIR_StatusBits & 0x10) != 0; } }  // b4
+
+        // FSM_StatusBits [409]
+        public bool isFSM_FMCConnected { get { return (FSM_StatusBits & 0x01) != 0; } }  // b0
+        public bool isFSM_HB_OK { get { return (FSM_StatusBits & 0x02) != 0; } }  // b1
+        public bool isFSM_NotLimited { get { return (FSM_StatusBits & 0x08) != 0; } }  // b3
+
+        // JET_StatusBits [410]
+        public bool isJET_Connected { get { return (JET_StatusBits & 0x01) != 0; } }  // b0
+        public bool isJET_Ready { get { return (JET_StatusBits & 0x02) != 0; } }  // b1
+        public bool isJET_Started { get { return (JET_StatusBits & 0x04) != 0; } }  // b2
+        public bool isJET_Streaming { get { return (JET_StatusBits & 0x08) != 0; } }  // b3
+        public bool isJET_CPU_OK { get { return (JET_StatusBits & 0x10) != 0; } }  // b4
+        public bool isJET_GPU_OK { get { return (JET_StatusBits & 0x20) != 0; } }  // b5
+        public bool isJET_CPU_TempOK { get { return (JET_StatusBits & 0x40) != 0; } }  // b6
+        public bool isJET_GPU_TempOK { get { return (JET_StatusBits & 0x80) != 0; } }  // b7
+
+        // INCL_StatusBits [411]
+        public bool isINCL_Connected { get { return (INCL_StatusBits & 0x01) != 0; } }  // b0
+        public bool isINCL_HB_OK { get { return (INCL_StatusBits & 0x02) != 0; } }  // b1
+        public bool isINCL_DataValid { get { return (INCL_StatusBits & 0x04) != 0; } }  // b2
 
         // ── Hardware revision ─────────────────────────────────────────────────
         public byte HW_REV { get; private set; } = 0;
@@ -407,17 +473,25 @@ namespace CROSSBOW
         // [379–382] Horizon buffer float
         // [383–386] BDC version word uint32
         // [387–390] MCU temp float
-        // [391]      TIME_BITS (session 32) — isPTP_En, ptp.isSynched, usingPTP, ntp.isSynched, ntpUsingFB, ntpHasFB
-        // [392]      HW_REV
-        // [393-395]  V2 temps (TEMP_RELAY, TEMP_BAT, TEMP_USB)
-        // [396]      HB_NTP    uint8  x0.1s units
-        // [397]      HB_FMC_ms uint8  raw ms
-        // [398]      HB_TRC_ms uint8  raw ms
-        // [399]      HB_MCC_ms uint8  raw ms
-        // [400]      HB_GIM_ms uint8  raw ms
-        // [401]      HB_FUJI_ms uint8  raw ms
-        // [402]      HB_MWIR_ms uint8  raw ms
-        // [403]      HB_INCL_ms uint8  raw ms
+        // [391]     TIME_BITS (session 32) — isPTP_En, ptp.isSynched, usingPTP, ntp.isSynched, ntpUsingFB, ntpHasFB
+        // [392]     HW_REV
+        // [393-395] V2 temps (TEMP_RELAY, TEMP_BAT, TEMP_USB)
+        // [396]     HB_NTP    uint8  x0.1s units
+        // [397]     HB_FMC_ms uint8  raw ms
+        // [398]     HB_TRC_ms uint8  raw ms
+        // [399]     HB_MCC_ms uint8  raw ms
+        // [400]     HB_GIM_ms uint8  raw ms
+        // [401]     HB_FUJI_ms uint8  raw ms
+        // [402]     HB_MWIR_ms uint8  raw ms
+        // [403]     HB_INCL_ms uint8  raw ms
+        // [404]     MCC_VOTES2_RB — MCC detail vote readback
+        // [405]     DEVICE_WARN_BITS — per-device warn summary
+        // [406]     BDC_GIM_STATUS_BITS
+        // [407]     BDC_VIS_STATUS_BITS
+        // [408]     BDC_MWIR_STATUS_BITS
+        // [409]     BDC_FSM_STATUS_BITS
+        // [410]     BDC_JET_STATUS_BITS
+        // [411]     BDC_INCL_STATUS_BITS
         // [404-511]  RESERVED
         // =========================================================================
         private void ParseMSG01(byte[] msg, int ndx)
@@ -485,11 +559,11 @@ namespace CROSSBOW
             VIS_FOV        = BitConverter.ToSingle(msg, ndx); ndx += sizeof(Single);
 
             // [164-168] Vote bits
-            VoteBits1   = msg[ndx]; ndx++;   // BDC override + geometry status
-            VoteBits2   = msg[ndx]; ndx++;   // BDC aggregated votes
-            VoteBits3   = msg[ndx]; ndx++;   // MCC vote bits readback
-            VoteBitsKIZ = msg[ndx]; ndx++;
-            VoteBitsLCH = msg[ndx]; ndx++;
+            VOTE_BITS_BDC2 = msg[ndx]; ndx++;  // [164] BDC_VOTES2 — raw/override detail
+            VOTE_BITS_BDC = msg[ndx]; ndx++;  // [165] BDC_VOTES  — computed vote summary
+            VOTE_BITS_MCC_RB = msg[ndx]; ndx++;  // [166] MCC_VOTES  readback
+            VoteBitsKIZ = msg[ndx]; ndx++;  // [167] KIZ vote
+            VoteBitsLCH = msg[ndx]; ndx++;  // [168] LCH vote
 
             // [169-232] FMC 64-byte fixed block
             ndx = fmcMSG.ParseMSG01(msg, ndx);
@@ -585,6 +659,15 @@ namespace CROSSBOW
             HB_FUJI_ms = (int)msg[ndx]; ndx++;
             HB_MWIR_ms = (int)msg[ndx]; ndx++;
             HB_INCL_ms = (int)msg[ndx]; ndx++;
+
+            VOTE_BITS_MCC2_RB = msg[ndx]; ndx++;  // [404] MCC_VOTES2 readback
+            DeviceWarnBits = msg[ndx]; ndx++;  // [405] DEVICE_WARN_BITS
+            GIM_StatusBits = msg[ndx]; ndx++;  // [406] BDC_GIM_STATUS_BITS
+            VIS_StatusBits = msg[ndx]; ndx++;  // [407] BDC_VIS_STATUS_BITS
+            MWIR_StatusBits = msg[ndx]; ndx++;  // [408] BDC_MWIR_STATUS_BITS
+            FSM_StatusBits = msg[ndx]; ndx++;  // [409] BDC_FSM_STATUS_BITS
+            JET_StatusBits = msg[ndx]; ndx++;  // [410] BDC_JET_STATUS_BITS
+            INCL_StatusBits = msg[ndx]; ndx++;  // [411] BDC_INCL_STATUS_BITS
         }
 
         // =========================================================================
@@ -592,25 +675,43 @@ namespace CROSSBOW
         // ICD v3.0.0 session 4: bit 7 changed from RTC → RES
         // Session 32: bit 7 = PTP
         // =========================================================================
-        public bool isNTP_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, 0); } }
-        public bool isGimbal_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, 1); } }
-        public bool isFuji_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, 2); } }
-        public bool isMWIR_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, 3); } }
-        public bool isFSM_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, 4); } }
+        public bool isNTP_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, (int)BDC_DEVICES.NTP); } }
+        public bool isGimbal_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, (int)BDC_DEVICES.GIMBAL); } }
+        public bool isFuji_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, (int)BDC_DEVICES.FUJI); } }
+        public bool isMWIR_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, (int)BDC_DEVICES.MWIR); } }
+        public bool isFSM_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, (int)BDC_DEVICES.FSM); } }
         public bool isFMC_DeviceEnabled { get { return isFSM_DeviceEnabled; } }   // alias
-        public bool isTRC_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, 5); } }
-        public bool isINC_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, 6); } }
-        public bool isPTP_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, 7); } }
+        public bool isTRC_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, (int)BDC_DEVICES.JETSON); } }
+        public bool isINCL_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, (int)BDC_DEVICES.INCL); } }
+        public bool isPTP_DeviceEnabled { get { return IsBitSet(DeviceEnabledBits, (int)BDC_DEVICES.PTP); } }
 
-        public bool isNTP_DeviceReady { get { return IsBitSet(DeviceReadyBits, 0); } }
-        public bool isGimbal_DeviceReady { get { return IsBitSet(DeviceReadyBits, 1); } }
-        public bool isFuji_DeviceReady { get { return IsBitSet(DeviceReadyBits, 2); } }
-        public bool isMWIR_DeviceReady { get { return IsBitSet(DeviceReadyBits, 3); } }
-        public bool isFSM_DeviceReady { get { return IsBitSet(DeviceReadyBits, 4); } }
+        public bool isNTP_DeviceReady { get { return IsBitSet(DeviceReadyBits, (int)BDC_DEVICES.NTP); } }
+        public bool isGimbal_DeviceReady { get { return IsBitSet(DeviceReadyBits, (int)BDC_DEVICES.GIMBAL); } }
+        public bool isFuji_DeviceReady { get { return IsBitSet(DeviceReadyBits, (int)BDC_DEVICES.FUJI); } }
+        public bool isMWIR_DeviceReady { get { return IsBitSet(DeviceReadyBits, (int)BDC_DEVICES.MWIR); } }
+        public bool isFSM_DeviceReady { get { return IsBitSet(DeviceReadyBits, (int)BDC_DEVICES.FSM); } }
         public bool isFMC_DeviceReady { get { return isFSM_DeviceReady; } }   // alias
-        public bool isTRC_DeviceReady { get { return IsBitSet(DeviceReadyBits, 5); } }
-        public bool isINC_DeviceReady { get { return IsBitSet(DeviceReadyBits, 6); } }
-        public bool isPTP_DeviceReady { get { return IsBitSet(DeviceReadyBits, 7); } }
+        public bool isTRC_DeviceReady { get { return IsBitSet(DeviceReadyBits, (int)BDC_DEVICES.JETSON); } }
+        public bool isINCL_DeviceReady { get { return IsBitSet(DeviceReadyBits, (int)BDC_DEVICES.INCL); } }
+        public bool isPTP_DeviceReady { get { return IsBitSet(DeviceReadyBits, (int)BDC_DEVICES.PTP); } }
+
+        public bool isNTP_DeviceWarn { get { return IsBitSet(DeviceWarnBits, (int)BDC_DEVICES.NTP); } }
+        public bool isGimbal_DeviceWarn { get { return IsBitSet(DeviceWarnBits, (int)BDC_DEVICES.GIMBAL); } }
+        public bool isFuji_DeviceWarn { get { return IsBitSet(DeviceWarnBits, (int)BDC_DEVICES.FUJI); } }
+        public bool isMWIR_DeviceWarn { get { return IsBitSet(DeviceWarnBits, (int)BDC_DEVICES.MWIR); } }
+        public bool isFSM_DeviceWarn { get { return IsBitSet(DeviceWarnBits, (int)BDC_DEVICES.FSM); } }
+        public bool isJetson_DeviceWarn { get { return IsBitSet(DeviceWarnBits, (int)BDC_DEVICES.JETSON); } }
+        public bool isINCL_DeviceWarn { get { return IsBitSet(DeviceWarnBits, (int)BDC_DEVICES.INCL); } }
+        public bool isPTP_DeviceWarn { get { return IsBitSet(DeviceWarnBits, (int)BDC_DEVICES.PTP); } }
+
+        // ADD — allows pre-connect ping to populate bits before REG1 arrives
+        public void SetDeviceReady(BDC_DEVICES dev, bool ready)
+        {
+            if (ready)
+                DeviceReadyBits |= (byte)(1 << (int)dev);
+            else
+                DeviceReadyBits &= (byte)~(1 << (int)dev);
+        }
 
         // HealthBits accessors [byte 10] — renamed from StatusBits (ICD v3.5.0 BDC unification)
         // bit 0: isReady   bit 1: isSwitchEnabled (V2 only)   bits 2-7: RES
@@ -645,38 +746,48 @@ namespace CROSSBOW
         public bool isRelay4_Enabled { get { return IsBitSet(PowerBits, 7); } }
 
         // =========================================================================
-        // VoteBits1 [164] — BDC override + geometry status
+        // VOTE_BITS_BDC2 [164] — BDC raw/override detail
         // =========================================================================
-        public bool isHorizVoteOverride { get { return IsBitSet(VoteBits1, 0); } }
-        public bool isKIZVoteOverride   { get { return IsBitSet(VoteBits1, 1); } }
-        public bool isLCHVoteOverride   { get { return IsBitSet(VoteBits1, 2); } }
-        public bool isBDCVoteOverride   { get { return IsBitSet(VoteBits1, 3); } }
-        public bool isBelowHoriz        { get { return IsBitSet(VoteBits1, 4); } }
-        public bool isInKIZ             { get { return IsBitSet(VoteBits1, 5); } }
-        public bool isInLCH             { get { return IsBitSet(VoteBits1, 6); } }
+        public bool isHorizVoteOverride { get { return (VOTE_BITS_BDC2 & (byte)BDC_VOTES2.HORIZ_VOTE_OVERRIDE) != 0; } }
+        public bool isKIZVoteOverride { get { return (VOTE_BITS_BDC2 & (byte)BDC_VOTES2.KIZ_VOTE_OVERRIDE) != 0; } }
+        public bool isLCHVoteOverride { get { return (VOTE_BITS_BDC2 & (byte)BDC_VOTES2.LCH_VOTE_OVERRIDE) != 0; } }
+        public bool isBDCVoteOverride { get { return (VOTE_BITS_BDC2 & (byte)BDC_VOTES2.BDC_VOTE_OVERRIDE) != 0; } }
+        public bool isBelowHoriz { get { return (VOTE_BITS_BDC2 & (byte)BDC_VOTES2.IS_BELOW_HORIZ) != 0; } }
+        public bool isInKIZ { get { return (VOTE_BITS_BDC2 & (byte)BDC_VOTES2.IS_IN_KIZ) != 0; } }
+        public bool isInLCH { get { return (VOTE_BITS_BDC2 & (byte)BDC_VOTES2.IS_IN_LCH) != 0; } }
 
         // =========================================================================
-        // VoteBits2 [165] — BDC aggregated votes
+        // VOTE_BITS_BDC [165] — BDC computed vote summary
         // =========================================================================
-        public bool BelowHorizVote  { get { return IsBitSet(VoteBits2, 0); } }
-        public bool InKIZVote       { get { return IsBitSet(VoteBits2, 1); } }
-        public bool InLCHVote       { get { return IsBitSet(VoteBits2, 2); } }
-        public bool BDCTotalVote    { get { return IsBitSet(VoteBits2, 3); } }
-        public bool isHorizonLoaded { get { return IsBitSet(VoteBits2, 5); } }
-        public bool isFSMNotLimited { get { return IsBitSet(VoteBits2, 7); } }
+        public bool BelowHorizVote { get { return (VOTE_BITS_BDC & (byte)BDC_VOTES.BELOW_HORIZ_VOTE) != 0; } }
+        public bool InKIZVote { get { return (VOTE_BITS_BDC & (byte)BDC_VOTES.IN_KIZ_VOTE) != 0; } }
+        public bool InLCHVote { get { return (VOTE_BITS_BDC & (byte)BDC_VOTES.IN_LCH_VOTE) != 0; } }
+        public bool BDCTotalVote { get { return (VOTE_BITS_BDC & (byte)BDC_VOTES.BDC_TOTAL_VOTE) != 0; } }
+        public bool isHorizonLoaded { get { return (VOTE_BITS_BDC & (byte)BDC_VOTES.HORIZ_LOADED) != 0; } }
+        public bool isFSMNotLimited { get { return (VOTE_BITS_BDC & (byte)BDC_VOTES.FSM_NOT_LIMITED) != 0; } }
 
         // =========================================================================
-        // VoteBits3 [166] — MCC vote bits readback
+        // VOTE_BITS_MCC_RB [166] — MCC_VOTES readback (MCC→BDC via 0xE0)
         // =========================================================================
-        public bool isLaserEnabled_Vote_rb       { get { return IsBitSet(VoteBits3, 0); } }
-        public bool isNotAbort_Vote_rb           { get { return IsBitSet(VoteBits3, 1); } }
-        public bool isArmed_Vote_rb              { get { return IsBitSet(VoteBits3, 2); } }
-        public bool isBDA_Vote_rb                { get { return IsBitSet(VoteBits3, 3); } }
-        public bool isLaserTotalHW_Vote_rb       { get { return isLaserEnabled_Vote_rb && isNotAbort_Vote_rb && isArmed_Vote_rb && isBDA_Vote_rb; } }
-        public bool isEMON                       { get { return IsBitSet(VoteBits3, 4); } }
-        public bool isLaserFireRequested_Vote_rb { get { return IsBitSet(VoteBits3, 5); } }
-        public bool isLaserTotal_Vote_rb         { get { return IsBitSet(VoteBits3, 6); } }
-        public bool isCombat_Vote_rb             { get { return IsBitSet(VoteBits3, 7); } }
+        public bool isNotAbort_Vote_rb { get { return (VOTE_BITS_MCC_RB & (byte)MCC_VOTES.NOT_ABORT) != 0; } }
+        public bool isArmed_Vote_rb { get { return (VOTE_BITS_MCC_RB & (byte)MCC_VOTES.ARMED) != 0; } }
+        public bool isBDC_Vote_rb { get { return (VOTE_BITS_MCC_RB & (byte)MCC_VOTES.BDC_VOTE) != 0; } }
+        public bool isLaserTotalHW_Vote_rb { get { return (VOTE_BITS_MCC_RB & (byte)MCC_VOTES.LASER_TOTAL_HW) != 0; } }
+        public bool isSW_Vote_rb { get { return (VOTE_BITS_MCC_RB & (byte)MCC_VOTES.SW_VOTE) != 0; } }
+        public bool isTrigger_Vote_rb { get { return (VOTE_BITS_MCC_RB & (byte)MCC_VOTES.TRIGGER) != 0; } }
+        public bool isFireState_Vote_rb { get { return (VOTE_BITS_MCC_RB & (byte)MCC_VOTES.FIRE_STATE) != 0; } }
+        public bool isEMON { get { return (VOTE_BITS_MCC_RB & (byte)MCC_VOTES.EMON) != 0; } }
+
+        // =========================================================================
+        // VOTE_BITS_MCC2_RB [404] — MCC_VOTES2 readback (MCC→BDC via 0xE0)
+        // =========================================================================
+        public bool isMCC2_BatNotLow { get { return (VOTE_BITS_MCC2_RB & (byte)MCC_VOTES2.BAT_NOT_LOW) != 0; } }
+        public bool isMCC2_TrainingMode { get { return (VOTE_BITS_MCC2_RB & (byte)MCC_VOTES2.TRAINING_MODE) != 0; } }
+        public bool isMCC2_Combat { get { return (VOTE_BITS_MCC2_RB & (byte)MCC_VOTES2.COMBAT) != 0; } }
+        public bool isMCC2_EMON_Missing { get { return (VOTE_BITS_MCC2_RB & (byte)MCC_VOTES2.EMON_MISSING) != 0; } }
+        public bool isMCC2_EMON_Unexpected { get { return (VOTE_BITS_MCC2_RB & (byte)MCC_VOTES2.EMON_UNEXPECTED) != 0; } }
+        public bool isMCC2_FireInterlocked { get { return (VOTE_BITS_MCC2_RB & (byte)MCC_VOTES2.FIRE_INTERLOCKED) != 0; } }
+
 
         // =========================================================================
         // VoteBitsKIZ [167]

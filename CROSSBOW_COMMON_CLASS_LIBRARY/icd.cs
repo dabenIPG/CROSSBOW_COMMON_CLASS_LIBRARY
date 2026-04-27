@@ -4,12 +4,12 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 
-// ─── CROSSBOW ICD defines.cs ──────────────────────────────────────────────────
+// ─── CROSSBOW ICD icd.cs ──────────────────────────────────────────────────
 // Authoritative shared enum and command byte definitions for all CROSSBOW C#
 // applications (THEIA HMI, CROSSBOW_ENG_GUIS). Canonical source of truth — matches
-// ICD v3.6.0 and defines.hpp v4.0.0.
+// ICD v3.6.0 and icd.hpp v4.0.0.
 // Do not edit per-application. All changes must be reflected in the ICD document
-// and kept in sync with defines.hpp.
+// and kept in sync with icd.hpp.
 // Version: 4.0.0 | Date: 2026-04-12 | CB-20260412
 // ⚠ MAJOR VERSION — ICD v3.6.0 command space restructuring (CB-20260412).
 // All five controller firmware targets VERSION_PACK(4,0,0).
@@ -20,7 +20,7 @@ namespace CROSSBOW
 {
     // ─── IP address registry ────────────────────────────────────────────────────
     // Single authority source for all CROSSBOW node IPs on the C# side.
-    // Mirrors defines.hpp IP_*_BYTES, plus C#-only entries for THEIA/HYPERION.
+    // Mirrors icd.hpp IP_*_BYTES, plus C#-only entries for THEIA/HYPERION.
     // Strings — consumers call IPAddress.Parse(IPS.X) at bind/send sites.
     // .208 appears twice (THEIA / NTP_FALLBACK) — same machine, two roles.
     // ─────────────────────────────────────────────────────────────────────────────
@@ -158,7 +158,7 @@ namespace CROSSBOW
         HI = 55,     // V1/V3 only — DBU3200 I2C CC/CV 55A; V2 returns STATUS_CMD_REJECTED
     }
 
-    // MCC unified power output enum — matches MCC_POWER in defines.hpp
+    // MCC unified power output enum — matches MCC_POWER in icd.hpp
     // Enum value N = POWER_BITS byte 10 bit N.
     // Used with ICD.PMS_POWER_ENABLE (0xE2): { (byte)MCC_POWER, (byte)(en?1:0) }
     // V1·48V·3kW valid:      RELAY_GPS, VICOR_BUS, RELAY_LASER, SOL_HEL, SOL_BDA
@@ -179,7 +179,7 @@ namespace CROSSBOW
 
     // Laser model identity — sensed via RMN on connect.
     // Byte [255] of MCC REG1. 0x00 = not yet sensed / sense fault.
-    // Mirror in defines.hpp.
+    // Mirror in icd.hpp.
     public enum LASER_MODEL : byte
     {
         UNKNOWN = 0x00,
@@ -214,112 +214,112 @@ namespace CROSSBOW
 
     public enum ICD
     {
-        SET_UNSOLICITED = 0xA0,  // Subscribe/unsubscribe to unsolicited 100 Hz push. {0x01}=subscribe, {0x00}=unsubscribe. Any accepted command auto-registers the sender. Does NOT affect A1 stream.
-        SET_HEL_TRAINING_MODE = 0xA1,  // Moved from 0xAF (v3.6.0). Promoted to INT_OPS. Training clamps power to 10% regardless of SET_HEL_POWER. uint8 0=COMBAT 1=TRAINING
-        SET_NTP_CONFIG = 0xA2,  // Promoted INT_ENG→INT_OPS (v3.6.0). 0 bytes=resync | byte[p]=set primary last octet | bytes[p,f]=set primary+fallback last octet. Routing by destination IP.
-        SET_TIMESRC = 0xA3,  // Assigned v3.6.0. Set active time source. Routing by IP — each controller applies independently. Prereq: FW-C8 (rejection handler removal) before live. uint8 0=OFF 1=NTP 2=PTP 3=AUTO
-        FRAME_KEEPALIVE = 0xA4,  // Register/keep-alive. Empty = register + ACK (ping fields: version, echo_seq, uptime_ms). Payload {0x01} = register + return REG1 now (rate-gated: max 1 Hz per client; suppressed if wantsUnsolicited). INT_ENG: all 5 controllers. INT_OPS: MCC/BDC only. Session 35: was EXT_FRAME_PING (A3/MCC/BDC only).
-        SET_SYSTEM_STATE = 0xA5,  //byte (SYSTEM_STATES)
-        SET_GIMBAL_MODE = 0xA6,  //byte (BDC_MODES)
-        SET_LCH_MISSION_DATA = 0xA7,  // Loads LCH mission data and clears all windows (see ICD)
-        SET_LCH_TARGET_DATA = 0xA8,  // Loads LCH target with windows (see ICD)
-        SET_REINIT = 0xA9,  // Assigned v3.6.0. Unified controller reinitialise. Replaces 0xB0 (BDC) and 0xE0 (MCC). Routing by IP. TMC/FMC not supported. uint8 subsystem (BDC: 0=NTP,1=GIM,2=FUJI,3=MWIR,4=FSM,5=JET,6=INCL,7=PTP | MCC: 0=NTP,1=TMC,2=HEL,3=BAT,4=PTP,5=CRG,6=GNSS,7=BDC)
-        SET_DEVICES_ENABLE = 0xAA,  // Assigned v3.6.0. Unified device enable/disable. Replaces 0xBE (BDC) and 0xE1 (MCC). Routing by IP. TMC/FMC not supported. uint8 device (same indices as SET_REINIT); uint8 0/1
+        SET_UNSOLICITED         = 0xA0,  // Subscribe/unsubscribe to unsolicited 100 Hz push. {0x01}=subscribe, {0x00}=unsubscribe. Any accepted command auto-registers the sender. Does NOT affect A1 stream.
+        SET_HEL_TRAINING_MODE   = 0xA1,  // Moved from 0xAF (v3.6.0). Promoted to INT_OPS. Training clamps power to 10% regardless of SET_HEL_POWER. uint8 0=COMBAT 1=TRAINING
+        SET_NTP_CONFIG          = 0xA2,  // Promoted INT_ENG→INT_OPS (v3.6.0). 0 bytes=resync | byte[p]=set primary last octet | bytes[p,f]=set primary+fallback last octet. Routing by destination IP.
+        SET_TIMESRC             = 0xA3,  // Assigned v3.6.0. Set active time source. Routing by IP — each controller applies independently. Prereq: FW-C8 (rejection handler removal) before live. uint8 0=OFF 1=NTP 2=PTP 3=AUTO
+        FRAME_KEEPALIVE         = 0xA4,  // Register/keep-alive. Empty = register + ACK (ping fields: version, echo_seq, uptime_ms). Payload {0x01} = register + return REG1 now (rate-gated: max 1 Hz per client; suppressed if wantsUnsolicited). INT_ENG: all 5 controllers. INT_OPS: MCC/BDC only. Session 35: was EXT_FRAME_PING (A3/MCC/BDC only).
+        SET_SYSTEM_STATE        = 0xA5,  //byte (SYSTEM_STATES)
+        SET_GIMBAL_MODE         = 0xA6,  //byte (BDC_MODES)
+        SET_LCH_MISSION_DATA    = 0xA7,  // Loads LCH mission data and clears all windows (see ICD)
+        SET_LCH_TARGET_DATA     = 0xA8,  // Loads LCH target with windows (see ICD)
+        SET_REINIT              = 0xA9,  // Assigned v3.6.0. Unified controller reinitialise. Replaces 0xB0 (BDC) and 0xE0 (MCC). Routing by IP. TMC/FMC not supported. uint8 subsystem (BDC: 0=NTP,1=GIM,2=FUJI,3=MWIR,4=FSM,5=JET,6=INCL,7=PTP | MCC: 0=NTP,1=TMC,2=HEL,3=BAT,4=PTP,5=CRG,6=GNSS,7=BDC)
+        SET_DEVICES_ENABLE      = 0xAA,  // Assigned v3.6.0. Unified device enable/disable. Replaces 0xBE (BDC) and 0xE1 (MCC). Routing by IP. TMC/FMC not supported. uint8 device (same indices as SET_REINIT); uint8 0/1
         SET_FIRE_REQUESTED_VOTE = 0xAB,  // Moved from 0xE6 (v3.6.0). Promoted to INT_OPS. Laser fire vote. uint8 0/1 — heartbeat required; watchdog cancels after 500ms silence.
-        SET_BDC_HORIZ = 0xAC,  //	VECTOR OF FLOATS HORIZ ELEVATION	float[360]
-        SET_HEL_POWER = 0xAD, // SETS LASER POWER    uint8 [0 100]
-        CLEAR_HEL_ERROR = 0xAE, // CLEAR LASER ERROR None
-        SET_CHARGER = 0xAF,  // Assigned v3.6.0. Merges 0xE3 (PMS_CHARGER_ENABLE) and 0xED (PMS_SET_CHARGER_LEVEL). Level required on every call. V1/V3: GPIO+I2C level control (DBU3200). V2: GPIO enable only — no I2C. uint8 level (CHARGE_LEVELS): 0=OFF 10=LO 30=MED 55=HI. Non-zero on V2 returns STATUS_CMD_REJECTED.
+        SET_BDC_HORIZ           = 0xAC,  //	VECTOR OF FLOATS HORIZ ELEVATION	float[360]
+        SET_HEL_POWER           = 0xAD, // SETS LASER POWER    uint8 [0 100]
+        CLEAR_HEL_ERROR         = 0xAE, // CLEAR LASER ERROR None
+        SET_CHARGER             = 0xAF,  // Assigned v3.6.0. Merges 0xE3 (PMS_CHARGER_ENABLE) and 0xED (PMS_SET_CHARGER_LEVEL). Level required on every call. V1/V3: GPIO+I2C level control (DBU3200). V2: GPIO enable only — no I2C. uint8 level (CHARGE_LEVELS): 0=OFF 10=LO 30=MED 55=HI. Non-zero on V2 returns STATUS_CMD_REJECTED.
 
         // RESERVING 0xB FOR BDC COMMAND
-        RES_B0 = 0xB0,  // ⚠ RETIRED v3.6.0 — SET_BDC_REINIT superseded by SET_REINIT (0xA9). Returns STATUS_CMD_REJECTED pending FW-C8.
-        SET_BDC_VOTE_OVERRIDE = 0xB1,  // Moved from 0xAA (v3.6.0). INT_ENG. Override individual BDC geometry vote bit. byte vote (0=HORIZ,1=KIZ,2=LCH,3=BDA); byte 0/1
-        SET_GIM_POS = 0xB2,  // POSITION (PAN/TILT)
-        SET_GIM_SPD = 0xB3,  // SPEED (PAN/TILT)
-        SET_CUE_OFFSET = 0xB4,  // CUE OFFSETS (float/float)
-        CMD_GIM_PARK = 0xB5,  // PARK
-        SET_GIM_LIMITS = 0xB6,  //	SET WRAP LIMITS (PAN, TILT)	int32, int32, int32, int32	pan fwd, back, tilt fwd, back (deg)
-        SET_PID_GAINS = 0xB7,  // PID GAINS (kpp,kip,kdp,kpt,kit,kdt)
-        SET_PID_TARGET = 0xB8,  //
-        SET_PID_ENABLE = 0xB9,  // PID ENABLE (OR IS THIS JUST MODE)
-        SET_SYS_LLA = 0xBA,  // GIMBAL ECEF COORD
-        SET_SYS_ATT = 0xBB,  // GIMBAL ANGLES?
-        SET_BDC_VICOR_ENABLE = 0xBC,  //	VICOR ON/OFF	byte 0/1	
-        SET_BDC_RELAY_ENABLE = 0xBD,  //	RELAY X ON/OFF	byte 1,2,3,4; byte 0/1	relay 1 based 
-        RES_BE = 0xBE,  // ⚠ RETIRED v3.6.0 — SET_BDC_DEVICES_ENABLE superseded by SET_DEVICES_ENABLE (0xAA). Returns STATUS_CMD_REJECTED pending FW-C8.
-        RES_BF = 0xBF,  // BDC REGISTER RESPONSE
+        RES_B0                  = 0xB0,  // ⚠ RETIRED v3.6.0 — SET_BDC_REINIT superseded by SET_REINIT (0xA9). Returns STATUS_CMD_REJECTED pending FW-C8.
+        SET_BDC_VOTE_OVERRIDE   = 0xB1,  // Moved from 0xAA (v3.6.0). INT_ENG. Override individual BDC geometry vote bit. byte vote (BDC_VOTE_OVERRIDES: 0=BELOW_HORIZ,1=IN_KIZ,2=IN_LCH,3=BDC_TOTAL); byte 0/1
+        SET_GIM_POS             = 0xB2,  // POSITION (PAN/TILT)
+        SET_GIM_SPD             = 0xB3,  // SPEED (PAN/TILT)
+        SET_CUE_OFFSET          = 0xB4,  // CUE OFFSETS (float/float)
+        CMD_GIM_PARK            = 0xB5,  // PARK
+        SET_GIM_LIMITS          = 0xB6,  //	SET WRAP LIMITS (PAN, TILT)	int32, int32, int32, int32	pan fwd, back, tilt fwd, back (deg)
+        SET_PID_GAINS           = 0xB7,  // PID GAINS (kpp,kip,kdp,kpt,kit,kdt)
+        SET_PID_TARGET          = 0xB8,  //
+        SET_PID_ENABLE          = 0xB9,  // PID ENABLE (OR IS THIS JUST MODE)
+        SET_SYS_LLA             = 0xBA,  // GIMBAL ECEF COORD
+        SET_SYS_ATT             = 0xBB,  // GIMBAL ANGLES?
+        SET_BDC_VICOR_ENABLE    = 0xBC,  //	VICOR ON/OFF	byte 0/1	
+        SET_BDC_RELAY_ENABLE    = 0xBD,  //	RELAY X ON/OFF	byte 1,2,3,4; byte 0/1	relay 1 based 
+        RES_BE                  = 0xBE,  // ⚠ RETIRED v3.6.0 — SET_BDC_DEVICES_ENABLE superseded by SET_DEVICES_ENABLE (0xAA). Returns STATUS_CMD_REJECTED pending FW-C8.
+        RES_BF                  = 0xBF,  // BDC REGISTER RESPONSE
 
         // RESERVING 0xC FOR CAM COMMANDS
-        RES_C0 = 0xC0,  // 
-        SET_CAM_MAG = 0xC1,  // ZOOM
-        SET_CAM_FOCUS = 0xC2,  // FOCUS (AUTO)
-        RES_C3 = 0xC3,  // GAIN (AUTO)
-        CMD_VIS_AWB = 0xC4,  // none — trigger VIS auto white balance once (HMI-AWB)
-        RES_C5 = 0xC5,  // EXP (AUTO)
-        RES_C6 = 0xC6,  // GAMMA
-        SET_CAM_IRIS = 0xC7,  // IRIS
-        CMD_VIS_FILTER_ENABLE = 0xC8,  // FILTER
-        SET_BDC_PALOS_VOTE = 0xC9,  //  	Set Operator/Position Valid Vote from GUI	byte which [0 KIZ, 1 LCH], byte OperatorValid, byte PositionValid	Send both
-        GET_BDC_PALOS_VOTE = 0xCA,  //	Checks BDC PALOS VOTE	byte which [0 KIZ, 1 LCH], float az, float el, uint64 timestamp
-        SET_MWIR_WHITEHOT = 0xCB,  // WHITE HOT ENABLE/DISABLE
-        CMD_MWIR_NUC1 = 0xCC,  // 
-        CMD_MWIR_AF_MODE = 0xCD,  // byte 0/1/2 off/cont/once
-        CMD_MWIR_BUMP_FOCUS = 0xCE,  //
-        RES_CF = 0xCF,  // CAMERA REGISTER RESPONSE?  
+        RES_C0                  = 0xC0,  // 
+        SET_CAM_MAG             = 0xC1,  // ZOOM
+        SET_CAM_FOCUS           = 0xC2,  // FOCUS (AUTO)
+        RES_C3                  = 0xC3,  // GAIN (AUTO)
+        CMD_VIS_AWB             = 0xC4,  // none — trigger VIS auto white balance once (HMI-AWB)
+        RES_C5                  = 0xC5,  // EXP (AUTO)
+        RES_C6                  = 0xC6,  // GAMMA
+        SET_CAM_IRIS            = 0xC7,  // IRIS
+        CMD_VIS_FILTER_ENABLE   = 0xC8,  // FILTER
+        SET_BDC_PALOS_VOTE      = 0xC9,  //  	Set Operator/Position Valid Vote from GUI	byte which [0 KIZ, 1 LCH], byte OperatorValid, byte PositionValid	Send both
+        GET_BDC_PALOS_VOTE      = 0xCA,  //	Checks BDC PALOS VOTE	byte which [0 KIZ, 1 LCH], float az, float el, uint64 timestamp
+        SET_MWIR_WHITEHOT       = 0xCB,  // WHITE HOT ENABLE/DISABLE
+        CMD_MWIR_NUC1           = 0xCC,  // 
+        CMD_MWIR_AF_MODE        = 0xCD,  // byte 0/1/2 off/cont/once
+        CMD_MWIR_BUMP_FOCUS     = 0xCE,  //
+        RES_CF                  = 0xCF,  // CAMERA REGISTER RESPONSE?  
 
         // RESERVING 0xD FOR ORIN/TRACKER COMMANDS
-        ORIN_CAM_SET_ACTIVE = 0xD0,  // ACTIVE CAMERA
-        ORIN_ACAM_COCO_ENABLE = 0xD1,  // Moved from 0xDF (v3.6.0). Dual-mode COCO control — ambient full-frame scan + intra-box track drift indicator. uint8 op (COCO_ENABLE_OPS); uint8 param (op-dependent). TRC binary handler pending (TRC-COCO-MODE1). ASCII fully implemented.
-        RES_D2 = 0xD2,  // ⚠ RETIRED v3.6.0 — ORIN_SET_STREAM_60FPS retired; framerate is compile/launch time only. ASCII FRAMERATE covers ENG use.
-        ORIN_SET_STREAM_OVERLAYS = 0xD3,  // STREAM OVERLAY BITMASK — see HUD_OVERLAY_FLAGS enum
-        ORIN_ACAM_SET_CUE_FLAG = 0xD4,  // byte 0/1
+        ORIN_CAM_SET_ACTIVE     = 0xD0,  // ACTIVE CAMERA
+        ORIN_ACAM_COCO_ENABLE   = 0xD1,  // Moved from 0xDF (v3.6.0). Dual-mode COCO control — ambient full-frame scan + intra-box track drift indicator. uint8 op (COCO_ENABLE_OPS); uint8 param (op-dependent). TRC binary handler pending (TRC-COCO-MODE1). ASCII fully implemented.
+        RES_D2                  = 0xD2,  // ⚠ RETIRED v3.6.0 — ORIN_SET_STREAM_60FPS retired; framerate is compile/launch time only. ASCII FRAMERATE covers ENG use.
+        ORIN_SET_STREAM_OVERLAYS = 0xD3,  // STREAM OVERLAY BITMASK — see HUD_OVERLAY_BITS enum
+        ORIN_ACAM_SET_CUE_FLAG  = 0xD4,  // byte 0/1
         ORIN_ACAM_SET_TRACKGATE_SIZE = 0xD5,  // uint8, unit8
         ORIN_ACAM_ENABLE_FOCUSSCORE = 0xD6,  // byte 0/1
         ORIN_ACAM_SET_TRACKGATE_CENTER = 0xD7,  // uint16, uint16
-        RES_D8 = 0xD8,  // ⚠ RETIRED v3.6.0 — ORIN_SET_TESTPATTERNS retired; ASCII TESTSRC covers ENG use; TRC binary handler never implemented.
+        RES_D8                  = 0xD8,  // ⚠ RETIRED v3.6.0 — ORIN_SET_TESTPATTERNS retired; ASCII TESTSRC covers ENG use; TRC binary handler never implemented.
         ORIN_ACAM_COCO_CLASS_FILTER = 0xD9,  // filter COCO inference to class ID  uint8 (0-79; 0xFF=all) //
-        ORIN_ACAM_RESET_TRACKB = 0xDA, //  	RESET TRACK B TO CURRENT TRACK BOX  none
+        ORIN_ACAM_RESET_TRACKB  = 0xDA, //  	RESET TRACK B TO CURRENT TRACK BOX  none
         ORIN_ACAM_ENABLE_TRACKERS = 0xDB,  // uint8 tracker_id (BDC_TRACKERS); uint8 0/1 enable; [uint8 mosseReseed 0x01/0x00] — 3rd byte enables NCC-gated MOSSE template reseed from LK bbox (ICD v4.1.0). ASCII: LK MOSSE ON|OFF.
-        ORIN_ACAM_SET_ATOFFSET = 0xDC,  // SET AT OFFSET FOR ACTIVE CAMERA
-        ORIN_ACAM_SET_FTOFFSET = 0xDD,  // SET FT OFFSET FOR ACTIVE CAMERA
-        ORIN_SET_VIEW_MODE = 0xDE,  // VIEW MODE — 0=CAM1, 1=CAM2, 2=PIP4, 3=PIP8
-        RES_DF = 0xDF,  // ⚠ RETIRED v3.6.0 — ORIN_ACAM_COCO_ENABLE moved to 0xD1.
+        ORIN_ACAM_SET_ATOFFSET  = 0xDC,  // SET AT OFFSET FOR ACTIVE CAMERA
+        ORIN_ACAM_SET_FTOFFSET  = 0xDD,  // SET FT OFFSET FOR ACTIVE CAMERA
+        ORIN_SET_VIEW_MODE      = 0xDE,  // VIEW MODE — 0=CAM1, 1=CAM2, 2=PIP4, 3=PIP8
+        RES_DF                  = 0xDF,  // ⚠ RETIRED v3.6.0 — ORIN_ACAM_COCO_ENABLE moved to 0xD1.
 
         // RESERVED 0xE (MAYBE TMS/PMS STUFF?)
-        SET_BCAST_FIRECONTROL_STATUS = 0xE0,  // Moved from 0xAB (v3.6.0). INT_ENG. Internal vote sync MCC→BDC→TRC. byte voteBitsMcc (VOTE_BITS_MCC); byte voteBitsBdc (VOTE_BITS_BDC)
-        RES_E1 = 0xE1,  // ⚠ RETIRED v3.6.0 — SET_MCC_DEVICES_ENABLE superseded by SET_DEVICES_ENABLE (0xAA). Returns STATUS_CMD_REJECTED pending FW-C8.
-        PMS_POWER_ENABLE = 0xE2,  // uint8(MCC_POWER); uint8 0/1 — INT_ENG only, both revisions. Replaces PMS_SOL_ENABLE/PMS_RELAY_ENABLE/PMS_VICOR_ENABLE.
-        RES_E3 = 0xE3,  // ⚠ RETIRED v3.6.0 — PMS_CHARGER_ENABLE merged into SET_CHARGER (0xAF). Returns STATUS_CMD_REJECTED pending FW-C8.
-        RES_E4 = 0xE4,  // ⚠ RETIRED — was PMS_RELAY_ENABLE. Use PMS_POWER_ENABLE with RELAY_GPS or RELAY_LASER.
-        RES_E5 = 0xE5,  //	
-        RES_E6 = 0xE6,  // ⚠ RETIRED v3.6.0 — SET_FIRE_VOTE moved to 0xAB and promoted to INT_OPS. Returns STATUS_CMD_REJECTED pending FW-C8.
-        TMS_INPUT_FAN_SPEED = 0xE7,  // which byte 0/1; speed (0=off, 128=low, 255=high) — see TMC_FAN_SPEEDS
-        TMS_SET_DAC_VALUE = 0xE8,  // SET DAC D TO VALUE	which enum dac, uint16 val	maybe just habe 3 settings?
-        TMS_SET_VICOR_ENABLE = 0xE9,  //	SET VICOR X TO ON/OFF	which byte vicor (0-3), byte on/off
-        TMS_SET_LCM_ENABLE = 0xEA,  //	SET LCM X TO ON/OFF	which byte lcm enum, byte on/off
-        TMS_SET_TARGET_TEMP = 0xEB,  // Set Target Temp C  byte [10-40 deg C] — firmware clamps silently
-        RES_EC = 0xEC,  // ⚠ RETIRED — was PMS_VICOR_ENABLE. Use PMS_POWER_ENABLE with VICOR_BUS, VICOR_GIM, or VICOR_TMS.
-        RES_ED = 0xED,  // ⚠ RETIRED v3.6.0 — PMS_SET_CHARGER_LEVEL merged into SET_CHARGER (0xAF). Returns STATUS_CMD_REJECTED pending FW-C8.
-        RES_EE = 0xEE,  //
-        RES_EF = 0xEF,  // 
+        SET_BCAST_FIRECONTROL_STATUS = 0xE0,  // Moved from 0xAB (v3.6.0). INT_ENG. Internal vote sync MCC→BDC→TRC. [MCC_VOTES][MCC_VOTES2][sysState][bdcMode] MCC→BDC; [MCC_VOTES][BDC_VOTES][sysState][bdcMode][MCC_VOTES2][BDC_VOTES2] BDC→TRC
+        RES_E1                  = 0xE1,  // ⚠ RETIRED v3.6.0 — SET_MCC_DEVICES_ENABLE superseded by SET_DEVICES_ENABLE (0xAA). Returns STATUS_CMD_REJECTED pending FW-C8.
+        PMS_POWER_ENABLE        = 0xE2,  // uint8(MCC_POWER); uint8 0/1 — INT_ENG only, both revisions. Replaces PMS_SOL_ENABLE/PMS_RELAY_ENABLE/PMS_VICOR_ENABLE.
+        RES_E3                  = 0xE3,  // ⚠ RETIRED v3.6.0 — PMS_CHARGER_ENABLE merged into SET_CHARGER (0xAF). Returns STATUS_CMD_REJECTED pending FW-C8.
+        RES_E4                  = 0xE4,  // ⚠ RETIRED — was PMS_RELAY_ENABLE. Use PMS_POWER_ENABLE with RELAY_GPS or RELAY_LASER.
+        RES_E5                  = 0xE5,  //	
+        RES_E6                  = 0xE6,  // ⚠ RETIRED v3.6.0 — SET_FIRE_VOTE moved to 0xAB and promoted to INT_OPS. Returns STATUS_CMD_REJECTED pending FW-C8.
+        TMS_INPUT_FAN_SPEED     = 0xE7,  // which byte 0/1; speed (0=off, 128=low, 255=high) — see TMC_FAN_SPEEDS
+        TMS_SET_DAC_VALUE       = 0xE8,  // SET DAC D TO VALUE	which enum dac, uint16 val	maybe just habe 3 settings?
+        TMS_SET_VICOR_ENABLE    = 0xE9,  //	SET VICOR X TO ON/OFF	which byte vicor (0-3), byte on/off
+        TMS_SET_LCM_ENABLE      = 0xEA,  //	SET LCM X TO ON/OFF	which byte lcm enum, byte on/off
+        TMS_SET_TARGET_TEMP     = 0xEB,  // Set Target Temp C  byte [10-40 deg C] — firmware clamps silently
+        RES_EC                  = 0xEC,  // ⚠ RETIRED — was PMS_VICOR_ENABLE. Use PMS_POWER_ENABLE with VICOR_BUS, VICOR_GIM, or VICOR_TMS.
+        RES_ED                  = 0xED,  // ⚠ RETIRED v3.6.0 — PMS_SET_CHARGER_LEVEL merged into SET_CHARGER (0xAF). Returns STATUS_CMD_REJECTED pending FW-C8.
+        RES_EE                  = 0xEE,  //
+        RES_EF                  = 0xEF,  // 
 
         // RESERVED 0xF FOR FSM COMMANDS AND RELATED
-        FMC_SET_FSM_POW = 0xF0,  //	FSM ENABLE	byte 0/1
-        BDC_SET_FSM_HOME = 0xF1,  //	FSM HOME	int16, int16
-        BDC_SET_FSM_IFOVS = 0xF2,  //	FSM IFOVS	float, float
-        FMC_SET_FSM_POS = 0xF3,  //	FSM POSITION	int16, int16	
-        BDC_SET_FSM_SIGNS = 0xF4,  //  	FSM DIRECTIONS	int8, int8
-        FMC_FSM_TEST_SCAN = 0xF5,  //	FSM TEST SCAN	none	
-        BDC_SET_FSM_TRACK_ENABLE = 0xF6,  //	FSM TRACK ENABLE	byte 0/1
-        FMC_READ_FSM_POS = 0xF7, //  	FSM POSITION FROM ADC	none
-        RES_F8 = 0xF8,  //
-        RES_F9 = 0xF9,  //
-        BDC_SET_STAGE_HOME = 0xFA,  //	FOCUS STAGE WAIST HOME	uint32 pos
-        FMC_SET_STAGE_POS = 0xFB,  // FOCUS STAGE POSITION	uint32 pos	
-        FMC_STAGE_CALIB = 0xFC,  // FOCUS STAGE CALIBRATE — none
-        RES_FD = 0xFD,
-        FMC_SET_STAGE_ENABLE = 0xFE,  // FOCUS STAGE ENABLE — byte 0/1
-        RES_FF = 0xFF,  // FSM register response
+        FMC_SET_FSM_POW         = 0xF0,  //	FSM ENABLE	byte 0/1
+        BDC_SET_FSM_HOME        = 0xF1,  //	FSM HOME	int16, int16
+        BDC_SET_FSM_IFOVS       = 0xF2,  //	FSM IFOVS	float, float
+        FMC_SET_FSM_POS         = 0xF3,  //	FSM POSITION	int16, int16	
+        BDC_SET_FSM_SIGNS       = 0xF4,  //  	FSM DIRECTIONS	int8, int8
+        FMC_FSM_TEST_SCAN       = 0xF5,  //	FSM TEST SCAN	none	
+        BDC_SET_FSM_TRACK_ENABLE= 0xF6,  //	FSM TRACK ENABLE	byte 0/1
+        FMC_READ_FSM_POS        = 0xF7, //  	FSM POSITION FROM ADC	none
+        RES_F8                  = 0xF8,  //
+        RES_F9                  = 0xF9,  //
+        BDC_SET_STAGE_HOME      = 0xFA,  //	FOCUS STAGE WAIST HOME	uint32 pos
+        FMC_SET_STAGE_POS       = 0xFB,  // FOCUS STAGE POSITION	uint32 pos	
+        FMC_STAGE_CALIB         = 0xFC,  // FOCUS STAGE CALIBRATE — none
+        RES_FD                  = 0xFD,
+        FMC_SET_STAGE_ENABLE    = 0xFE,  // FOCUS STAGE ENABLE — byte 0/1
+        RES_FF                  = 0xFF,  // FSM register response
 
     }
 
@@ -334,7 +334,7 @@ namespace CROSSBOW
     //       Both must be set for full cue operation; either can be cleared independently.
     // -----------------------------------------------------------------------
     [Flags]
-    public enum HUD_OVERLAY_FLAGS : byte
+    public enum HUD_OVERLAY_BITS : byte
     {
         None            = 0,
         Reticle         = 1 << 0,  // bit0 — crosshair/reticle overlay
@@ -364,7 +364,7 @@ namespace CROSSBOW
     }
 
     // -----------------------------------------------------------------------
-    // HudOverlay helper — builds HUD_OVERLAY_FLAGS bitmasks by named parameter
+    // HudOverlay helper — builds HUD_OVERLAY_BITS bitmasks by named parameter
     // -----------------------------------------------------------------------
     public static class HudOverlay
     {
@@ -382,20 +382,20 @@ namespace CROSSBOW
             bool focusScore     = false,
             bool osd            = false)
         {
-            HUD_OVERLAY_FLAGS flags = HUD_OVERLAY_FLAGS.None;
-            if (reticle)       flags |= HUD_OVERLAY_FLAGS.Reticle;
-            if (trackPreview)  flags |= HUD_OVERLAY_FLAGS.TrackPreview;
-            if (trackBox)      flags |= HUD_OVERLAY_FLAGS.TrackBox;
-            if (cueChevrons)   flags |= HUD_OVERLAY_FLAGS.CueChevrons;
-            if (acProjections) flags |= HUD_OVERLAY_FLAGS.AC_Projections;
-            if (acLeaderLines) flags |= HUD_OVERLAY_FLAGS.AC_LeaderLines;
-            if (focusScore)    flags |= HUD_OVERLAY_FLAGS.FocusScore;
-            if (osd)           flags |= HUD_OVERLAY_FLAGS.OSD;
+            HUD_OVERLAY_BITS flags = HUD_OVERLAY_BITS.None;
+            if (reticle)       flags |= HUD_OVERLAY_BITS.Reticle;
+            if (trackPreview)  flags |= HUD_OVERLAY_BITS.TrackPreview;
+            if (trackBox)      flags |= HUD_OVERLAY_BITS.TrackBox;
+            if (cueChevrons)   flags |= HUD_OVERLAY_BITS.CueChevrons;
+            if (acProjections) flags |= HUD_OVERLAY_BITS.AC_Projections;
+            if (acLeaderLines) flags |= HUD_OVERLAY_BITS.AC_LeaderLines;
+            if (focusScore)    flags |= HUD_OVERLAY_BITS.FocusScore;
+            if (osd)           flags |= HUD_OVERLAY_BITS.OSD;
             return (byte)flags;
         }
 
         /// <summary>Set or clear a single flag in an existing bitmask.</summary>
-        public static byte Set(byte current, HUD_OVERLAY_FLAGS flag, bool enable)
+        public static byte Set(byte current, HUD_OVERLAY_BITS flag, bool enable)
         {
             return enable
                 ? (byte)(current | (byte)flag)
@@ -403,7 +403,7 @@ namespace CROSSBOW
         }
 
         /// <summary>Check if a specific flag is set in a bitmask byte.</summary>
-        public static bool IsSet(byte mask, HUD_OVERLAY_FLAGS flag)
+        public static bool IsSet(byte mask, HUD_OVERLAY_BITS flag)
         {
             return (mask & (byte)flag) != 0;
         }
@@ -411,53 +411,80 @@ namespace CROSSBOW
 
     // -----------------------------------------------------------------------
     // -----------------------------------------------------------------------
-    // MCC fire control vote bits — 0xE0 SET_BCAST_FIRECONTROL_STATUS byte 1
-    // Send via: aTRC.SetFireStatus(FireVote.SetMcc(...))
-    //
-    // NOTE: bit1 (NotAbort) is INVERTED — 0 = abort ACTIVE (safe-by-default).
-    //       At idle (0x00) isAbort() is TRUE on TRC3. To clear abort, set
-    //       NotAbort = 1. All other bits are positive-logic.
-    // -----------------------------------------------------------------------
+    // 0xE0 SET_BCAST_FIRECONTROL_STATUS byte 1 — MCC vote bits (upper / summary)
+    // Bits ordered b0→b7 to follow the physical gate chain.
+    // All bits = 1 while trigger is held means the laser is firing.
+    // Any bit clear while trigger is held identifies the exact blocking condition.
+    // NOTE: NOT_ABORT is INVERTED — bit CLEAR = abort ACTIVE (safe-by-default)
     [Flags]
-    public enum VOTE_BITS_MCC : byte
+    public enum MCC_VOTES : byte
     {
-        None          = 0,
-        NotAbort      = 1 << 1,  // bit1 — INVERTED: 1 = no abort, 0 = abort ACTIVE
-        Armed         = 1 << 2,  // bit2 — HEL armed
-        BDAVote       = 1 << 3,  // bit3 — LOS clear, system may fire
-        Firing        = 1 << 4,  // bit4 — laser energized (readback only — set by MCC)
-        Trigger       = 1 << 5,  // bit5 — trigger pulled
-        FireState     = 1 << 6,  // bit6 — FC has all votes, should be firing
-        Combat        = 1 << 7,  // bit7 — COMBAT system state
+        None            = 0,
+        NOT_ABORT       = 1 << 0,  // b0 — INVERTED: CLEAR=abort ACTIVE, SET=normal
+        ARMED           = 1 << 1,  // b1 — D3 HW readback
+        BDC_VOTE        = 1 << 2,  // b2 — D4 hardwire from BDC
+        LASER_TOTAL_HW  = 1 << 3,  // b3 — D7 AND gate: NotAbort && Armed && BDCVote
+        SW_VOTE         = 1 << 4,  // b4 — Combat && BatNotLow
+        TRIGGER         = 1 << 5,  // b5 — trigger heartbeat
+        FIRE_STATE      = 1 << 6,  // b6 — D45 final HW AND gate output
+        EMON            = 1 << 7,  // b7 — IPG energy out confirmed (display only)
 
-        // Convenience composites for testing
-        ArmedNominal  = NotAbort | Armed,                            // armed, no abort
-        ReadyToFire   = NotAbort | Armed | BDAVote | Combat,        // all votes except trigger
-        FullFireChain = NotAbort | Armed | BDAVote | Trigger | FireState | Combat,
+        // Composites — EMON always excluded
+        ARMED_NOMINAL   = NOT_ABORT | ARMED,
+        READY_TO_FIRE   = NOT_ABORT | ARMED | BDC_VOTE | LASER_TOTAL_HW | SW_VOTE,
+        FULL_FIRE_CHAIN = READY_TO_FIRE | TRIGGER | FIRE_STATE,
     }
 
     // -----------------------------------------------------------------------
-    // BDC geometry vote bits — 0xE0 SET_BCAST_FIRECONTROL_STATUS byte 2
-    // Send via: aTRC.SetFireStatus(mcc, FireVote.SetBdc(...))
+    // 0xE0 SET_BCAST_FIRECONTROL_STATUS byte 2 — BDC geometry vote bits (upper / summary)
+    // BDCTotalVote = override OR (FSMNotLimited AND (BelowHoriz ? InKIZ : InKIZ AND InLCH))
     // -----------------------------------------------------------------------
     [Flags]
-    public enum VOTE_BITS_BDC : byte
+    public enum BDC_VOTES : byte
     {
-        None           = 0,
-        BelowHorizon   = 1 << 0,  // bit0 — LOS below horizon
-        InKIZ          = 1 << 1,  // bit1 — within kill inhibit zone
-        InLCH          = 1 << 2,  // bit2 — within laser clear heading
-        BDAVote2       = 1 << 3,  // bit3 — BDA vote copy
-        // bit4 reserved
-        HorizLoaded    = 1 << 5,  // bit5 — horizon loaded
-        // bit6 reserved
-        FSMNotLimited  = 1 << 7,  // bit7 — FSM not at gimbal limit
+        None = 0,
+        BELOW_HORIZ_VOTE = 1 << 0,  // b0 — LOS below horizon (override or raw)
+        IN_KIZ_VOTE     = 1 << 1,  // b1 — within KIZ (override or raw)
+        IN_LCH_VOTE     = 1 << 2,  // b2 — within LCH (override or raw; above horizon only)
+        BDC_TOTAL_VOTE  = 1 << 3,  // b3 — BDC fire gate
+        HORIZ_LOADED    = 1 << 5,  // b5 — horizon elevation array loaded and valid
+        FSM_NOT_LIMITED = 1 << 7,  // b7 — FSM clear of angular limits
 
-        // Convenience composites for testing
-        GeoNominal     = FSMNotLimited,                              // FSM ok, above horizon
-        GeoBelow       = BelowHorizon | InKIZ | FSMNotLimited,      // below horizon, KIZ clear
-        GeoAbove       = InLCH | InKIZ | FSMNotLimited,             // above horizon, all clear
-        GeoAllClear    = BelowHorizon | InKIZ | InLCH | FSMNotLimited,
+        // Composites
+        GeoNominal      = FSM_NOT_LIMITED,
+        GeoBelow        = BELOW_HORIZ_VOTE | IN_KIZ_VOTE | FSM_NOT_LIMITED,
+        GeoAbove        = IN_KIZ_VOTE | IN_LCH_VOTE | FSM_NOT_LIMITED,
+        GeoAllClear     = BELOW_HORIZ_VOTE | IN_KIZ_VOTE | IN_LCH_VOTE | FSM_NOT_LIMITED,
+    }
+
+    // 0xE0 SET_BCAST_FIRECONTROL_STATUS byte 3 (MCC→BDC) / byte 6 (BDC→TRC)
+    // MCC detail byte — individual inputs composing SW_VOTE plus FC-CONSISTENCY flags.
+    // SW_VOTE in MCC_VOTES b4 = COMBAT (b2) AND BAT_NOT_LOW (b0).
+    [Flags]
+    public enum MCC_VOTES2 : byte
+    {
+        None            = 0,
+        BAT_NOT_LOW     = 1 << 0,  // b0 — voltage above trip threshold; input to SW_VOTE
+        TRAINING_MODE   = 1 << 1,  // b1 — laser power clamped to 10%; status, not a gate
+        COMBAT          = 1 << 2,  // b2 — System_State == COMBAT; input to SW_VOTE
+        EMON_MISSING    = 1 << 3,  // b3 — fire chain complete but no EMON
+        EMON_UNEXPECTED = 1 << 4,  // b4 — EMON present without fire chain
+        FIRE_INTERLOCKED = 1 << 5,  // b5 — trigger held but fire chain incomplete
+    }
+
+    // 0xE0 SET_BCAST_FIRECONTROL_STATUS byte 7 (BDC→TRC) — BDC detail byte
+    // Raw geometry inputs and override flags underlying BDC_VOTES.
+    [Flags]
+    public enum BDC_VOTES2 : byte
+    {
+        None                = 0,
+        HORIZ_VOTE_OVERRIDE = 1 << 0,  // b0 — eng mode only
+        KIZ_VOTE_OVERRIDE   = 1 << 1,  // b1 — eng mode only
+        LCH_VOTE_OVERRIDE   = 1 << 2,  // b2 — eng mode only
+        BDC_VOTE_OVERRIDE   = 1 << 3,  // b3 — eng mode only; bypasses BDCTotalVote entirely
+        IS_BELOW_HORIZ      = 1 << 4,  // b4 — raw horizon sensor input before override
+        IS_IN_KIZ           = 1 << 5,  // b5 — raw KIZ sensor input before override
+        IS_IN_LCH           = 1 << 6,  // b6 — raw LCH sensor input before override
     }
 
     // -----------------------------------------------------------------------
@@ -469,7 +496,7 @@ namespace CROSSBOW
     //   aTRC.SetFireStatus(mcc, bdc);
     //
     //   // Checkbox example (Armed):
-    //   aTRC.SetFireStatus(FireVote.Set(aTRC.VoteBitsMcc_RB, VOTE_BITS_MCC.Armed, chk_Armed.Checked),
+    //   aTRC.SetFireStatus(FireVote.Set(aTRC.VoteBitsMcc_RB, MCC_VOTES.Armed, chk_Armed.Checked),
     //                      aTRC.VoteBitsBdc_RB);
     // -----------------------------------------------------------------------
     public static class FireVote
@@ -478,44 +505,46 @@ namespace CROSSBOW
         public static byte SetMcc(
             bool notAbort   = false,
             bool armed      = false,
-            bool bdaVote    = false,
-            bool firing     = false,
+            bool bdcVote    = false,
+            bool laserTotalHW = false,
+            bool swVote     = false,
             bool trigger    = false,
             bool fireState  = false,
-            bool combat     = false)
+            bool emon       = false)
         {
-            VOTE_BITS_MCC flags = VOTE_BITS_MCC.None;
-            if (notAbort)   flags |= VOTE_BITS_MCC.NotAbort;
-            if (armed)      flags |= VOTE_BITS_MCC.Armed;
-            if (bdaVote)    flags |= VOTE_BITS_MCC.BDAVote;
-            if (firing)     flags |= VOTE_BITS_MCC.Firing;
-            if (trigger)    flags |= VOTE_BITS_MCC.Trigger;
-            if (fireState)  flags |= VOTE_BITS_MCC.FireState;
-            if (combat)     flags |= VOTE_BITS_MCC.Combat;
+            MCC_VOTES flags = MCC_VOTES.None;
+            if (notAbort)   flags |= MCC_VOTES.NOT_ABORT;
+            if (armed)      flags |= MCC_VOTES.ARMED;
+            if (bdcVote)    flags |= MCC_VOTES.BDC_VOTE;
+            if (laserTotalHW) flags |= MCC_VOTES.LASER_TOTAL_HW;
+            if (swVote)     flags |= MCC_VOTES.SW_VOTE;
+            if (trigger)    flags |= MCC_VOTES.TRIGGER;
+            if (fireState)  flags |= MCC_VOTES.FIRE_STATE;
+            if (emon)       flags |= MCC_VOTES.EMON;
             return (byte)flags;
         }
 
         /// <summary>Build a BDC vote bitmask from named flags.</summary>
         public static byte SetBdc(
-            bool belowHorizon  = false,
-            bool inKIZ         = false,
-            bool inLCH         = false,
-            bool bdaVote2      = false,
-            bool horizLoaded   = false,
-            bool fsmNotLimited = false)
+            bool belowHorizVote = false,
+            bool inKIZVote      = false,
+            bool inLCHVote      = false,
+            bool bdcTotalVote   = false,
+            bool horizLoaded    = false,
+            bool fsmNotLimited  = false)
         {
-            VOTE_BITS_BDC flags = VOTE_BITS_BDC.None;
-            if (belowHorizon)   flags |= VOTE_BITS_BDC.BelowHorizon;
-            if (inKIZ)          flags |= VOTE_BITS_BDC.InKIZ;
-            if (inLCH)          flags |= VOTE_BITS_BDC.InLCH;
-            if (bdaVote2)       flags |= VOTE_BITS_BDC.BDAVote2;
-            if (horizLoaded)    flags |= VOTE_BITS_BDC.HorizLoaded;
-            if (fsmNotLimited)  flags |= VOTE_BITS_BDC.FSMNotLimited;
+            BDC_VOTES flags = BDC_VOTES.None;
+            if (belowHorizVote)     flags |= BDC_VOTES.BELOW_HORIZ_VOTE;
+            if (inKIZVote)          flags |= BDC_VOTES.IN_KIZ_VOTE;
+            if (inLCHVote)          flags |= BDC_VOTES.IN_LCH_VOTE;
+            if (bdcTotalVote)       flags |= BDC_VOTES.BDC_TOTAL_VOTE;
+            if (horizLoaded)        flags |= BDC_VOTES.HORIZ_LOADED;
+            if (fsmNotLimited)      flags |= BDC_VOTES.FSM_NOT_LIMITED;
             return (byte)flags;
         }
 
         /// <summary>Set or clear a single MCC flag in an existing bitmask.</summary>
-        public static byte Set(byte current, VOTE_BITS_MCC flag, bool enable)
+        public static byte Set(byte current, MCC_VOTES flag, bool enable)
         {
             return enable
                 ? (byte)(current | (byte)flag)
@@ -523,7 +552,7 @@ namespace CROSSBOW
         }
 
         /// <summary>Set or clear a single BDC flag in an existing bitmask.</summary>
-        public static byte Set(byte current, VOTE_BITS_BDC flag, bool enable)
+        public static byte Set(byte current, BDC_VOTES flag, bool enable)
         {
             return enable
                 ? (byte)(current | (byte)flag)
@@ -531,10 +560,10 @@ namespace CROSSBOW
         }
 
         /// <summary>Check if a specific MCC flag is set.</summary>
-        public static bool IsSet(byte mask, VOTE_BITS_MCC flag) => (mask & (byte)flag) != 0;
+        public static bool IsSet(byte mask, MCC_VOTES flag) => (mask & (byte)flag) != 0;
 
         /// <summary>Check if a specific BDC flag is set.</summary>
-        public static bool IsSet(byte mask, VOTE_BITS_BDC flag) => (mask & (byte)flag) != 0;
+        public static bool IsSet(byte mask, BDC_VOTES flag) => (mask & (byte)flag) != 0;
     }
 
     // -----------------------------------------------------------------------

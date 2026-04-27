@@ -20,14 +20,6 @@ namespace CROSSBOW
 {
     public class MCC
     {
-        public enum READY_STATUS
-        {
-            ALIVE,
-            READY,
-            WARN,
-            ERROR,
-            NA,
-        }
 
         // ── Frame constants ───────────────────────────────────────────────────
         private const byte MAGIC_HI             = 0xCB;
@@ -156,6 +148,9 @@ namespace CROSSBOW
                 Send(BuildFrame((byte)ICD.FRAME_KEEPALIVE));
                 _lastKeepalive = DateTime.UtcNow;
                 Debug.WriteLine("MCC: A3 registration sent (0xA4)");
+                Thread.Sleep(20);  // brief pause to allow firmware to process registration before we start receiving frames
+                Send((byte)ICD.SET_UNSOLICITED, new byte[] { 0x01 });
+                Log?.Information("BDC: unsolicited subscribed (0xA0)");
             }
 
             Log?.Information("MCC UDP connected ({LocalIp}:{Port} → {RemoteIp})",
@@ -187,7 +182,7 @@ namespace CROSSBOW
                             HB_RX_ms = (now - lastMsgRx).TotalMilliseconds;
                             lastMsgRx = now;
 
-                            if (rxBuff[3] == 0x00 || rxBuff[3] == 0xA1)  // REG1 CMD_BYTE: 0x00 (v4.0.0) | 0xA1 (legacy pre-FW-C10)
+                            if (rxBuff[3] == 0x00 || rxBuff[3] == 0xA1 || rxBuff[3] == (byte)ICD.FRAME_KEEPALIVE) // REG1 CMD_BYTE: 0x00 (v4.0.0) | 0xA1 (legacy pre-FW-C10) keepalive ACK — ParseA3 dispatches internally
                                 LatestMSG.Parse(rxBuff);
                             else
                                 Debug.WriteLine($"MCC: A3 ACK rx CMD=0x{rxBuff[3]:X2}");
@@ -469,45 +464,6 @@ namespace CROSSBOW
         {
             if (!AssertIntEng("SetTargetTemp")) return;
             Send((byte)ICD.TMS_SET_TARGET_TEMP, new byte[] { tt });
-        }
-
-        // ── Connection + status ───────────────────────────────────────────────
-        public bool MCC_STATUS { get { return LatestMSG.HB_ms < 200; } }
-        public bool TMC_STATUS { get { return LatestMSG.isTMC_DeviceReady; } }
-        public bool GPS_STATUS { get { return LatestMSG.isGNSS_DeviceReady && LatestMSG.GNSSMsg.SIV >= 4; } }
-
-        private const int HEL_HB_STALE_ms = 200;   // laser silent > 200ms = stale
-
-        public READY_STATUS HEL_STATUS
-        {
-            get
-            {
-                if (!LatestMSG.isHEL_Sensed) return READY_STATUS.ERROR;
-                if (LatestMSG.HB_HEL_ms > HEL_HB_STALE_ms) return READY_STATUS.ERROR;
-
-                if (LatestMSG.LaserModel == LASER_MODEL.YLM_6K)
-                {
-                    // 6K has no HK/bus voltage readback — use notready bit only
-                    return LatestMSG.isHEL_NOTREADY ? READY_STATUS.WARN : READY_STATUS.READY;
-                }
-
-                // 3K — validate HK and bus voltage before declaring ready
-                if ((LatestMSG.IPGMsg.HKVoltage > 23.3) && (LatestMSG.IPGMsg.BusVoltage > 40))
-                    return LatestMSG.isHEL_NOTREADY ? READY_STATUS.WARN : READY_STATUS.READY;
-
-                return READY_STATUS.ERROR;
-            }
-        }
-
-        public Color COLOR_FROM_STATUS(READY_STATUS status)
-        {
-            switch (status)
-            {
-                case READY_STATUS.READY: return Color.Green;
-                case READY_STATUS.WARN:  return Color.Orange;
-                default:
-                case READY_STATUS.ERROR: return Color.Red;
-            }
         }
     }
 }

@@ -90,10 +90,7 @@ namespace CROSSBOW
         public UInt16 HB_ms { get; private set; } = 1000;
         public UInt16 dt_us { get; private set; } = 0;
 
-        // Backward-compat aliases — existing UI bindings continue to work
-        public UInt32 HB_TX_us { get { return (UInt32)HB_ms * 1000u; } }
         public double HB_TX_ms { get { return (double)HB_ms; } }
-        public UInt32 dt       { get { return (UInt32)dt_us; } }
 
         // ── Version ───────────────────────────────────────────────────────────
         public UInt32 FW_VERSION { get; private set; } = 0;
@@ -113,8 +110,6 @@ namespace CROSSBOW
         // ── Status / device bits ──────────────────────────────────────────────
         public byte DeviceEnabledBits { get; private set; } = 0;
         public byte DeviceReadyBits   { get; private set; } = 0;
-        public byte StatusBits => HealthBits;   // backward compat
-        public byte StatusBits2 => PowerBits;    // backward compat
         public byte HealthBits { get; private set; } = 0;   // byte 9 — renamed from StatusBits
         public byte PowerBits { get; private set; } = 0;   // byte 10 — renamed from StatusBits2
         public byte HW_REV { get; private set; } = 0;   // byte 254 — 0x01=V1, 0x02=V2, 0x03=V3
@@ -127,6 +122,53 @@ namespace CROSSBOW
                                     : $"unknown (0x{HW_REV:X2})";
 
         public LASER_MODEL LaserModel { get; private set; } = LASER_MODEL.UNKNOWN;  // byte 255 — v3.5.0
+
+        // Device STATUS_BITS bytes [256-263] — per-device health packed by firmware
+        public byte DeviceWarnBits { get; private set; } = 0;  // [257] DEVICE_WARN_BITS
+        public byte TMC_StatusBits { get; private set; } = 0;  // [258] MCC_TMC_STATUS_BITS
+        public byte HEL_StatusBits { get; private set; } = 0;  // [259] MCC_HEL_STATUS_BITS
+        public byte BAT_StatusBits { get; private set; } = 0;  // [260] MCC_BAT_STATUS_BITS
+        public byte CRG_StatusBits { get; private set; } = 0;  // [261] MCC_CRG_STATUS_BITS
+        public byte GNSS_StatusBits { get; private set; } = 0;  // [262] MCC_GNSS_STATUS_BITS
+        public byte BDC_StatusBits { get; private set; } = 0;  // [263] MCC_BDC_STATUS_BITS
+
+        // =========================================================================
+        // Device STATUS_BITS accessors — mirror firmware mcc.hpp bit layout
+        // =========================================================================
+
+        // TMC_StatusBits [258]
+        public bool isTMC_Connected { get { return (TMC_StatusBits & 0x01) != 0; } }  // b0
+
+        // HEL_StatusBits [259]
+        public bool isHEL_Sensed { get { return (HEL_StatusBits & 0x01) != 0; } }  // b0
+        public bool isHEL_HB_OK { get { return (HEL_StatusBits & 0x02) != 0; } }  // b1
+        public bool isHEL_NotReady { get { return (HEL_StatusBits & 0x04) != 0; } }  // b2 — set = error
+        public bool isHEL_ModelMatch { get { return (HEL_StatusBits & 0x08) != 0; } }  // b3
+        public bool isHEL_EMON_sb { get { return (HEL_StatusBits & 0x10) != 0; } }  // b4 — display only
+        public bool isHEL_EMON_Missing { get { return (HEL_StatusBits & 0x20) != 0; } }  // b5
+        public bool isHEL_EMON_Unexpected { get { return (HEL_StatusBits & 0x40) != 0; } }  // b6
+        public bool isHEL_FireInterlocked { get { return (HEL_StatusBits & 0x80) != 0; } }  // b7
+
+        // BAT_StatusBits [260]
+        public bool isBAT_Connected { get { return (BAT_StatusBits & 0x01) != 0; } }  // b0
+        public bool isBAT_NotLowVoltage { get { return (BAT_StatusBits & 0x02) != 0; } }  // b1
+        public bool isBAT_Charging { get { return (BAT_StatusBits & 0x04) != 0; } }  // b2 — display only
+        public bool isBAT_Discharging { get { return (BAT_StatusBits & 0x08) != 0; } }  // b3 — display only
+
+        // CRG_StatusBits [261]
+        public bool isCRG_Connected { get { return (CRG_StatusBits & 0x01) != 0; } }  // b0
+        public bool isCRG_Enabled { get { return (CRG_StatusBits & 0x02) != 0; } }  // b1
+
+        // GNSS_StatusBits [262]
+        public bool isGNSS_Connected { get { return (GNSS_StatusBits & 0x01) != 0; } }  // b0
+        public bool isGNSS_HB_OK { get { return (GNSS_StatusBits & 0x02) != 0; } }  // b1
+        public bool isGNSS_PositionValid { get { return (GNSS_StatusBits & 0x04) != 0; } }  // b2
+        public bool isGNSS_SIV_OK { get { return (GNSS_StatusBits & 0x08) != 0; } }  // b3
+
+        // BDC_StatusBits [263]
+        public bool isBDC_Enabled { get { return (BDC_StatusBits & 0x01) != 0; } }  // b0
+        public bool isBDC_Reachable { get { return (BDC_StatusBits & 0x02) != 0; } }  // b1
+
         public bool isVerboseLogEnabled { get; set; } = true;
 
         /// <summary>
@@ -157,22 +199,31 @@ namespace CROSSBOW
                 }
             }
         }
-
-
-        // ── Vote bits with change logging ─────────────────────────────────────
-        private byte _voteBits { get; set; } = 0;
-        public  byte LastVoteBits { get; private set; } = 0;
-        public  byte VoteBits
+        private byte _voteBitsMCC { get; set; } = 0;
+        public byte LastVOTE_BITS_MCC { get; private set; } = 0;
+        public byte VOTE_BITS_MCC  // [11] MCC gate-chain summary
         {
-            get { return _voteBits; }
+            get { return _voteBitsMCC; }
             set
             {
-                if (isVerboseLogEnabled && _voteBits != value)
-                {
-                    Log?.Information($"MCC VOTE CHANGED {Convert.ToString(_voteBits, 2).PadLeft(8, '0')} -> {Convert.ToString(value, 2).PadLeft(8, '0')}");
-                }
-                LastVoteBits = value;
-                _voteBits    = value;
+                if (isVerboseLogEnabled && _voteBitsMCC != value)
+                    Log?.Information($"MCC VOTES CHANGED {Convert.ToString(_voteBitsMCC, 2).PadLeft(8, '0')} -> {Convert.ToString(value, 2).PadLeft(8, '0')}");
+                LastVOTE_BITS_MCC = value;
+                _voteBitsMCC = value;
+            }
+        }
+
+        private byte _voteBitsMCC2 { get; set; } = 0;
+        public byte LastVOTE_BITS_MCC2 { get; private set; } = 0;
+        public byte VOTE_BITS_MCC2  // [256] MCC detail
+        {
+            get { return _voteBitsMCC2; }
+            set
+            {
+                if (isVerboseLogEnabled && _voteBitsMCC2 != value)
+                    Log?.Information($"MCC VOTES2 CHANGED {Convert.ToString(_voteBitsMCC2, 2).PadLeft(8, '0')} -> {Convert.ToString(value, 2).PadLeft(8, '0')}");
+                LastVOTE_BITS_MCC2 = value;
+                _voteBitsMCC2 = value;
             }
         }
 
@@ -341,7 +392,7 @@ namespace CROSSBOW
         //   [8]       DeviceReadyBits
         //   [9]       HealthBits     (isReady b0, isChargerEnabled b1, isNotBatLowVoltage b2, isTrainingMode b3, isLaserModelMatch b4)
         //   [10]      PowerBits      (bit N = MCC_POWER value N — RELAY_GPS/VICOR_BUS/RELAY_LASER/VICOR_GIM/VICOR_TMS/SOL_HEL/SOL_BDA/RELAY_NTP)
-        //   [11]      VoteBits
+        //   [11]      MCC_VOTES_BITS  
         //   [12-19]   NTP epoch ms   Int64
         //   [20]      Temp1 (Charger) int8
         //   [21]      Temp2 (Air)     int8
@@ -363,6 +414,14 @@ namespace CROSSBOW
         //   [253]      TIME_BITS (session 32) — isPTP_En, ptp.isSynched, usingPTP, ntp.isSynched, ntpUsingFB, ntpHasFB
         //   [254]      HW_REV — 0x01=V1, 0x02=V2 (MCC unification session)
         //   [255]      LASER_MODEL — 0x00=UNKNOWN, 0x01=YLM_3K, 0x02=YLM_6K (v3.5.0)
+        //   [256]      MCC_VOTES2_BITS — BAT_NOT_LOW, TRAINING_MODE, COMBAT, EMON_MISSING, EMON_UNEXPECTED, FIRE_INTERLOCKED
+        //   [257]      DEVICE_WARN_BITS — per-device warn summary (same bit layout as DEVICE_ENABLED_BITS)
+        //   [258]      MCC_TMC_STATUS_BITS
+        //   [259]      MCC_HEL_STATUS_BITS
+        //   [260]      MCC_BAT_STATUS_BITS
+        //   [261]      MCC_CRG_STATUS_BITS
+        //   [262]      MCC_GNSS_STATUS_BITS
+        //   [263]      MCC_BDC_STATUS_BITS
         // =========================================================================
         private void ParseMSG01(byte[] msg, int ndx)
         {
@@ -377,7 +436,7 @@ namespace CROSSBOW
             DeviceReadyBits   = msg[ndx]; ndx++;
             HealthBits = msg[ndx]; ndx++;   // was StatusBits
             PowerBits = msg[ndx]; ndx++;   // was StatusBits2
-            VoteBits          = msg[ndx]; ndx++;
+            VOTE_BITS_MCC = msg[ndx]; ndx++;  // [11]  MCC_VOTES
 
             // ICD v3.0.0 session 4: NTP epoch ms only — no RTC field
             _ntpTime = BitConverter.ToInt64(msg, ndx); ndx += sizeof(Int64);
@@ -417,6 +476,15 @@ namespace CROSSBOW
             // propagate to IPGMsg so PowerSetting_W and IsEMON decode correctly
             IPGMsg.LaserModel = LaserModel;
 
+            VOTE_BITS_MCC2 = msg[ndx]; ndx++;  // [256] MCC_VOTES2
+            DeviceWarnBits = msg[ndx]; ndx++;  // [257] DEVICE_WARN_BITS
+            TMC_StatusBits = msg[ndx]; ndx++;  // [258] MCC_TMC_STATUS_BITS
+            HEL_StatusBits = msg[ndx]; ndx++;  // [259] MCC_HEL_STATUS_BITS
+            BAT_StatusBits = msg[ndx]; ndx++;  // [260] MCC_BAT_STATUS_BITS
+            CRG_StatusBits = msg[ndx]; ndx++;  // [261] MCC_CRG_STATUS_BITS
+            GNSS_StatusBits = msg[ndx]; ndx++;  // [262] MCC_GNSS_STATUS_BITS
+            BDC_StatusBits = msg[ndx]; ndx++;  // [263] MCC_BDC_STATUS_BITS
+
             if (dt_us > dtmax)
             {
                 dtmax = dt_us;
@@ -434,8 +502,8 @@ namespace CROSSBOW
         // HealthBits accessors [byte 9] — isReady(0), isChargerEnabled(1), isNotBatLowVoltage(2)
         public bool isReady { get { return IsBitSet(HealthBits, 0); } }   // new — was missing from old StatusBits
         public bool isCharger_Enabled { get { return IsBitSet(HealthBits, 1); } }   // was bit 4
-        public bool isNotBatLowVoltage { get { return IsBitSet(HealthBits, 2); } }   // was bit 5
-        public bool isHEL_TrainingMode { get { return IsBitSet(HealthBits, 3); } }  // v3.5.0 — MCC training mode flag
+        public bool isNotBatLowVoltage { get { return (VOTE_BITS_MCC2 & (byte)MCC_VOTES2.BAT_NOT_LOW) != 0; } }
+        public bool isHEL_TrainingMode { get { return (VOTE_BITS_MCC2 & (byte)MCC_VOTES2.TRAINING_MODE) != 0; } }
         // Solenoid/laser moved to PowerBits — compat aliases so existing call sites don't break
         public bool isSolenoid1_Enabled { get { return IsBitSet(PowerBits, (int)MCC_POWER.SOL_HEL); } }
         public bool isSolenoid2_Enabled { get { return IsBitSet(PowerBits, (int)MCC_POWER.SOL_BDA); } }
@@ -464,13 +532,6 @@ namespace CROSSBOW
         // false until laser connects; combined with isHEL_Ready for full diagnostic
         public bool isLaserModelMatch { get { return IsBitSet(HealthBits, 4); } }
 
-        // Backward-compat aliases — revision-aware so existing call sites return correct value
-        public bool isVicor_Enabled { get { return IsV2 ? pb_VicorGim : pb_VicorBus; } }
-        public bool isRelay1_Enabled { get { return IsV2 ? pb_RelayLaser : pb_RelayGps; } }
-        public bool isRelay2_Enabled { get { return IsV2 ? pb_VicorTms : pb_RelayLaser; } }
-        public bool isRelay3_Enabled { get { return false; } }  // retired — not in PowerBits
-        public bool isRelay4_Enabled { get { return false; } }  // retired — not in PowerBits
-
         // TimeBits redirects — unchanged
         public bool ntpUsingFallback { get { return tb_ntpUsingFallback; } }
         public bool ntpHasFallback { get { return tb_ntpHasFallback; } }
@@ -479,14 +540,23 @@ namespace CROSSBOW
         // =========================================================================
         // VoteBits accessors
         // =========================================================================
-        public bool isLaserTotalHW_Vote_rb       { get { return IsBitSet(VoteBits, 0); } }
-        public bool isNotAbort_Vote_rb           { get { return IsBitSet(VoteBits, 1); } }
-        public bool isArmed_Vote_rb              { get { return IsBitSet(VoteBits, 2); } }
-        public bool isBDA_Vote_rb                { get { return IsBitSet(VoteBits, 3); } }
-        public bool isEMON                       { get { return IsBitSet(VoteBits, 4); } }
-        public bool isLaserFireRequested_Vote_rb { get { return IsBitSet(VoteBits, 5); } }
-        public bool isLaserTotal_Vote_rb         { get { return IsBitSet(VoteBits, 6); } }
-        public bool isCombat_Vote_rb             { get { return IsBitSet(VoteBits, 7); } }
+        // VOTE_BITS_MCC [11] — gate-chain order b0→b7
+        public bool isNotAbort_Vote_rb { get { return (VOTE_BITS_MCC & (byte)MCC_VOTES.NOT_ABORT) != 0; } }
+        public bool isArmed_Vote_rb { get { return (VOTE_BITS_MCC & (byte)MCC_VOTES.ARMED) != 0; } }
+        public bool isBDC_Vote_rb { get { return (VOTE_BITS_MCC & (byte)MCC_VOTES.BDC_VOTE) != 0; } }
+        public bool isLaserTotalHW_Vote_rb { get { return (VOTE_BITS_MCC & (byte)MCC_VOTES.LASER_TOTAL_HW) != 0; } }
+        public bool isSW_Vote_rb { get { return (VOTE_BITS_MCC & (byte)MCC_VOTES.SW_VOTE) != 0; } }
+        public bool isTrigger_Vote_rb { get { return (VOTE_BITS_MCC & (byte)MCC_VOTES.TRIGGER) != 0; } }
+        public bool isFireState_Vote_rb { get { return (VOTE_BITS_MCC & (byte)MCC_VOTES.FIRE_STATE) != 0; } }
+        public bool isEMON { get { return (VOTE_BITS_MCC & (byte)MCC_VOTES.EMON) != 0; } }
+
+        // VOTE_BITS_MCC2 [256] — detail / diagnostic
+        public bool isBatNotLow { get { return (VOTE_BITS_MCC2 & (byte)MCC_VOTES2.BAT_NOT_LOW) != 0; } }
+        public bool isTrainingMode { get { return (VOTE_BITS_MCC2 & (byte)MCC_VOTES2.TRAINING_MODE) != 0; } }
+        public bool isCombat_Vote_rb { get { return (VOTE_BITS_MCC2 & (byte)MCC_VOTES2.COMBAT) != 0; } }
+        public bool isEMON_Missing { get { return (VOTE_BITS_MCC2 & (byte)MCC_VOTES2.EMON_MISSING) != 0; } }
+        public bool isEMON_Unexpected { get { return (VOTE_BITS_MCC2 & (byte)MCC_VOTES2.EMON_UNEXPECTED) != 0; } }
+        public bool isFireInterlocked { get { return (VOTE_BITS_MCC2 & (byte)MCC_VOTES2.FIRE_INTERLOCKED) != 0; } }
 
         // =========================================================================
         // DeviceEnabled / DeviceReady accessors
@@ -512,6 +582,24 @@ namespace CROSSBOW
         public bool isGNSS_DeviceReady   { get { return IsBitSet(DeviceReadyBits, (int)MCC_DEVICES.GNSS); } }
         public bool isBDC_DeviceReady    { get { return IsBitSet(DeviceReadyBits, (int)MCC_DEVICES.BDC);  } }
 
+        public bool isNTP_DeviceWarn { get { return IsBitSet(DeviceWarnBits, (int)MCC_DEVICES.NTP); } }
+        public bool isTMC_DeviceWarn { get { return IsBitSet(DeviceWarnBits, (int)MCC_DEVICES.TMC); } }
+        public bool isHEL_DeviceWarn { get { return IsBitSet(DeviceWarnBits, (int)MCC_DEVICES.HEL); } }
+        public bool isBAT_DeviceWarn { get { return IsBitSet(DeviceWarnBits, (int)MCC_DEVICES.BAT); } }
+        public bool isPTP_DeviceWarn { get { return IsBitSet(DeviceWarnBits, (int)MCC_DEVICES.PTP); } }
+        public bool isCRG_DeviceWarn { get { return IsBitSet(DeviceWarnBits, (int)MCC_DEVICES.CRG); } }
+        public bool isGNSS_DeviceWarn { get { return IsBitSet(DeviceWarnBits, (int)MCC_DEVICES.GNSS); } }
+        public bool isBDC_DeviceWarn { get { return IsBitSet(DeviceWarnBits, (int)MCC_DEVICES.BDC); } }
+
+        // ADD — allows pre-connect ping to populate bits before REG1 arrives
+        public void SetDeviceReady(MCC_DEVICES dev, bool ready)
+        {
+            if (ready)
+                DeviceReadyBits |= (byte)(1 << (int)dev);
+            else
+                DeviceReadyBits &= (byte)~(1 << (int)dev);
+        }
+
         // =========================================================================
         // HEL accessors (via IPGMsg)
         // =========================================================================
@@ -519,7 +607,7 @@ namespace CROSSBOW
         public bool isHEL_NOTREADY { get { return IPGMsg.IsNotReady; } }   // model-aware — 3K=bit9, 6K=bit11
         public bool isHEL_EXT_EM_ENABLED { get { return IsBitSet(IPGMsg.StatusWord, 5); } }  // 3K only
         public bool isHEL_LowPowerMode { get { return IsBitSet(IPGMsg.StatusWord, 15); } }  // 3K only — reserved
-        public bool isHEL_Sensed { get { return IPGMsg.IsSensed; } }
+        //public bool isHEL_Sensed { get { return IPGMsg.IsSensed; } }
         public int HEL_MaxPower_W { get { return IPGMsg.MaxPower_W; } }
 
         // =========================================================================

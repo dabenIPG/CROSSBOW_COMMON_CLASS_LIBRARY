@@ -2,8 +2,8 @@
 
 **Document:** `CROSSBOW_CHANGELOG.md`
 **Doc #:** IPGD-0019
-**Version:** 4.5.0
-**Date:** 2026-04-19
+**Version:** 4.6.0
+**Date:** 2026-04-25
 **Status:** Current
 **Supersedes:** `Embedded_Controllers_ACTION_ITEMS.md` (unregistered, retired), `Embedded_Controllers_CLOSED_ACTION_ITEMS.md` (unregistered, retired)
 
@@ -21,6 +21,69 @@ Session numbers marked `~` are approximate where the exact session number is unc
 ---
 
 # PART 1 — SESSION LOG
+
+---
+
+## CB-20260425 — Full codebase review: MCC / TMC / tmc_drv / FMC / TRC / frame.hpp
+**Files:** `mcc.cpp`, `mcc.hpp`, `tmc.cpp`, `tmc.hpp`, `tmc_drv.cpp`, `tmc_drv.hpp`, `fmc.cpp`, `fmc.hpp`, `frame.hpp`, `trc_frame.hpp`, `trc_a1.hpp`, `udp_listener.cpp`, `types.h`, `defines.hpp`
+**ICD:** no change
+**ARCH:** v4.0.5 → v4.0.6
+
+**Summary:** Structured review of MCC, TMC, tmc_drv, FMC, and TRC codebases. Established authoritative A1 ARP backoff standard pattern (non-blocking — W5500 `endPacket()` returns immediately on ARP miss). Fixed fleet-wide FW-C10 CMD_BYTE at source in `frame.hpp::frameSendA1` — single edit propagates to TMC, FMC, TRC simultaneously. Corrected MCC `SEND_FIRE_STATUS` self-locking `isBDC_Ready` gate. `tmc_drv` fan speed clamping bug fixed (0–100% → raw PWM 0–255). FMC confirmed clean — no changes needed. TRC frame structure confirmed functionally equivalent to `frame.hpp`. TRC A1 backoff confirmed not needed (Linux kernel handles ARP asynchronously).
+
+**`frame.hpp` changes:**
+- `frameSendA1`: CMD_BYTE `0xA1` → `0x00` — FW-C10 fix at source; single edit covers TMC, FMC, TRC
+- Stale note updated: `0xA1 is still used as CMD_BYTE` → `CMD_BYTE 0x00 used in all unsolicited REG1 frames (FW-C10)`
+
+**`mcc.cpp` / `mcc.hpp` changes:**
+- `SEND_FIRE_STATUS`: gate changed `isBDC_Ready` → `isBDC_Enabled`; ARP backoff added (`bdcA1FailCount`, `bdcA1BackoffCount`, `BDC_A1_FAIL_MAX=3`, `BDC_A1_BACKOFF_TICKS=5`); `isBDC_Ready = endPacket()` retained — only real-time feedback on BDC reachability
+- All other `isBDC_Ready` set points (StateManager V1/V3-3kW SOL_BDA, EnablePower VICOR_GIM V2/V3-6kW, RE_INIT_DEVICE BDC) commented out — `isBDC_Ready` now driven exclusively by `SEND_FIRE_STATUS` endPacket result
+- `StateManager` V1 OFF/FAULT/MAINT: stray `EnablePower(RELAY_NTP, false)` removed (RELAY_NTP is V3-only; fell to `default:` on V1 logging an error on every shutdown)
+- `RE_INIT_DEVICE(NTP)`: spurious `ptp.INIT()` call removed
+- `PRINT_REG()` CMD BYTE: `0xA1` → `0x00`
+- `HB_HEL()`: return type `uint16_t` → `uint8_t constrain(..., 0, 255)`; PRINT_REG label updated to `ms (sat 255)`
+
+**`tmc_drv.cpp` / `tmc_drv.hpp` changes:**
+- `SetFanSpeed`: clamping `constrain(speedPct, 0, 100)` removed; parameter renamed `speedPct` → `speed`; block comment and debug print updated — raw PWM `0=OFF 128=LO 255=HI`
+
+**`tmc.cpp` / `tmc.hpp` changes:**
+- `PRINT_REG()` CMD BYTE: `0xA1` → `0x00`
+- `buildReg01()` header comment: `CMD_BYTE 0xA1 (outbound REG1 identifier)` → `CMD_BYTE 0x00 (legacy 0xA1 retired — FW-C10)`
+- Flow sensor defaults `f1=3.66`, `f2=5.12`: intent documented — non-zero prevents false flow errors before ISR populates real values; do not change to 0.0f without adding an initialisation-armed guard
+
+**`trc_frame.hpp` / `trc_a1.hpp` changes:**
+- Header comments: `ICD v1.7 session 4` → `ICD v4.2.1`
+
+**`udp_listener.cpp` changes:**
+- `SET_SYSTEM_STATE` / `SET_GIMBAL_MODE` case comments: `// 0xB8` / `// 0xB9` → `// 0xA5` / `// 0xA6` (stale — enum resolves to correct values)
+
+**`types.h` changes:**
+- A1_PORT comment: `0xAB fire control status RX` → `0xE0 fire control status RX`
+
+**`defines.hpp` changes:**
+- File header date: `2026-04-12` → `2026-04-22 (DEF-2: TMC enums moved to tmc.hpp)`
+- `SET_FIRE_REQUESTED_VOTE` (0xAB): clarifying cross-reference added — notes 0xAB was previously SET_BCAST_FIRECONTROL_STATUS (now 0xE0); see RES_E6
+
+**A1 ARP backoff — authoritative standard pattern (CB-20260425):**
+Non-blocking. `endPacket()` on W5500 returns immediately on ARP miss (drops packet, returns 0 — no stall). Backoff purpose is to limit SPI bus traffic when peer is offline. Pattern: gate uses the device *enabled* flag (not ready flag); `FAIL_MAX=3` always; `BACKOFF_TICKS × TICK_ms` = 25 ms–2 s proportional to stream rate; peer-ready flag set exclusively by `endPacket()` result — the only real-time feedback on peer reachability; reset counters in corresponding `RE_INIT_DEVICE()` case.
+
+**Items closed:**
+| ID | Item |
+|----|------|
+| FW-C10 | CMD_BYTE `0x00` fixed at source in `frameSendA1` — single edit covers TMC, FMC, TRC |
+| FW-C4 | BDC A1 ARP backoff confirmed correct this session; stale "not working" note retired |
+| TRC-CMD-BYTES | SET_SYSTEM_STATE/SET_GIMBAL_MODE stale comments corrected — enum resolves correctly |
+| TRC stale comments | `trc_frame.hpp`, `trc_a1.hpp`, `types.h` updated |
+| ARCH §2.2a TMC verify | FW-B4 confirmed from TMC source — verify qualifier removed |
+| FW-C5-FRAME-CLEANUP | `frame.hpp` dead `A1_DEST_*_IP` block deleted; `tmc.hpp` comment updated to `IP_MCC_BYTES`; `fmc.hpp` stale TODO removed |
+| DOC-1 | ARCH §2.5 already contains full TRC NTP config — `timesyncd.conf`, `timedatectl`, JETSON_SETUP.md cross-reference. Closed without additional edits. |
+| INT_ENG stale 0xAB | Four references to `0xAB` corrected to `0xE0` in INT_ENG v4.2.2 — connection diagram, `HB_MCC_ms`, `voteBitsMcc`, FCVOTES note |
+
+**Items opened:**
+| ID | Item | Priority |
+|----|------|----------|
+| FW-FUJI-1 | BDC `FUJI_WAIT` timeout 10 s vs ARCH 5 s — hold pending HW stability investigation | 🔴 HW |
+| THEIA-POS-JOG-1 | POS mode gimbal unresponsive — `XBOX_FOV_SCALE=0` when `VIS_FOV=0`; add `Debug.WriteLine(vx, vy, XBOX_FOV_SCALE, VIS_FOV)` at failure point | 🔴 HW |
 
 ---
 
@@ -1145,7 +1208,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 
 | ID | Item | Status | Detail | Files |
 |----|------|--------|--------|-------|
-| DOC-1 | Add TRC NTP setup reference to ARCHITECTURE.md §2.5 | ⏳ Open | Add `timesyncd.conf` entry (`NTP=192.168.1.33`, fallback `.208`), `timedatectl` verification command, `systemctl restart systemd-timesyncd`. Cross-reference to JETSON_SETUP.md. Assess whether partially addressed by ARCH v3.3.5 update. | `ARCHITECTURE.md` §2.5 |
+| ~~DOC-1~~ | ~~Add TRC NTP setup reference to ARCHITECTURE.md §2.5~~ | ✅ **Closed CB-20260425** | §2.5 already contains full `timesyncd.conf` config, `timedatectl` verification, and JETSON_SETUP.md cross-reference. Content was added when §2.5 was written; item was not retroactively closed at the time. | `ARCHITECTURE.md` §2.5 ✅ |
 | DOC-3 | File format specs in ICD INT_ENG and INT_OPS | ⏳ Open | Add file format specifications for horizon files, KIZ/LCH uploads, and survey data to both INT_ENG and INT_OPS ICDs. Currently undocumented — integrators have no reference for file structure. | `CROSSBOW_ICD_INT_ENG.md`, `CROSSBOW_ICD_INT_OPS.md` |
 | CROSS-APP-1 | CROSS_APP_SUMMARY.md update pass | 🟢 Low | Document at v3.0.5 (2026-03-17), ICD ref v3.1.0, ARCH ref v3.0.3 — all significantly stale. Update needed: header refs → ICD v3.6.0 / ARCH v3.3.7; §5/§6/§7 `ICD.GET_REGISTER1` dispatch → literal bytes (FW-C10); §8 FW version table → 4.0.0 fleet-wide; §9 defines → v4.0.0; §11 document set → all current versions + new docs; §12 close NEW-9/10/18/31/33/35; §12 add NEW-32, S19-33–37; §13 close #14→FW-14, TRC-M9. Bump document version to 4.0.0. | `CROSS_APP_SUMMARY.md` |
 | GST-1 | GSTREAMER_INSTALL.md update pass — retired command references | 🟡 Open | §8 Multicast: references `0xD1 ORIN_SET_STREAM_MULTICAST` as pending action item — command **retired** in CB-20260412. Multicast already works via `--dest-host 239.127.1.21` launch flag (per TRC README). Rewrite §8 to document current working multicast path. §11 30fps: references `0xD2 ORIN_SET_STREAM_60FPS` as pending — **retired** (RES_D2). 30fps now ASCII-only via `FRAMERATE 30`. TRC binary name `multi_streamer` → `trc` throughout. Pipeline parameters (buffer-size, latency, PixelShift -420) confirmed correct — no changes needed there. | `GSTREAMER_INSTALL.md` — §8, §11, binary name |
@@ -1169,7 +1232,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | ~~DEPLOY-5~~ | ~~NovAtel GNSS (.30) — PTP configuration per production system~~ | ✅ **CLOSED CB-20260416** | Configuration procedure documented in CROSSBOW_GNSS_CONFIG.md (IPGD-0018) — `PTPMODE ENABLE_FINETIME` → `PTPTIMESCALE UTC_TIME` → `SAVECONFIG`. Applied and verified on bench unit. Each production unit requires same procedure at commissioning. |
 | ~~DEPLOY-6~~ | ~~IGMP snooping — verify switch compatibility for PTP multicast~~ | ✅ **CLOSED CB-20260416** | Verified on production switch. No issues with PTP multicast. |
 | ARCH-FMC-HW | ARCH §12.1 FMC Hardware table — V1/V2 column refactor | 🟢 Low | Opened CB-20260413. ARCH §12.1 FMC Hardware table currently has a single column. Refactor to V1/V2 columns parallel to the TMC §11.3 pattern, with a BME280 V2 row added (now that FMC-TPH is closed and the BME280 is part of the V2 build). Documentation cleanup, no functional impact. Pairs naturally with ARCH-1 if that's the next ARCH pass. | `ARCHITECTURE.md` §12.1 |
-| FW-C5-FRAME-CLEANUP | Retire dead `A1_DEST_*_IP` defines from `frame.hpp` | 🟢 Low | Opened CB-20260413. After FW-C5's TMC pass, `A1_DEST_MCC_IP` (line 97) and `A1_DEST_BDC_IP` (line 98) in `frame.hpp` are both unreferenced. `A1_DEST_MCC_IP` had exactly one consumer (the `_mcc[]` temp-array dance in `tmc.cpp:21–22`, now cleaned up to `IPAddress(IP_MCC_BYTES)`); `A1_DEST_BDC_IP` was already unreferenced before this session. Both were left in place per FW-C5 option (a) "leave frame.hpp alone" rule. One-line cleanup: delete both `#define` lines and the surrounding "Fixed destinations for A1 TX" comment block. While in there, also refresh the now-stale comment at `tmc.hpp:235` ("`A1_DEST_MCC_IP from frame.hpp`") and the stale TODO at `fmc.hpp:188` ("NOTE: add `A1_DEST_BDC_IP = {192,168,1,20}` to frame.hpp if not already defined"). Dead code, harmless to leave but cleaner to remove. | `frame.hpp` lines 96–98; `tmc.hpp:235`; `fmc.hpp:188` |
+| ~~FW-C5-FRAME-CLEANUP~~ | ~~Retire dead `A1_DEST_*_IP` defines from `frame.hpp`~~ | ✅ **Closed CB-20260425** | `frame.hpp` `A1_DEST_*_IP` block deleted; `tmc.hpp` stale comment updated to `IP_MCC_BYTES`; `fmc.hpp` stale TODO removed. | `frame.hpp` ✅ `tmc.hpp` ✅ `fmc.hpp` ✅ |
 | ~~TRC-CS-DEAD-IPENDPOINT~~ | ~~Retire dead `ipEndPoint` field in `trc.cs`~~ | ✅ **CLOSED CB-20260419b** | Removed in full `trc.cs` rewrite — field, assignment, and commented reference all gone. | `trc.cs` ✅ |
 | ~~TRC-SOM-SN-ICD~~ | ~~TRC REG1 ICD entry for `som_serial` field~~ | ✅ **CLOSED** | **Closed CB-20260413.** TRC REG1 row added to `CROSSBOW_ICD_INT_ENG.md`: split `[49-63] RESERVED 15 bytes` into `[49-56] som_serial uint64 LE` (tagged `v4.0.0 (TRC-SOM-SN)`, with note about `/proc/device-tree/serial-number` source and `std::stoull` parse) + `[57-63] RESERVED 7 bytes`. Defined / Reserved totals: 49 / 15 → 57 / 7. ICD INT_ENG header version held at 3.6.0 (ICD-1 will do the v4.0.0 rename pass for the whole document). | `CROSSBOW_ICD_INT_ENG.md` ✅ |
 

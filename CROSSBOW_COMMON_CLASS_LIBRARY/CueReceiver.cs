@@ -228,9 +228,9 @@ namespace CROSSBOW
                 payload[0] = (byte)_cb.System_State;
                 payload[1] = (byte)_cb.BDC_Mode;
                 payload[2] = (byte)_cb.Active_CAM;
-                payload[3] = _cb.aMCC.LatestMSG.VoteBits;          // MCC vote bits
-                payload[4] = _cb.aBDC.LatestMSG.VoteBits1;         // BDC raw geometry bits
-                payload[5] = _cb.aBDC.LatestMSG.VoteBits2;         // BDC computed votes
+                payload[3] = _cb.aMCC.LatestMSG.VOTE_BITS_MCC;          // MCC vote bits
+                payload[4] = _cb.aBDC.LatestMSG.VOTE_BITS_BDC;         // BDC raw geometry bits
+                payload[5] = _cb.aBDC.LatestMSG.VOTE_BITS_BDC2;         // BDC computed votes
 
                 // Gimbal LOS NED (from gimbal encoder + platform attitude)
                 ExtOpsFrame.WriteFloat(payload, 6,  _cb.aBDC.LatestMSG.LOS_GIM.X);
