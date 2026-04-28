@@ -1,210 +1,13 @@
 # CROSSBOW System Architecture
 
-**Document Version:** 4.0.7
+**Document Version:** 4.0.8
 **Date:** 2026-04-25
 **ICD Reference:** ICD v4.2.2
-**Status:** CB-20260425 FW-C5-FRAME-CLEANUP + DOC-1 closed.
+**Status:** CB-20260425 IP range gating removed fleet-wide.
 
-**v4.0.7 changes (FW-C5-FRAME-CLEANUP + DOC-1 closures — 2026-04-25):**
-- §17: FW-C5-FRAME-CLEANUP closed — `frame.hpp` dead `A1_DEST_*_IP` block deleted; `tmc.hpp`/`fmc.hpp` stale comments corrected.
-- §17: DOC-1 closed — §2.5 TRC Timing already contains full NTP configuration (`timesyncd.conf`, `timedatectl`, JETSON_SETUP.md cross-reference).
-- ICD Reference updated: v4.2.1 → v4.2.2.
 
-**v4.0.6 changes (MCC/TMC/FMC/TRC codebase review — 2026-04-25):**
-- §2.2a fleet socket table: TMC row — FW-B4 confirmed from TMC source; "verify against TMC source" qualifier removed. Footer note corrected: all four controllers (`ptp.INIT()` gated by `isPTP_Enabled` — MCC, BDC, TMC, FMC).
-- §6.6 A1 ARP backoff: note revised — W5500 `endPacket()` is non-blocking (ARP miss drops and returns 0 immediately); backoff limits SPI traffic, not blocking. TRC Linux stack noted — no backoff needed. Authoritative standard pattern documented.
-- §9.3 SEND_FIRE_STATUS gate: `isBDC_Ready` → `isBDC_Enabled`; `isBDC_Ready` now set exclusively by `endPacket()` result; ARP backoff added (`BDC_A1_FAIL_MAX=3`, `BDC_A1_BACKOFF_TICKS=5` × 5 ms = 25 ms).
-- §17 Open items: FW-C4 closed (BDC A1 backoff confirmed correct). FW-FUJI-1 and THEIA-POS-JOG-1 opened.
-
-**v4.0.5 changes (BDC/TRC doc corrections — 2026-04-25):**
-- §8.4 TRC REG1: Jetson health fields updated to ICD v4.2.0 layout — `jetsonTemp`/`jetsonCpuLoad`/`jetsonGpuLoad` int16→uint8 at [45]/[46]/[47]; `jetsonGpuTemp` uint8 [48] added; RESERVED expands [59–63]→[57–63]; Defined 59→57, Reserved 5→7.
-- §9.4 Vote Aggregation: `0xAB SET_BCAST_FIRECONTROL_STATUS` → `0xE0 SET_BCAST_FIRECONTROL_STATUS` (ICD v3.6.0 restructuring).
-- §13.3 Fire Control Chain / Xbox table: `0xE6` → `0xAB SET_FIRE_REQUESTED_VOTE` (ICD v3.6.0 restructuring).
-- §14 Fire State HUD: `0xAB SET_BCAST_FIRECONTROL_STATUS` → `0xE0 SET_BCAST_FIRECONTROL_STATUS`.
-- §2.2a fleet socket table: BDC row corrected — ptp.INIT() IS gated (FW-B4 closed CB-20260412); socket budget corrected to 5/8 (PTP disabled) / 7/8 (PTP enabled). TMC row updated pending source verification. Footer note corrected.
-- §6.7 C# client connect sequence: registration burst (`0xA4 ×3`) replaced with single `0xA4` to match §4.2 authoritative standard. `SET_UNSOLICITED` auto-subscribe removed — user-controlled via checkbox.
-- ICD Reference updated: v4.1.0 → v4.2.1.
-
-**v4.0.4 changes (TRC ENG GUI update pass — 2026-04-19):**
-- §3 Codebase inventory: `TRC_ENG_GUI_PRESERVE` → `CROSSBOW_ENG_GUIS` throughout. Inventory row expanded with full MDI child form list (`frmMCC`, `frmBDC`, `frmTMC`, `frmFMC`, `frmTRC`, `frmHEL`, `frmNTP_PTP`, `frmFWProgrammer`). CROSSBOW lib row updated.
-- §4.2/§4.5/§7.4: All remaining `TRC_ENG_GUI_PRESERVE` references → `CROSSBOW_ENG_GUIS`. §7.4 namespace corrected `CROSSBOW` → `CROSSBOW_ENG_GUIS`.
-- §17: GUI-8 closed — TRC C# client model complete and verified on live HW (CB-20260419b).
-- ICD Reference updated: v4.0.3 → v4.1.0.
-
-**v4.0.3 changes (TRC COCO ambient, OSD redesign, GPU telemetry — 2026-04-19):**
-- §8 TRC — COCO ambient scan: compositor bug fix (push/poll now outside tracker block); ambient detection hold; `--coco-ambient` launch flag; COCO NMS + min/max area filter (runtime-tunable ASCII commands); OSD redesign (STATE/MODE/FC top-right, COCO rows below TRACK, colour coding); GPU load telemetry (sysfs → REG1 [57–58] → OSD JGPU); CPU/GPU complementary filter at alpha=0.3 1Hz poll; trackbox W/H reset on tracker off and COCO RESET.
-- §8.4 TRC REG1: `jetsonGpuLoad int16` at [57–58]; RESERVED shrinks [7]→[5] at [59–63]. Defined: 57→59. Reserved: 7→5. **Superseded by ICD v4.2.0 (CB-20260419c) — all four Jetson health fields compacted to uint8; jetsonGpuTemp added at [48]; see current §8.4 table.**
-- §8.2 Thread table: stats thread corrected to 1Hz (was 1Hz temp / 5Hz CPU — now both CPU+GPU at 1Hz).
-
-**v4.0.2 changes (BDC HB subsystem wiring — 2026-04-13):**
-- §10 BDC: Eight HB counter bytes added to REG1 in reserved space [396–403]. Bytes [396]=HB_NTP (x0.1s), [397]=HB_FMC_ms, [398]=HB_TRC_ms, [399]=HB_MCC_ms, [400]=HB_GIM_ms, [401]=HB_FUJI_ms, [402]=HB_MWIR_ms, [403]=HB_INCL_ms (all raw ms). Defined count 396→404, reserved 116→108. ICD rows to be added under ICD-1 pass.
-- §10.9 Build config: `prev_HB_NTP`/`HB_NTP` added to BDC. NTP stamp added to A2 intercept block.
-
-**v4.0.0 changes (HW revision quick reference + doc version alignment — 2026-04-13):**
-- §3.1 (new): Hardware Revision Quick Reference — fleet-wide V1/V2 summary table for MCC, BDC, TMC, FMC. Captures HW_REV register byte location, platform labels, key V1→V2 differences, ICD breaking change version, C# IsV2 detection pattern, and cross-controller hw_rev.hpp build config matrix. Bring-up warnings for MCC V2 polarity and BDC Vicor POL_VICOR_OFF rule included.
-
-**v3.3.9 changes (additional CB-20260413 closures — 2026-04-13):**
-- §10 BDC — BDC-FSM-VOTE-LATCH closed. `isFSMNotLimited` (VOTE_BITS_BDC bit 7, `FSM_NOT_LTD` — inverted logic, set = OK) now computed from FMC FSM position readback (`fmc.fsm_posX_rb` / `fsm_posY_rb`) at the top of `BDC::PidUpdate()`, ahead of the `TICK_PID` rate gate. Conversion: `(fsm_posX_rb - FSM_X0) * iFOV_FSM_X_DEG_COUNT` gives target-space degrees, magnitude check vs `FSM_ANGLE_MAX_TARGET_SPACE_DEG = 2.0°`. The ATRACK/FTRACK case body still overwrites with the predictive (track-error-derived) value when actively driving the FSM (lead-by-one-tick advantage in track mode); in all other modes the readback value persists. Vote bit now reflects current physical FSM angular state in every mode rather than latching the last ATRACK predictive value. **Architectural note:** the rate gate `if ((millis() - prev_PID_Millis) < TICK_PID) return;` was deliberately moved BELOW the FSM readback block — the FSM limit check is an instantaneous physical state read, not a control-loop concept, so the readback updates at full UPDATE-loop rate while the predictive computation stays gated to PID rate. Both computations live inside `PidUpdate()` together by design (paired alongside FSM_X / FSM_Y / Set_FM_POS); do not hoist either out.
-- §8 TRC — TRC-SOM-SN closed. Jetson SOM serial number now read once at startup from `/proc/device-tree/serial-number` in `main.cpp` (parsed via `std::stoull` with try/catch fallback to 0), stored in `GlobalState.somSerial` (`uint64_t`), packed as `uint64 LE` into TelemetryPacket bytes [49-56] in `udp_listener.cpp::buildTelemetry()`. C# `MSG_TRC.cs` parses via `BitConverter.ToUInt64`. `som_serial` row added to ICD INT_ENG TRC REG1 table tagged v4.0.0 (TRC-SOM-SN); defined-bytes 49 → 57, reserved 15 → 7. SOM serial additionally rendered on TRC OSD video overlay (user addition beyond surgical change set).
-- HW-FMC-1 closed (hardware-only): FMC/BDC shared 5V on USB serial connector corrected in hardware. Merged FMC-HW-4, FMC-HW-5, FMC-HW-7. No firmware or ARCH body impact; recorded for action register completeness.
-- §17 Open items: BDC-FSM-VOTE-LATCH, TRC-SOM-SN, HW-FMC-1 closed. New low-priority item TRC-SOM-SN-ICD opened then closed in same session (deferred ICD edit applied).
-- Documentation hygiene: §10.5 mislabel in v3.3.7 / v3.3.8 changes blocks corrected — the bullets referenced "§10.5 IP defines" but the actual §10.5 in the body is "BDC Time Source Architecture". IP defines are not currently a body section in ARCH. Bullets updated to read "IP defines" without the incorrect section number. ARCH-1 should consider whether to create a canonical IP defines section.
-
-**v3.3.8 changes (FW-C5 + FMC-TPH closures — 2026-04-13):**
-- IP defines: FW-C5 closed. `defines.hpp` gained `IP_HEL_BYTES` (.13) and `IP_NTP_FALLBACK_BYTES` (.208). All firmware peer-IP literals replaced with `IP_*_BYTES` references across MCC (4 edits), BDC (3 edits), TMC (3 edits, including `tmc.cpp` `_mcc[]` temp-array dance retired), FMC (1 edit). TRC controller code (Linux/Jetson) was already compliant via its own `Defaults::` namespace registry — zero firmware edits needed. C# side: new flat `IPS` static class added to `defines.cs` (12 string constants for all CROSSBOW node IPs, including C#-only THEIA/HYPERION). All five C# client classes (`mcc.cs`, `bdc.cs`, `tmc.cs`, `fmc.cs`, `trc.cs`) migrated to `IPS.<NODE>` references — 6 edits total (TRC had a duplicate literal at `trc.cs:106` bypassing the IP property, also fixed). Discipline: peer-driver classes take IP via `INIT(IPAddress)`, C# client IP properties use `private set` — both type-enforced. Surgical option (a) — SET_NTP_CONFIG last-octet handlers, parsed-octet serial commands, and log strings intentionally left in place.
-- §12 FMC: FMC-TPH closed. BME280 ambient T/P/H integration on V2 (STM32F7) hardware. REG1 bytes [47–58] populated with three floats (Temp °C / Pressure Pa / Humidity %), all gated `#if defined(HW_REV_V2)`; V1 leaves bytes 0x00 → decodes to 0.0f. C# `MSG_FMC.cs` parses the new fields; `frmFMC.cs` populates `lbl_FMC_tph` gated on `IsV2`. Bench-verified on V2 hardware: MCU 45.28°C, Ambient 30.79°C, Pressure 100131.88 Pa, Humidity 30.47%.
-- §17 Open items: FW-C5 closed. Three new low-priority items opened: ARCH-FMC-HW (FMC §12.1 V1/V2 table refactor), FW-C5-FRAME-CLEANUP (retire dead `A1_DEST_*_IP` defines from `frame.hpp`), TRC-CS-DEAD-IPENDPOINT (retire dead `ipEndPoint` field in `trc.cs`).
-
-**v3.3.7 changes (FMC STM32F7 port — 2026-04-11):**
-- §3 Codebase inventory: FMC platform updated SAMD21 → STM32F7 (OpenCR board library). FW version 3.2.x → 3.3.0. STM32 migration deferred note removed.
-- §12 FMC header: platform SAMD21 → STM32F7, FW v3.2.0 → v3.3.0. hw_rev.hpp self-detecting HW_REV byte [45] added.
-- §12.2 FMC socket budget: FW-B4 note updated — ptp.INIT() remains gated due to FW-B3 (W5500 multicast contention with BDC). Socket budget 2/8 always.
-- §12.3 FMC time source: isNTP_Enabled default changed false → true (SAMD21 NTP bug resolved — not applicable on STM32). NTP init unconditional at boot.
-- §12.5 Build Configuration (new): hw_rev.hpp table parallel to §9.6 MCC, §10.9 BDC, §11.6 TMC patterns.
-- §15 Version table: FMC 3.2.0 → 3.3.0.
-- §16 Compatibility matrix: FMC STM32F7 port + hw_rev.hpp entry added.
-- §17 Open items: FMC-NTP closed. FW-B4 updated — BDC/TMC ptp.INIT() also need gate (FW-B3 fleet-wide). FW-B5 added (BDC FSM offset bug). HW-FMC-1 added (power isolation).
-- §2.2a fleet socket budget: BDC/TMC ptp.INIT() notes updated — unconditional needs gate due to FW-B3.
-
-**v3.3.6 changes (BDC unification — 2026-04-11):**
-- §10 BDC Internal Architecture: updated for unified V1/V2 hardware abstraction (`hw_rev.hpp`). FW version updated to 3.3.0.
-- §10.1 Role (new): V1/V2 power architecture variants documented.
-- §10.2–10.8: renumbered (was §10.1–10.7) to accommodate new §10.1 Role section.
-- §10.9 Build Configuration (new): `hw_rev.hpp` table parallel to §9.6 MCC and §11.6 TMC patterns.
-- §15 Version table: BDC `3.2.0` → `3.3.0`.
-- §16 Compatibility matrix: BDC HW_REV self-detection entry added.
-
-**v3.3.5 changes (2026-04-10):**
-- §2 Network Topology: TRC (.22) row updated — 192.168.1.22 documented as TRC role address shared by all TRC units (non-Super and Super). Only one unit is ever live at a time. Address belongs to the role, not the hardware.
-- §2.5 TRC Timing: DOC-2 reference updated — JETSON_SETUP.md is no longer pending, it is complete at v2.2.0.
-- §17 Open items: New item added — TRC SOM serial: read `/proc/device-tree/serial-number` at startup into `GlobalState`, pack as `uint64 LE` into TelemetryPacket bytes [49–56]. Tracks ICD v3.5.x TRC REG1 change.
-
-**v3.3.4 changes (MCC unification — 2026-04-08):**
-- §9 MCC Internal Architecture: updated for unified V1/V2 hardware abstraction (`hw_rev.hpp`). FW version updated to 3.3.0.
-- §9.1 Role: V1/V2 power architecture variants documented.
-- §9.5 Register bits table: `STAT_BITS2` → `POWER_BITS` reference updated; `HEALTH_BITS` noted.
-- §9.6 Build Configuration (new): `hw_rev.hpp` table parallel to §11.6 TMC pattern.
-- §15 Version table: MCC `3.1.0` → `3.3.0`.
-- §16 Compatibility matrix: MCC HW_REV self-detection entry added.
-
-**v3.3.3 changes (session 30 — 2026-04-07):**
-- §11 TMC Internal Architecture: updated for unified V1/V2 hardware abstraction (`hw_rev.hpp`). Hardware variants documented, FW version updated to 3.3.0, socket budget unchanged (4/8).
-- §11.1 Role: updated to reflect V1/V2 hardware differences (pump power supply, heater, external ADC).
-- §11.3 Hardware: table updated with V1/V2 columns.
-- §11.4 Temperature Channels: tv3/tv4 noted as V1-only.
-- §15 Version table: TMC `3.2.0` → `3.3.0`.
-- §16 Compatibility matrix: TMC HW_REV self-detection entry added.
-
-**v3.3.2 changes (session 29):**
-- §4.2 (new): C# ENG GUI client connect sequence — authoritative standard for all four controllers (A2 and A3). Single `0xA4` registration on connect (burst retired — firmware replay fix makes it unnecessary). `_lastKeepalive` only updated in `SendKeepalive()` — not on every `Send()`. Any valid frame updates `isConnected` and `lastMsgRx` — not just `0xA1`. `connection established` logged immediately in receive loop on first valid frame. `KeepaliveLoop` redundant elapsed check removed — `SendKeepalive()` called directly on every timer tick.
-- §4.2 Firmware replay window fix (all six A2/A3 handlers): new client detection (`isNewClient` check + `a_seq_init = false`) moved **before** `frameCheckReplay()` in all handlers — MCC A2/A3, BDC A2/A3, TMC A2, FMC A2. Prevents permanent lockout of reconnecting clients. Fixes `drop #2 after 0.0s` on BDC A3 (THEIA). Firmware version bumped to v3.2.3.
-- §4.2 A3 connect sequence: auto-subscribe (`UnsolicitedMode = true`) removed from A3 connect path on MCC and BDC — user controls via checkbox. A3 now sends single `0xA4` registration on connect matching A2 pattern.
-- §17 Open items: GUI-1 closed. FMC-NTP added (FMC dt elevated — suspected NTP/USB CDC loop blocking). GUI-8 added (TRC C# client model pending).
-
-**v3.3.1 changes (session 28):**
-- §10.1 BDC boot sequence: `FUJI_WAIT(5s)` step added between `PTP_INIT` and `DONE`. Non-blocking — advances when `fuji.isConnected` or after 5s timeout. `DONE` delay reduced to 0.5s. Boot completion print now shows subsystem status: `gimbal`, `trc`, `fmc`, `fuji`, `ntp`. Note: `fuji.SETUP()` and `fuji.UPDATE()` run post-boot only — `fuji=---` always shown at DONE regardless of physical connection (FW-C3 open).
-- §12.3 FMC time source: `isNTP_Enabled` default changed `false` → `true`. SAMD-NTP root cause identified as `PrintTime()` calling `Serial` not `SerialUSB` — removed all `PrintTime()` calls from FMC serial command handlers. NTP confirmed working on bench with USB CDC active. SAMD-NTP closed.
-- §6.5 Serial debug standardization (all four embedded controllers): HELP command restructured — COMMON block (identical across all controllers) + SPECIFIC block (local hardware). Unicode box style `╔══╗`. Serial buffer changed from `String serialBuffer` to `static char[64]` + `static uint8_t serialLen` on all four `.ino` files — eliminates heap fragmentation. `handleCommand` signature changed to `const char*` throughout.
-- §6.6 A1 TX control: `isA1Enabled` firmware-only flag added to all four controllers (`mcc.hpp`, `bdc.hpp`, `tmc.hpp`, `fmc.hpp`). Serial command `A1 ON|OFF` on all controllers. `SEND_FIRE_STATUS()` on MCC and `SEND_FIRE_STATUS_TO_TRC()` on BDC gated on flag. Default `true` — no behavior change at boot.
-- §6.6 BDC A1 ARP backoff added — `a1FailCount`/`a1BackoffCount`/`A1_FAIL_MAX=3`/`A1_BACKOFF_TICKS=5`. Note: backoff detection not working (FW-C4 open) — use `A1 OFF` as workaround when TRC offline.
-- §6.5 TIME command: `lastSync ms` → `ms ago` (`millis() - lastSyncMs`) on all controllers. `PrintTime()` calls gated on `isSynched` — prints `[not synced]` when not synced (STM32 controllers) or `[not synced]`/`[see PTPDEBUG]` (FMC). `NTP enabled`, `NTP offset_us`, `NTP lastSync ms ago` fields added to TMC TIME command (were missing). NTP fallback prints gated on `DEBUG_LEVEL >= MIN` fleet-wide.
-- §6.5 PTPDIAG command added to all four controllers — toggles `ptp.suppressDelayReq` for FW-B3 testing.
-- IP defines: `IP_BDC_BYTES`, `IP_TMC_BYTES`, `IP_MCC_BYTES` added to `defines.hpp`. `IP_TRC_BYTES` confirmed existing. Hardcoded IPs replaced in `SEND_FIRE_STATUS()` (MCC) and `SEND_FIRE_STATUS_TO_TRC()` (BDC). Audit pending (FW-C5).
-- §6.9 (new): Serial debug standards — serial buffer pattern, HELP box structure, COMMON/SPECIFIC command split, TIME command output format, A1 TX control, FMC SerialUSB constraint. Authoritative reference for adding new serial commands to any controller.
-- §17 Open items: FW-C3, FW-C4, FW-C5, DOC-3 added. SAMD-NTP closed.
-
-**v3.3.0 changes (session 28):**
-- §2.2 MCC socket budget: corrected "all 8 allocated" — actual state is 6/8 with PTP disabled (default), 8/8 with PTP enabled. `ptp.INIT()` is gated by `isPTP_Enabled` at boot — FW-B4 open to remove gate and match BDC/TMC unconditional pattern.
-- §2.2a (new): Unified fleet W5500 socket budget summary — authoritative reference for all four embedded controllers. Verified from source (mcc.hpp/cpp, bdc.hpp/cpp, tmc.hpp/cpp, fmc.hpp/cpp, gnss.hpp) session 28.
-- §11.2 TMC socket budget: added note — `ptp.INIT()` unconditional at boot (sockets 3/4 always allocated regardless of `isPTP_Enabled`). Correct pattern — FW-B4 will align MCC/FMC to match.
-- §12.2 FMC socket budget: corrected — 2/8 with PTP disabled (current default — `ptp.INIT()` gated), 4/8 with PTP enabled. FW-B4 will remove gate.
-- §12 FMC header: FW version corrected to v3.2.0; platform confirmed SAMD21.
-- §11 TMC header: FW version corrected to v3.2.0; platform confirmed STM32F7 / OpenCR.
-- §3 Codebase inventory: platform labels corrected — MCC/TMC/BDC are STM32F7 (OpenCR board library), FMC is SAMD21, TRC is Jetson Orin NX Linux 6.1.
-- §2.5 (new): TRC timing — `systemd-timesyncd` NTP configuration documented. See DOC-1/DOC-2.
-
-**v3.2.1 changes (session 37):**
-- §7.4 HYPERION flow diagram: Stellarium updated — now feeds `trackLogs["STELLA"]` via synthetic LLA (ned2lla conversion). Was: "az/el reference only — not in trackLogs".
-- §7.4 Sensor Input Reference: Stellarium track key updated to `"STELLA"`.
-
-**v3.2.0 changes (session 37):**
-- §2 Network topology: HYPERION `.206` row added. IP assignment note added.
-- §2.4 External topology diagram: CUE output port `10009` → `15009`. HYPERION `.206` added.
-- §3 Codebase inventory: CUE SIM added.
-- §5 Port reference: 15000 EXT_OPS block added — `15001` HYPERION aRADAR, `15002` HYPERION aLORA, `15009` THEIA CueReceiver, `15010` HYPERION CUE output.
-- §7.4 HYPERION architecture: sensor input ports updated (`10009`→`15001`, `10032`→`15002`). CUE output `10009`→`15009`. `ToArray()` legacy reference replaced with `BuildCueFrame()`. Sensor input reference table updated. Engagement sequence port references updated.
-- §16 Compatibility matrix: EXT_OPS port migration entry added.
-
-**v3.1.0 changes (session 35/36):**
-- Section 6.6: A1 stream ARP backoff added (TMC→MCC, FMC→BDC) — `A1_FAIL_MAX=3`, `A1_BACKOFF_TICKS` — prevents W5500 ARP-stall when peer offline; serial command `A1 ON|OFF` for testing
-- Section 6.7: A2 unified client model — `0xA4 FRAME_KEEPALIVE` replaces `EXT_FRAME_PING` as registration/keepalive; `0xA0 SET_UNSOLICITED` now sets per-slot `wantsUnsolicited` flag; `0xA1` and `0xA3` retired as inbound commands (return `STATUS_CMD_REJECTED`); `isUnSolicitedEnabled` global flag retired across all controllers
-- Section 9.5, 10.4, 11.5, 12.3: `GetCurrentTime()` holdover rewrite — EPOCH_MIN_VALID_US guard, `_lastGoodTimeUs`/`_lastGoodStampUs` latch, free-run from latch when both PTP and NTP invalid; `activeTimeSource = NONE` during holdover
-- Section 10.4, 11.5, 12.3: `isPTP_Enabled` defaults to `false` across all controllers (FW-B3 deferred — W5500 DELAY_REQ contention with simultaneous PTP clients); serial `TIMESRC PTP` to enable
-- Section 12.3: FMC `isNTP_Enabled` defaults to `true` (changed session 28 — SAMD-NTP resolved). `isNTP_Enabled` was `false` (SAMD21 NTP timing bug workaround) — root cause identified as `PrintTime()` calling `Serial` not `SerialUSB`. All `PrintTime()` calls removed from FMC. NTP confirmed working on bench with USB CDC active simultaneously.
-- Section 15: Firmware versions updated to session 36 state
-- Section 17: Open items updated
-
-**v3.0.8 changes (session 32):**
-- Section 9.5: Register table updated — MCC `STAT_BITS2` bits 0–2 moved to `TIME_BITS` byte 253; `TIME_BITS` row added
-- Section 10: BDC boot sequence updated — `PTP_INIT(1s)` added; `DONE` renumbered
-- Section 10.2: BDC subsystem drivers — PTP row added
-- Section 10.3 (new): BDC W5500 socket budget — 7/8 allocated
-- Section 10.4 (new): BDC time source architecture — mirrors MCC section 9.5
-- Section 11.2 (new): TMC W5500 socket budget — 4/8 allocated
-
-**v3.0.7 changes (session 29):**
-- Section 9: PTP subsystem fully documented — `ptpClient` class, fallback chain timing, `ntpSuppressedByPTP`, `TIMESRC`/`TIME`/`PTPDEBUG` serial commands, `PTPMODE ENABLE_FINETIME` corrected
-- Section 17: NEW-36 closed (HW verified), NEW-37 closed (MSG_MCC.cs + ENG GUI verified)
-- Section 17: FW-1 (`PTPDEBUG`), FW-2 (`TIMESRC` UDP), FW-3 (fallback test), NEW-38 (propagate to BDC/TMC/FMC/TRC) remain open
-
-**v3.0.6 changes (session 28):**
-- Section 2: GNSS .30 now documented as PTP grandmaster (IEEE 1588, PTP_UDP profile, multicast, domain 0, 1 Hz, 2-step; UTC_TIME timescale confirmed)
-- Section 5: PTP ports 319/320 added to MCC socket table; W5500 budget now 8/8 (fully allocated)
-- Section 9: MCC time source hierarchy documented (PTP primary → NTP primary → NTP fallback)
-- Registers: DEVICE_ENABLED bit4=isPTP_Enabled, DEVICE_READY bit4=isPTP_Ready, STATUS_BITS2 bit2=usingPTP (all were RES)
-- Section 17: NEW-36 opened — PTP integration HW verify pending
-
-**v3.0.5 changes (session 27):**
-- Section 2: NTP topology note updated — `.33` is HW Stratum 1 primary; `.208` Windows HMI is fallback; `.8` is eng IP and must not be used as NTP server
-- Section 2: NTP auto-recovery behaviour documented — 3 missed responses (~30s) triggers fallback; 2-minute primary retry; latches on primary when it responds
-- Section 17: NEW-35 closed — NTP server address verified and corrected in `defines.hpp` (`IP_NTP_BYTES` = `.33`); fallback `.208` configured by default in `mcc.hpp`
-
-**v3.0.4 changes (session 16):**
-- Section 2 network table: THEIA split into two rows — A3 external NIC (.200–.254) and internal NIC (.1–.99)
-- Section 2: dual-NIC note added — TMC `IP_INTERNAL_MAX=99` requires internal NIC for A2 eng access
-
-**v3.0.3 changes (session 24):**
-- THEIA IP corrected throughout: 192.168.1.208 → 192.168.1.208
-- NTP topology corrected: all five controllers target .33 directly — not via THEIA
-- ICD filenames updated to current naming convention throughout
-- Open items updated to session 24 state
-
-**v3.0.2 changes (session 18):**
-- Section 7.4 CUE Packet Format — completely replaced. Old stale 64-byte raw format removed.
-  Now shows authoritative 71-byte EXT_OPS framed layout per `CROSSBOW_ICD_EXT_OPS`:
-  EXT_OPS header (magic `0xCB 0x48`, CMD, SEQ_NUM, PAYLOAD_LEN, CRC16), 62-byte payload
-  with ms timestamp at [0], Heading/Speed replacing vx/vy NED (v3.0.2 field change noted).
-- Section 7.4 engagement sequence — steps 2/3 updated: `CueReceiver` shared library replaces
-  old `RADAR` class reference.
-
-**v3.0.1 changes (session 18):**
-- Section 4.3: TransportPath / NEW-12 confirmed complete — section updated to reflect deployed state
-- Section 4.4 / 4.5: Entry point column updated — callers use single `Parse()` dispatcher, not `ParseA2`/`ParseA3` directly
-- Section 12.2: FSM position note removed — #7 closed, int16 commanded vs int32 readback confirmed correct distinct types
-- Section 16: Compatibility matrix updated — MSG_MCC/BDC deployed, TransportPath complete
-- Section 17: Open items updated — TRC-M1/M5/M6/M7, NEW-11/12 all closed. FW #14 (GNSS socket bug) added. NEW-29 (Emplacement guide) added as deferred.
-
-**v3.0.0 changes (session 16):**
-- Document version aligned to ICD v3.1.0
-- Section 4 (Client Access Model) — new. Defines ENG GUI vs THEIA transport paths, ParseA2/ParseA3 entry points, TransportPath enum
-- Section 5 (Consolidated Port Reference) — new. Single source of truth for all ports across all nodes
-- Section 6 (IP Range Policy + Framing Protocol) — moved from ICD. ICD now owns commands and registers only
-- Section 9 (MCC Internal Architecture) — new
-- Section 11 (TMC Internal Architecture) — new
-- Section 5.2 port table: Galil corrected to 7777 (cmd TX) and 7778 (data RX)
-- Data flows: THEIA→BDC corrected to A3/10050. A2 section corrected — THEIA does not use A2
-- Version references updated throughout: ICD v1.7 → v3.0.0, VERSION_PACK updated
-- Compatibility matrix and open items updated
+> **Change history and open items:** All version changes, closed action items, and open item tracking
+> are maintained exclusively in **`CROSSBOW_CHANGELOG.md`** (IPGD-0019).
 
 ---
 
@@ -212,71 +15,119 @@
 
 CROSSBOW is a ground-based directed-energy (HEL) tracking and fire-control system. It integrates
 a gimbal-mounted dual-camera payload (VIS + MWIR), a fast steering mirror (FSM), a thermal
-management controller, an operator HMI, and external cueing sources (ADS-B, radar, LoRa) into
-a unified sensor-to-fire control chain.
+management system, a power management system, an operator HMI, and external cueing sources
+(ADS-B, radar, LoRa) into a unified sensor-to-fire-control chain.
 
-The TRC2 legacy tracker has been replaced by TRC (Jetson Orin NX). ICD v3.1.0 migration is
-complete across all five embedded controllers (MCC, BDC, TMC, FMC, TRC).
+---
+
+### 1.1 Hardware Architecture
+
+CROSSBOW is organised as a set of Line Replaceable Units (LRUs). Each LRU has a dedicated
+embedded controller and communicates over a common 1 Gbps Ethernet subnet.
+
+#### LRUs
+
+| LRU | Controller | Role |
+|-----|-----------|------|
+| **PMS** — Power Management System | MCC | System and safety controller. Manages battery, laser power supply, charger, GNSS, NTP/PTP time. Aggregates all fire control votes. |
+| **TMS** — Thermal Management System | TMC | Maintains coolant temperature for the HEL thermal load. Controls pumps, LCM compressors, fans. |
+| **GNSS** — NovAtel receiver | — | Provides BESTPOS/INS/heading to MCC. Acts as **PTP grandmaster** (IEEE 1588) for precision time. |
+| **NTP Server** — Phoenix Contact FL Timeserver | — | HW Stratum 1 NTP primary, GPS-disciplined. All five controllers sync to `.33`. |
+| **HEL** — IPG laser module | — | 3 kW (YLM-3000-SM-VV) or 6 kW (YLM-6000). TCP status embedded in MCC REG1. |
+| **BDA** — Beam Director Assembly | BDC | Line-of-sight and fire controller. Contains three sub-assemblies (see below). |
+
+#### BDA Sub-Assemblies
+
+| Sub-Assembly | Contents | Controller |
+|---|---|---|
+| **Gimbal** | Pan/tilt servo drive (Galil) | BDC (via Galil ASCII UDP ports 7777/7778) |
+| **COA** — Camera Optical Assembly | VIS camera (Allied Vision Alvium), MWIR camera, TRC (Jetson Orin NX) track controller | TRC |
+| **LOA** — Laser Optical Assembly | FMC (FSM controller), fast steering mirror (FSM), focus stage (M3-LS), beam delivery optics | FMC |
+
+---
+
+### 1.2 FW Codebase Summary
+
+Five embedded controllers run the CROSSBOW firmware. All share `defines.hpp`/`defines.cs` as the
+canonical ICD constant source and `crc.hpp` for CRC-16/CCITT. See **§3.1** for full platform
+detail and hardware revision tables.
+
+| Controller | Platform | FW Version | Role |
+|-----------|---------|-----------|------|
+| **MCC** | STM32F7 (OpenCR) | 4.0.0 | Power, laser, GNSS, charger, fire vote aggregation, NTP/PTP |
+| **BDC** | STM32F7 (OpenCR) | 4.0.0 | Gimbal PID, camera/tracker supervision, FSM control, fire control |
+| **TMC** | STM32F7 (OpenCR) | 4.0.0 | Thermal — pumps, LCM compressors, Vicors, fans |
+| **FMC** | STM32F7 (OpenCR) | 4.0.0 | FSM DAC/ADC, focus stage I2C |
+| **TRC** | Jetson Orin NX / Linux 6.1 | 4.0.3 | Dual-camera capture, MOSSE tracking, COCO inference, H.264 encode |
+
+---
+
+### 1.3 SW Codebase Summary
+
+Four Windows C# (.NET 8 / WinForms) applications comprise the CROSSBOW software suite.
+They share a common class library (`namespace CROSSBOW`) for all message parsing.
+See **§3.2** for namespace and transport detail, and **§4.1–4.4** for inter-application
+interfaces and ICD governance.
+
+| Application | Role | Audience |
+|-------------|------|----------|
+| **THEIA** | Operator HMI — video display, gimbal/FSM control, fire control, Xbox controller | Operator |
+| **HYPERION** | Reference CUE source — sensor fusion (ADS-B, radar, LoRa), Kalman filter, track selection, EXT_OPS output | Sensor operator |
+| **CROSSBOW_ENG_GUIS** | Engineering management suite — MDI shell with per-controller tabs, firmware programmer, NTP/PTP management | Engineering only |
+| **CROSSBOW_EMPLACEMENT_GUIS** | Emplacement and test toolset — CUE SIM track injection, HyperionSniffer, emplacement workflow (HMI-A3-18 pending) | Engineering / commissioning |
 
 ---
 
 ## 2. Network Topology
 
-All nodes communicate over a dedicated 1 Gbps Ethernet switch on subnet 192.168.1.x.
-NTP server (`.33`) is the HW Stratum 1 primary — all five controllers sync directly to `.33` with `.208` (Windows HMI) as automatic fallback. `.8` is reserved for engineering use and must not be used as an NTP target.
+All nodes communicate over a dedicated 1 Gbps Ethernet switch on subnet `192.168.1.x`.
 
-MCC additionally uses the GNSS receiver (`.30`) as a **PTP grandmaster** (IEEE 1588, PTP_UDP profile, multicast `224.0.1.129`, domain 0, 1 Hz sync, 2-step). PTP is MCC's primary time source; NTP is retained as a warm fallback. PTP accuracy is ~1–100 µs (software timestamping); NTP accuracy is ~1–10 ms.
+**IP convention (not enforced in firmware — CB-20260425):**
+- `.1–.99` — embedded controllers and engineering tools (A1/A2 internal traffic)
+- `.100–.199` — reserved
+- `.200–.254` — external clients: THEIA, HYPERION, integration clients (A3 external traffic)
+
+---
+
+### 2.1 IP Node Table
 
 | Node | IP | Role |
 |------|----|------|
-| HMI (THEIA) | 192.168.1.208 (default) | A3 external NIC — operator workstation, THEIA → MCC/BDC port 10050 |
-| HMI (THEIA) | 192.168.1.x (.1–.99)     | Internal NIC — A2 eng access, NTP sync, H.264 video RX from TRC port 5000 |
-| HYPERION | 192.168.1.206 (default) | EXT_OPS C2 node — sensor fusion, Kalman filter, CUE relay to THEIA |
-| MCC (Arduino) | 192.168.1.10 | Master control — power, laser, GNSS, charger |
-| TMC (Arduino) | 192.168.1.12 | Thermal management — coolant, fans, TEC |
+| MCC | 192.168.1.10 | Master control — power, laser, GNSS, charger |
+| TMC | 192.168.1.12 | Thermal management — coolant, fans, TEC |
 | HEL (IPG laser) | 192.168.1.13 | Laser source (read-only, status embedded in MCC REG1) |
-| BDC (STM32F7) | 192.168.1.20 | Beam director — gimbal, cameras, FSM, MWIR, fire control |
+| BDC | 192.168.1.20 | Beam director — gimbal, cameras, FSM, MWIR, fire control |
 | Gimbal (Galil) | 192.168.1.21 | Pan/tilt servo drive |
-| TRC (Jetson Orin NX) | 192.168.1.22 | Camera capture, tracker, video encoder — **role address shared by all TRC units (non-Super and Super). Only one unit live at a time.** |
-| FMC (SAMD21) | 192.168.1.23 | FSM DAC/ADC, focus stage |
-| GPS/GNSS | 192.168.1.30 | NovAtel GNSS receiver — BESTPOS/INS/heading (MCC managed) + **PTP grandmaster** (IEEE 1588, PTP_UDP, multicast, domain 0, UTC_TIME) |
-| RPI/ADSB | 192.168.1.31 | ADS-B decoder |
+| TRC (Jetson Orin NX) | 192.168.1.22 | Camera capture, tracker, video encoder — role address shared by all TRC units. Only one live at a time. |
+| FMC | 192.168.1.23 | FSM DAC/ADC, focus stage |
+| GPS/GNSS (NovAtel) | 192.168.1.30 | Position/heading/INS (MCC managed) + PTP grandmaster (IEEE 1588, domain 0, UTC_TIME) |
+| RPI/ADS-B | 192.168.1.31 | ADS-B decoder |
 | LoRa | 192.168.1.32 | LoRa/MAVLink track input |
-| NTP appliance | 192.168.1.33 | HW Stratum 1 NTP primary → all five controllers direct |
-| Windows HMI (THEIA) | 192.168.1.208 | NTP fallback — `w32tm` serving on `.208` NIC |
+| NTP appliance | 192.168.1.33 | HW Stratum 1 NTP primary — all five controllers sync directly |
 | RADAR | 192.168.1.34 | Radar track input |
 
-Engineering laptops and ENG GUI PCs: .1–.99 range by convention.
-External integration clients (THEIA A3): .200–.254 range by convention.
+Engineering laptops and ENG GUI PCs: `.1–.99` by convention.
+SW clients (THEIA, HYPERION, ENG GUI, EMPLACEMENT_GUIS): `.200–.254` by convention for external/operator clients, `.1–.99` for engineering. IP range is not enforced in firmware — convention only.
 
-> **IP assignment note:** THEIA and HYPERION operate in the `192.168.1.200–.254` external range. The addresses shown are IPG reference deployment defaults — both are operator-configurable. The constraint is that they remain in the `.200–.254` range so embedded controllers accept their A3 packets. IPG reserves `.200–.209`; third-party integrators use `.210–.254` by convention.
+---
 
-### 2.2 MCC W5500 Socket Budget
+### 2.2 NTP/PTP Time Architecture
 
-W5500 has 8 hardware sockets. MCC allocates **6/8 with PTP disabled (current default)** or **8/8 with PTP enabled**. Two sockets are reserved for PTP and were designed into the budget from session 28.
+| Source | IP | Type | Accuracy | Users |
+|--------|-----|------|----------|-------|
+| NovAtel GNSS | .30 | PTP grandmaster (IEEE 1588, PTP_UDP, multicast `224.0.1.129`, domain 0, 1 Hz sync, 2-step, UTC_TIME) | ~1–100 µs (SW timestamping) | MCC primary |
+| Phoenix Contact FL Timeserver | .33 | NTP Stratum 1 (GPS-disciplined) | ~1–10 ms | All five controllers direct |
+| Windows HMI (w32tm) | .208 | NTP fallback | ~10 ms | All five controllers automatic fallback after 3 misses |
 
-| # | Owner | Port | Type | Notes |
-|---|-------|------|------|-------|
-| 1 | MCC `udpA1` | 10019 | unicast | A1 RX — TMC unsolicited stream |
-| 2 | MCC `udpA2` | 10018 | unicast | A2 eng RX+TX — shared: NTP TX/RX (`&udpA2`), TMC TX (`&udpA2`), fire control broadcast to BDC |
-| 3 | MCC `udpA3` | 10050 | unicast | A3 external RX+TX |
-| 4 | GNSS `udpRxClient` | 3001 | unicast | GNSS data RX from NovAtel |
-| 5 | GNSS `udpTxClient` | 3002 | unicast | GNSS cmd TX to NovAtel |
-| 6 | IPG `udpClient` | 10011 | unicast | HEL laser status/control |
-| 7 | PTP `udpEvent` | 319 | multicast | PTP SYNC RX — **only opened when `isPTP_Enabled=true`** |
-| 8 | PTP `udpGeneral` | 320 | multicast | PTP DELAY_REQ/RESP — **only opened when `isPTP_Enabled=true`** |
+PTP is MCC's primary time source; NTP is retained as a warm fallback. BDC, TMC, and FMC use NTP only — PTP deferred fleet-wide (FW-B3). TRC uses `systemd-timesyncd` NTP (see §2.5). `.8` must NOT be used as an NTP target.
 
-BAT (RS485), DBU (I2C), CRG (I2C), TPH (I2C) consume no W5500 sockets.
+> **IGMP snooping** must be OFF on the network switch for PTP multicast (`224.0.1.129`) to flow correctly.
 
-> ⚠️ **FW-B4 open:** MCC `ptp.INIT()` is gated by `if (isPTP_Enabled)` at boot — sockets 7/8 are not opened when PTP is disabled. `TIMESRC PTP` at runtime sets the flag but sockets were never opened — silent failure. Fix: call `ptp.INIT()` unconditionally at boot (matching BDC/TMC pattern). MCC has headroom: 6/8 → 8/8. Ensure `ptp.INIT()` placed after GNSS and HEL init.
+---
 
-> **IGMP snooping** must be OFF on the network switch for PTP multicast (`224.0.1.129`) to flow correctly (per NovAtel PTP docs).
+### 2.3 Fleet Socket Budget
 
-> **THEIA dual-NIC:** one NIC in the `.200–.254` range is the A3 external interface (magic `0xCB 0x58`, port 10050, THEIA → MCC/BDC). A second NIC in the `.1–.99` range is used for A2 engineering access, NTP sync, and H.264 video receive from TRC port 5000. TMC enforces `IP_INTERNAL_MAX = 99` on A2 — TMC commands must originate from the internal NIC (`.1–.99`), not the A3 NIC.
-
-### 2.2a Fleet W5500 Socket Budget — Unified Summary
-
-Authoritative reference for all embedded controllers. Verified from source files session 28. See per-controller sections (§9, §10.3, §11.2, §12.2) for full detail.
+Authoritative reference for all embedded controllers. Verified from source files session 28. See per-controller sections (§7, §8, §9, §10) for full detail.
 
 | Controller | PTP disabled (default) | PTP enabled | Spare (PTP disabled) | Notes |
 |------------|----------------------|-------------|----------------------|-------|
@@ -287,92 +138,16 @@ Authoritative reference for all embedded controllers. Verified from source files
 | TRC | N/A | N/A | N/A | Linux kernel sockets — no W5500 hardware limit |
 
 **Shared socket pattern (authoritative):**
-- NTP uses `&udpA2` on all four controllers — zero additional sockets
+- NTP uses `&udpA2` on all four embedded controllers — zero additional sockets
 - BDC TRC/FMC command TX borrows `&udpA2` — zero additional sockets
 - `isPTP_Enabled` gates `ptp.UPDATE()` on all controllers
-- `ptp.INIT()` gated by `isPTP_Enabled` on all four embedded controllers — MCC, BDC, TMC, FMC (FW-B4 confirmed all controllers CB-20260425).
+- `ptp.INIT()` gated by `isPTP_Enabled` on all four embedded controllers — confirmed CB-20260425
 
-### 2.3 Internal Network Topology
-
-Internal subnet — controllers, embedded devices, and engineering tools (.1–.99).
-All traffic uses magic `0xCB 0x49` (A1/A2). Video stream is internal unicast.
-
-```
-192.168.1.x  INTERNAL (.1–.99)
-══════════════════════════════════════════════════════════════════
-
-  NTP appliance (.33)  — primary; .208 Windows HMI is automatic fallback
-       │ NTP Stratum 1 (all five controllers sync directly; fallback to .208 after 3 misses)
-       ├──► MCC (.10)
-       ├──► TMC (.12)
-       ├──► BDC (.20)
-       ├──► FMC (.23)
-       └──► TRC (.22)
-
-  THEIA / HMI (.208) ◄────────────── Video RTP H.264 port 5000 ─────────────────┐
-                                                                                  │
-                                           ┌── Gimbal (.21) ◄──── 7778 ──┐       │
-                                           │   CMD→ 7777                  │       │
-  ┌───────────────────────────────────┐    │                              │       │
-  │         1 Gbps Ethernet Switch    │    │                              │       │
-  └──┬──────┬──────┬──────┬──────┬───┘    │                              │       │
-     │      │      │      │      │        │                              │       │
-   MCC    TMC    BDC    TRC   FMC        │                              │       │
-  (.10)  (.12)  (.20)  (.22)  (.23)       │                              │       │
-     │      │      │      │      │        │                              │       │
-     │      │      ├──────┘      │        │                              │       │
-     │      │      │  A1:10019   │        │                              │       │
-     │      │      │  TRC→BDC    │        │                              │       │
-     │      │      │  FMC→BDC ◄──┘        │                              │       │
-     │      │      │                      │                              │       │
-     │      │      ├── Galil (.21) ────────┘                              │       │
-     │      │      │   CMD:7777 / DATA:7778                               │       │
-     │      │      │                                                       │       │
-     │      └──────► A1:10019  TMC→MCC                                    │       │
-     │             │                                                       │       │
-     │             └──────────────────── A1:10019  MCC→BDC                │       │
-     │                                                                     │       │
-     └── A2:10018 (ENG GUI ↔ all controllers)                             │       │
-                                                                           │       │
-  TRC (.22) ──────────────────────────────── video port 5000 ─────────────┘       │
-                                                                                   │
-  ENG GUI / laptop (.1–.99)                                                        │
-    └── A2:10018 → any controller                                                  │
-```
-
-### 2.4 External Network Topology
-
-External integration zone — THEIA and integration clients (.200–.254).
-All traffic uses magic `0xCB 0x58` (A3 only). Sub-controllers are not reachable.
-
-```
-192.168.1.x  EXTERNAL (.200–.254)
-══════════════════════════════════════════════════════════════════
-
-  CUE SIM / Third-party integrator (.210–.254)
-       │
-       │  EXT_OPS framed UDP:15001 (→ HYPERION aRADAR)
-       ▼
-  HYPERION (.206 default)
-       │
-       │  EXT_OPS framed UDP:15009 (CMD 0xAA, 71B)
-       ▼
-  THEIA (.208 default)
-       │
-       │  A3:10050  magic 0xCB 0x58
-       ├────────────────────────────────► MCC (.10)
-       │                                  (system state, laser, GNSS, fire vote)
-       │
-       └────────────────────────────────► BDC (.20)
-                                          (gimbal, camera, FSM, PID, fire control)
-
-  Sub-controllers (.12 TMC, .23 FMC, .22 TRC)
-       └── No A3 listener — NOT reachable from external zone
-```
+See per-controller sections (§7, §8, §9, §10) for full socket detail tables.
 
 ---
 
-## 2.5 TRC Timing — NTP Configuration
+### 2.4 TRC Timing — NTP Configuration
 
 TRC (Jetson Orin NX, Linux 6.1) uses `systemd-timesyncd` for NTP time synchronisation. This is configured as a one-time setup step on first deployment or re-image.
 
@@ -400,34 +175,35 @@ For full TRC/Jetson setup procedure (OS install, static IP, software deployment)
 
 ---
 
+---
+
 ## 3. Codebase Inventory
 
-| Name | Platform | Language | Role |
-|------|----------|----------|------|
-| **TRC** | Jetson Orin NX (Linux 6.1) | C++17 / OpenCV / GStreamer | Camera capture, tracking, H.264 video encode, telemetry |
-| **BDC** | STM32F7 (OpenCR board library) | Arduino C++ | System controller, PID loops, fire control, subsystem routing |
-| **MCC** | STM32F7 (OpenCR board library) | Arduino C++ | Power management, laser, GNSS, charger, TMC supervision |
-| **TMC** | STM32F7 (OpenCR board library) | Arduino C++ | Thermal management — pump, LCM, Vicor, fans, TPH sensor |
-| **FMC** | STM32F7 (OpenCR board library) | Arduino C++ | FSM SPI DAC/ADC, M3-LS focus stage I2C. FW v3.3.0. V1/V2 hardware abstraction (`hw_rev.hpp`). |
-| **THEIA** | Windows PC | C# / .NET 8 / WinForms | Operator HMI, Xbox controller, video display, fire control |
-| **HYPERION** | Windows PC | C# / .NET 8 / WinForms | Sensor fusion — ADS-B, Echodyne, RADAR, LoRa, Stellarium. Track filtering (6-state Kalman), operator track selection, CUE unicast output to THEIA. |
-| **CUE SIM** | Windows PC | C# / .NET 8 / WinForms | EXT_OPS test and simulation tool — simulated track injection into HYPERION (UDP:15001) or direct to THEIA (UDP:15009). HyperionSniffer for CUE output verification. |
-| **CROSSBOW_ENG_GUIS** | Windows PC | C# / .NET 8 / WinForms | IPG CROSSBOW MANAGEMENT SUITE — MDI shell (`frmCROSSBOW_ENG`). Child forms: `frmMCC`, `frmBDC`, `frmTMC`, `frmFMC`, `frmTRC` (A2 controller GUIs); `frmHEL` (laser direct TCP); `frmNTP_PTP` (time source management); `frmFWProgrammer` (firmware programmer). Engineering-only — not present in operational configuration. |
-| **CROSSBOW lib** | Shared | C# / .NET 8 | Shared class library — namespace CROSSBOW. MSG_MCC, MSG_BDC and all sub-message parsers. Used by both THEIA and CROSSBOW_ENG_GUIS. |
+---
 
+### 3.1 FW Codebase
 
-### 3.1 Hardware Revision Quick Reference
+| Controller | Platform | Language | Role |
+|-----------|---------|----------|------|
+| **MCC** | STM32F7 (OpenCR board library) | Arduino C++ | Power management, laser (IPG TCP), GNSS (NovAtel UDP), charger (I2C/GPIO), fire vote aggregation, NTP/PTP. V1/V2/V3 hardware abstraction (`hw_rev.hpp`). |
+| **BDC** | STM32F7 (OpenCR board library) | Arduino C++ | Gimbal (Galil ASCII UDP), camera/tracker supervision, FSM/focus stage coordination, MWIR, Fuji lens, inclinometer, fire control. V1/V2 hardware abstraction. |
+| **TMC** | STM32F7 (OpenCR board library) | Arduino C++ | Thermal management — pump, LCM, Vicor, fans, TPH sensor. V1/V2 hardware abstraction. |
+| **FMC** | STM32F7 (OpenCR board library) | Arduino C++ | FSM SPI DAC/ADC, M3-LS focus stage I2C. V1/V2 hardware abstraction. |
+| **TRC** | Jetson Orin NX / JetPack 6.2.2 | C++17 / GStreamer | Dual-camera capture (VIS/MWIR), MOSSE tracking, LK optical flow, COCO SSD MobileNet V3 inference, H.264 encode, UDP telemetry. |
 
-All four embedded controllers (MCC, BDC, TMC, FMC) share a unified V1/V2 hardware abstraction
-pattern via `hw_rev.hpp`. The active revision is compile-time selected and self-reported in REG1
-at boot. Read the `HW_REV` register byte before interpreting `HEALTH_BITS` and `POWER_BITS`.
+#### Hardware Revision and Build Configuration
 
-| Controller | HW_REV Byte | V1 Platform | V2 Platform | Key V1 → V2 Differences | ICD Breaking Change |
-|-----------|------------|-------------|-------------|--------------------------|---------------------|
-| **MCC** | REG1 [254] | STM32F7 | STM32F7 | STM32F7 | Solenoids retired on V2, restored on V3 (SOL_BDA pin moved 8→50); relay bus Vicor absent V2, restored V3 (pin A0→40, polarity LOW→HIGH); three relays on V3 vs two on V1 (RELAY_NTP new on V3); VICOR_GIM/TMS absent V1, switched V2, optional external V3-6kW; charger I2C retired V2, restored V3; `LASER_3K`/`LASER_6K` compile axis gates RELAY_LASER pin dispatch (V3 only) | `HEALTH_BITS`/`POWER_BITS` rename — ICD v3.4.0; V3 enum renames (RELAY_GPS, RELAY_LASER, RELAY_NTP, VICOR_GIM, VICOR_TMS) + `HW_REV_BYTE 0x03` — ICD vTBD |
-| **BDC** | REG1 [392] | STM32F7 | STM32F7 | Vicor PSU polarity inverted (NC opto LOW=ON → non-inverted HIGH=ON); Vicor thermistor pin moved (GPIO 0→20); three new NTC thermistors added (RELAY GPIO 19, BAT GPIO 18, USB GPIO 16); IP175 5-port Ethernet switch added (RESET GPIO 52, DISABLE GPIO 64); unused DIG2 (GPIO 42) removed | `HEALTH_BITS`/`POWER_BITS` rename; `isSwitchEnabled` HEALTH_BITS bit 1 (V2 only) — ICD v3.5.1 |
-| **TMC** | REG1 [62] | STM32F7 | STM32F7 | Single Vicor pump (DAC speed control) replaced by two independent TRACO DC-DCs (on/off only, per-pump); heater subsystem (Vicor + DAC) removed; two ADS1015 external ADCs (8 aux temp channels) removed — replaced by direct MCU analog inputs; total Vicors reduced 4→2 (LCM only); PSU inhibit opto polarity flipped (NO CTRL_ON=LOW → NC CTRL_ON=HIGH); `tv3`/`tv4` temp channels V1-only (0x00 on V2) | None breaking — unified in session 30 |
-| **FMC** | REG1 [45] | SAMD21 (MKR) | STM32F7 (OpenCR) | **Platform change** — SAMD21 → STM32F7; serial abstracted (`SerialUSB`→`Serial` via `FMC_SERIAL`); SPI bus abstracted (`SPI`→`SPI_IMU` via `FMC_SPI`); BME280 ambient TPH (Temp/Pressure/Humidity) live on V2 (REG1 [47–58]); V1 TPH bytes always 0x00; NTP unconditional on V2 (SAMD21 `SerialUSB` blocking bug not applicable on STM32) | `HEALTH_BITS` [7] / `POWER_BITS` [46] promoted from RESERVED; `isFSM_Powered`/`isStageEnabled` moved from HEALTH_BITS to POWER_BITS — ICD v3.5.2 |
+All four embedded controllers share a unified hardware abstraction via `hw_rev.hpp`. The active
+revision is compile-time selected (`HW_REV_V1`/`V2`/`V3`) and self-reported in REG1 at boot.
+Read the `HW_REV` register byte before interpreting `HEALTH_BITS` and `POWER_BITS`.
+The table below combines the quick reference and `hw_rev.hpp` build configuration for all controllers.
+
+| Controller | HW_REV Byte | V1 | V2 | V3 | Key Differences | ICD Breaking Change |
+|-----------|------------|----|----|----|----|---------------------|
+| **MCC** | REG1 [254] | STM32F7 · relay bus Vicor (A0 LOW=ON), solenoids, GPS relay, I2C charger | STM32F7 · VICOR_GIM (A0 HIGH=ON) + VICOR_TMS (pin 20 HIGH=ON), no solenoids, no relay bank, GPIO charger | STM32F7 · VICOR_BUS (pin 40 HIGH=ON), solenoids restored (pin 50), three relays (GPS/NTP/LASER), I2C charger; `LASER_6K` adds VICOR_GIM (pin 55) + VICOR_TMS (pin 51) | V2: solenoids/relay bank retired, Vicor polarity inverted, pin reuse (A0/pin20/pin83); V3: dedicated pins, relay bank restored, RELAY_NTP added, `LASER_3K`/`LASER_6K` compile axis | `HEALTH_BITS`/`POWER_BITS` rename — ICD v3.4.0; V3 `HW_REV_BYTE 0x03` — ICD vTBD |
+| **BDC** | REG1 [392] | STM32F7 · Vicor NC opto LOW=ON, GPIO 0 thermistor | STM32F7 · Vicor HIGH=ON, GPIO 20 thermistor, 3 new NTCs, IP175 switch | — | Vicor PSU polarity inverted (NC opto LOW=ON → non-inverted HIGH=ON); Vicor thermistor pin moved (GPIO 0→20); three new NTC thermistors added (RELAY GPIO 19, BAT GPIO 18, USB GPIO 16); IP175 5-port Ethernet switch added (RESET GPIO 52, DISABLE GPIO 64); unused DIG2 (GPIO 42) removed | `HEALTH_BITS`/`POWER_BITS` rename; `isSwitchEnabled` HEALTH_BITS bit 1 (V2 only) — ICD v3.5.1 |
+| **TMC** | REG1 [62] | STM32F7 · Vicor pump, ADS1015, heater | STM32F7 · TRACO pumps, direct MCU analog, no heater | — | Single Vicor pump (DAC speed control) replaced by two independent TRACO DC-DCs (on/off only, per-pump); heater subsystem (Vicor + DAC) removed; two ADS1015 external ADCs (8 aux temp channels) removed — replaced by direct MCU analog inputs; total Vicors reduced 4→2 (LCM only); PSU inhibit opto polarity flipped (NO CTRL_ON=LOW → NC CTRL_ON=HIGH); `tv3`/`tv4` temp channels V1-only (0x00 on V2) | None breaking — unified in session 30 |
+| **FMC** | REG1 [45] | SAMD21 (MKR) · legacy | STM32F7 (OpenCR) · current | — | **Platform change** — SAMD21 → STM32F7; serial abstracted (`SerialUSB`→`Serial` via `FMC_SERIAL`); SPI bus abstracted (`SPI`→`SPI_IMU` via `FMC_SPI`); BME280 ambient TPH (Temp/Pressure/Humidity) live on V2 (REG1 [47–58]); V1 TPH bytes always 0x00; NTP unconditional on V2 (SAMD21 `SerialUSB` blocking bug not applicable on STM32) | `HEALTH_BITS` [7] / `POWER_BITS` [46] promoted from RESERVED; `isFSM_Powered`/`isStageEnabled` moved from HEALTH_BITS to POWER_BITS — ICD v3.5.2 |
 
 #### Revision Detection — C# Pattern
 
@@ -451,7 +227,7 @@ bool tmcIsV2 = msgTmc.IsV2;   // gates: tv3/tv4 channels (always 0x00 on V2)
 bool fmcIsV2 = msgFmc.IsV2;   // gates: POWER_BITS [46], TPH fields [47-58]
 ```
 
-#### `hw_rev.hpp` Build Config — Per-Controller Defines
+#### `hw_rev.hpp` Compile-Time Defines
 
 | Define | MCC | BDC | TMC | FMC |
 |--------|-----|-----|-----|-----|
@@ -478,12 +254,80 @@ bool fmcIsV2 = msgFmc.IsV2;   // gates: POWER_BITS [46], TPH fields [47-58]
 
 ---
 
-## 4. Client Access Model
 
-This section defines which software clients connect to which controllers, on which transport port,
-and which C# entry points to call. This is the authoritative reference for call site decisions.
+---
 
-### 4.1 Transport Summary
+### 3.2 SW Codebase
+
+| Application | Platform | Namespace | Transport | Controllers | Entry Point |
+|-------------|---------|-----------|-----------|-------------|-------------|
+| **THEIA** | Windows / .NET 8 / WinForms | `CROSSBOW` | A3 / port 10050 / magic `0xCB 0x58` | MCC, BDC only | `Parse(data)` → internal `ParseA3` |
+| **CROSSBOW_ENG_GUIS** | Windows / .NET 8 / WinForms | `CROSSBOW_ENG_GUIS` (shell) / `CROSSBOW` (lib) | A2 / port 10018 / magic `0xCB 0x49` | All 5 controllers | `Parse(data)` → internal `ParseA2` |
+| **HYPERION** | Windows / .NET 8 / WinForms | `Hyperion` | EXT_OPS UDP:15009 (CUE output to THEIA) | External sensors only | N/A — separate stack |
+| **CROSSBOW_EMPLACEMENT_GUIS** | Windows / .NET 8 / WinForms | `CROSSBOW_EMPLACEMENT_GUIS` | EXT_OPS UDP:15001/15009 | HYPERION / THEIA | CUE SIM injection + HyperionSniffer |
+| **CROSSBOW lib** | Shared | `CROSSBOW` | — | — | Shared class library — MSG_MCC, MSG_BDC and all sub-message parsers. Used by THEIA and CROSSBOW_ENG_GUIS. |
+
+#### Application Descriptions
+
+**THEIA** — Operator HMI. Connects to MCC and BDC via A3/INT_OPS (port 10050). Receives CUE
+from any conforming EXT_OPS source on UDP:15009. Sub-controller data (TMC, FMC, TRC) arrives
+embedded in MCC and BDC REG1 payloads — THEIA never communicates with them directly.
+See **§11** for class structure, Xbox mapping, and fire control chain.
+
+**HYPERION** — Reference CUE source. Ingests tracks from ADS-B (dump1090 TCP:30002), Echodyne
+radar (TCP:29982), generic UDP:15001, LoRa/MAVLink (UDP:15002), and Stellarium (HTTP:8090).
+Applies a 6-state NED Kalman filter per track. Operator selects a track; HYPERION transmits a
+71-byte EXT_OPS CUE packet to THEIA on UDP:15009. Replaceable by any conforming EXT_OPS source.
+See **§5.4** for architecture diagram and engagement sequence.
+
+**CROSSBOW_ENG_GUIS** — Engineering management suite. MDI shell (`frmCROSSBOW_ENG`) with child
+forms: `frmMCC`, `frmBDC`, `frmTMC`, `frmFMC`, `frmTRC` (controller GUIs); `frmHEL` (laser
+TCP); `frmNTP_PTP` (time source management); `frmFWProgrammer`. Engineering-only — not present
+in operational configuration. See **§4.11** for per-controller access detail.
+
+**CROSSBOW_EMPLACEMENT_GUIS** — Emplacement and test toolset. Current scope: CUE SIM (EXT_OPS
+track injection to HYPERION UDP:15001 or direct to THEIA UDP:15009) and HyperionSniffer.
+Intended scope (HMI-A3-18 pending): KIZ/LCH/horizon file loading and upload via A3.
+File format specs tracked under DOC-3.
+
+---
+
+## 4. Communications Architecture
+
+This section is the authoritative reference for all transport paths, wire protocol, and ICD
+governance. Controllers are accessed via three transport layers (A1/A2/A3) described in §4.6–4.8.
+
+---
+
+### 4.1 Inter-Application Interfaces
+
+| From | To | Transport | Port | Magic | ICD | Notes |
+|------|----|-----------|------|-------|-----|-------|
+| THEIA | MCC | UDP / A3 | 10050 | `0xCB 0x58` | INT_OPS (IPGD-0004) | System state, laser, GNSS, fire vote |
+| THEIA | BDC | UDP / A3 | 10050 | `0xCB 0x58` | INT_OPS (IPGD-0004) | Gimbal, camera, FSM, PID, fire control |
+| MCC | THEIA | UDP / A3 | 10050 | `0xCB 0x58` | INT_OPS (IPGD-0004) | MCC REG1 unsolicited 100 Hz |
+| BDC | THEIA | UDP / A3 | 10050 | `0xCB 0x58` | INT_OPS (IPGD-0004) | BDC REG1 unsolicited 100 Hz (includes TRC/FMC/Gimbal embedded) |
+| HYPERION | THEIA | UDP / EXT_OPS | 15009 | `0xCB 0x48` | EXT_OPS (IPGD-0005) | 71B CUE packet, CMD 0xAA |
+| CUE SIM | THEIA | UDP / EXT_OPS | 15009 | `0xCB 0x48` | EXT_OPS (IPGD-0005) | Direct inject, bypasses HYPERION |
+| CUE SIM | HYPERION | UDP / EXT_OPS | 15001 | `0xCB 0x48` | EXT_OPS (IPGD-0005) | Simulated track injection |
+| ENG GUI | All 5 controllers | UDP / A2 | 10018 | `0xCB 0x49` | INT_ENG (IPGD-0003) | Bidirectional engineering access |
+| TRC | THEIA | RTP/UDP | 5000 | — | — | H.264 video unicast |
+
+---
+
+### 4.2 ICD Governance
+
+| ICD | IPGD | Scope Label | Governs | Audience |
+|-----|------|-------------|---------|----------|
+| `CROSSBOW_ICD_INT_OPS.md` | IPGD-0004 | `INT_OPS` | THEIA ↔ MCC/BDC via A3 (port 10050) | Operators and system integrators |
+| `CROSSBOW_ICD_INT_ENG.md` | IPGD-0003 | `INT_ENG` | CROSSBOW_ENG_GUIS ↔ all controllers via A2 (port 10018) | Engineering only |
+| `CROSSBOW_ICD_EXT_OPS.md` | IPGD-0005 | `EXT_OPS` | HYPERION / CUE SIM ↔ THEIA (UDP:15009) | External integrators |
+
+> Sub-controllers (TMC, FMC, TRC) have no A3 listener and are not reachable from the external zone. THEIA never communicates with them directly.
+
+---
+
+### 4.3 Transport Summary
 
 **Client access (software → controller):**
 
@@ -493,22 +337,113 @@ and which C# entry points to call. This is the authoritative reference for call 
 | **CROSSBOW_ENG_GUIS** | A2 Internal | 10018 | `0xCB 0x49` | MCC, BDC, TMC, FMC, TRC | `ParseA2(byte[] msg)` |
 
 Sub-controllers (TMC, FMC, TRC) have **no A3 listener** — they are unreachable from the
-external IP range. THEIA never communicates with TMC, FMC, or TRC directly.
+external zone. THEIA never communicates with TMC, FMC, or TRC directly.
+Controller-to-controller A1 streams are described in **§4.6**.
 
-**Controller-to-controller (not a client path):**
+---
 
-| Stream | Transport | Port | Magic | Direction | Rate |
-|--------|-----------|------|-------|-----------|------|
-| TMC REG1 | A1 Internal | 10019 | `0xCB 0x49` | TMC → MCC | 100 Hz |
-| FMC REG1 | A1 Internal | 10019 | `0xCB 0x49` | FMC → BDC | 50 Hz |
-| TRC REG1 | A1 Internal | 10019 | `0xCB 0x49` | TRC → BDC | 100 Hz |
-| Fire control vote (0xAB) | A1 Internal | 10019 | `0xCB 0x49` | MCC → BDC | 100 Hz |
-| Fire control status (0xAB) | Raw 5B (no frame) | 10019 | — | BDC → TRC | 100 Hz |
+### 4.4 Frame Geometry
 
-A1 streams are always-on from boot — no registration or `0xA0` enable required.
-The BDC→TRC fire control status is raw 5 bytes with no frame wrapper or CRC.
+```
+[0-1]     MAGIC_HI / MAGIC_LO
+[2]       SEQ_NUM    uint8  — server rolling counter
+[3]       CMD_BYTE   uint8  — ICD command byte
+[4]       STATUS     uint8  — 0x00 = OK; non-zero = error
+[5-6]     PAYLOAD_LEN uint16 LE — always 0x0200 (512) for REG1
+[7-518]   PAYLOAD    512 bytes — register data, zero-padded
+[519-520] CRC-16     uint16 BE — CRC-16/CCITT over bytes [0..518]
+```
 
-### 4.2 C# ENG GUI Client Connect Sequence (Session 29)
+**Request frame (variable length):**
+
+```
+[0-1]   MAGIC_HI / MAGIC_LO
+[2]     SEQ_NUM     uint8
+[3]     CMD_BYTE    uint8
+[4-5]   PAYLOAD_LEN uint16 LE — 0 for no-payload commands
+[6+]    PAYLOAD     (PAYLOAD_LEN bytes)
+[last-2] CRC-16     uint16 BE — over all bytes before CRC field
+```
+
+Minimum request frame (no payload): 8 bytes.
+
+
+---
+
+### 4.5 CRC-16/CCITT
+
+Poly=0x1021, init=0xFFFF, no reflection, BE wire order.
+Known-answer: `crc16("123456789", 9) == 0x29B1`
+Shared implementation: `crc.hpp` (all embedded controllers). Runtime-generated table —
+verified correct on STM32, SAMD21, Arduino, and x86-64.
+
+> ⚠ **CRC cross-platform verification note:** Past integration issues were observed between
+> the STM32 implementation and Linux/x86 implementations. Before first HW integration, perform
+> a full end-to-end CRC verification across all five controllers and both C# applications using
+> the known-answer test above. Do not assume correctness from unit tests alone — verify with
+> live framed packets on the wire. Log as a pre-HW-test checklist item.
+
+
+---
+
+### 4.6 A1 — Internal Unsolicited (Always-On Stream)
+
+Sub-controllers boot and immediately begin streaming REG1 to their upper-level controller at
+100 Hz. No handshake or `0xA0` enable required.
+
+| Source | Destination | Port | Rate | Content |
+|--------|-------------|------|------|---------|
+| TMC | MCC (.10) | 10019 | 100 Hz | TMC REG1 (64 bytes) |
+| FMC | BDC (.20) | 10019 | 50 Hz | FMC REG1 (64 bytes) |
+| TRC | BDC (.20) | 10019 | 100 Hz | TRC REG1 (64 bytes) |
+| MCC | BDC (.20) | 10019 | 50 Hz | MCC REG1 via 0xAB fire control vote |
+| BDC | TRC (.22) | 10019 | 100 Hz | Fire control status (raw 5B, no frame) |
+
+Liveness timeout: if no A1 packet received within `2 × expected_interval` (200 ms), the
+`DEVICE_READY` bit for that source clears. Stream resumes automatically on reconnect.
+
+**A1 ARP backoff (session 36, revised CB-20260425):** Non-blocking — `endPacket()` on W5500 returns immediately on ARP miss (drops packet, returns 0). Backoff purpose is to limit SPI bus traffic when peer is offline, not to prevent blocking. After `A1_FAIL_MAX = 3` consecutive send failures, the A1 send is suppressed for `A1_BACKOFF_TICKS` cycles (~2 s at the controller's stream rate). Recovery is instant — first successful send clears both counters. Gate uses the device *enabled* flag (not the ready flag); peer-ready flag set exclusively by `endPacket()` result. Serial command `A1 ON|OFF` allows disabling the A1 stream for bench testing. TRC (Jetson/Linux) requires no backoff — Linux kernel handles ARP asynchronously.
+
+
+---
+
+### 4.7 A2 — Internal Engineering (Bidirectional, All Controllers)
+
+**Session 35 unified client model** — applies to all five controllers (MCC, BDC, TMC, FMC, TRC):
+
+| Command | Byte | Description |
+|---------|------|-------------|
+| `FRAME_KEEPALIVE` | `0xA4` | Replaces `EXT_FRAME_PING`. Register/keepalive. Empty payload = ACK only (ping response). Payload `{0x01}` = ACK + solicited REG1 return (rate-gated 1 Hz per slot); suppressed if `wantsUnsolicited=true` on that slot. |
+| `SET_UNSOLICITED` | `0xA0` | Sets per-slot `wantsUnsolicited` flag on the sender's client table entry. `{0x01}` = subscribe to 50/100 Hz unsolicited push. `{0x00}` = unsubscribe (client stays registered). Does NOT affect A1 stream. |
+| `RES_A1` | `0xA1` | **RETIRED inbound** — returns `STATUS_CMD_REJECTED`. `0xA1` is still used as the outbound `CMD_BYTE` in all REG1 unsolicited frames. |
+| `RES_A3` | `0xA3` | **RETIRED** — returns `STATUS_CMD_REJECTED`. |
+
+**Client table:** Any accepted A2 or A3 frame auto-registers the sender and refreshes its 60-second liveness window. Up to **4 simultaneous A2 clients** and **2 simultaneous A3 clients** per controller. `isUnSolicitedEnabled` global flag retired (session 35) — per-slot `wantsUnsolicited` in `FrameClient` replaces it.
+
+**STATUS_BITS bit 7** (`isUnsolicitedModeEnabled`) retired session 35 across all controllers — always `0`. C# callers should not read this bit.
+
+**C# client connect sequence (A2):**
+```
+Start() → FRAME_KEEPALIVE {}         (single registration frame — burst retired, firmware replay fix handles reconnects)
+KeepaliveLoop() → FRAME_KEEPALIVE {} every 30 s  (maintain slot liveness)
+```
+Registration burst (`0xA4 ×3`) retired — see §4.9 for authoritative standard. `SET_UNSOLICITED` is user-controlled via checkbox, not sent automatically on connect.
+
+ENG GUI is the primary A2 client. BDC also uses A2 to issue commands to TRC.
+
+
+---
+
+### 4.8 A3 — External (MCC and BDC Only)
+
+THEIA connects here. CMD_BYTE whitelist (`EXT_CMDS[]`) enforced on all received frames.
+Up to **2 simultaneous external clients** per controller (MCC and BDC independently).
+Same `0xA0` registration / 60-second liveness model as A2.
+
+
+---
+
+### 4.9 C# Connect Sequence
 
 This is the authoritative standard for all four C# controller classes (`mcc.cs`, `bdc.cs`,
 `tmc.cs`, `fmc.cs`). Any new controller client must follow this exact pattern.
@@ -588,7 +523,10 @@ if (frameCheckReplay(seq, a_last_seq, a_seq_init)) { ... return; }
 Affected handlers: MCC `handleA2Frame`, MCC `handleA3Frame`, BDC `handleA2Frame`,
 BDC `handleA3Frame`, TMC `handleA2Frame`, FMC `handleA2Frame`.
 
-### 4.3 ParseA3 vs ParseA2
+
+---
+
+### 4.10 ParseA3 vs ParseA2
 
 `ParseA3` validates the full 521-byte A3 frame (magic `0xCB 0x58`, CRC-16, STATUS byte) before
 dispatching to `ParseMSG01`. It sets `LastFrameStatus` on every call regardless of STATUS value.
@@ -600,7 +538,10 @@ performs no magic or CRC validation — the A2 transport layer handles that. Liv
 Both entry points are present on `MSG_MCC` and `MSG_BDC`. THEIA must call `ParseA3`.
 ENG GUI must call `ParseA2`. Cross-wiring these will silently produce wrong results.
 
-### 4.4 TransportPath
+
+---
+
+### 4.11 TransportPath Enum
 
 `MSG_MCC` and `MSG_BDC` use a `TransportPath` constructor parameter to select transport
 at construction time. `MAGIC_LO` is computed — not hardcoded. `ParseA3` and `ParseA2`
@@ -621,7 +562,10 @@ new BDC(log, TransportPath.A2_Internal)   // ENG GUI
 
 Deployed session 16/17. NEW-12 ✅ closed.
 
-### 4.5 ENG GUI — Per-Controller Access
+
+---
+
+### 4.12 ENG GUI — Per-Controller Access
 
 CROSSBOW_ENG_GUIS connects to each of the five controllers independently on A2 port 10018.
 Each controller has its own message class instance:
@@ -634,7 +578,10 @@ Each controller has its own message class instance:
 | FMC | 192.168.1.23 | 10018 | `MSG_FMC` | `ParseA2` |
 | TRC | 192.168.1.22 | 10018 | `MSG_TRC` | `ParseA2` |
 
-### 4.6 THEIA — Per-Controller Access
+
+---
+
+### 4.13 THEIA — Per-Controller Access
 
 THEIA connects to MCC and BDC on A3 only:
 
@@ -645,282 +592,12 @@ THEIA connects to MCC and BDC on A3 only:
 
 ---
 
-## 5. Consolidated Port Reference
-
-Single source of truth for all UDP ports across all nodes. No port numbers appear elsewhere
-in this document or in the ICD — reference this table.
-
-| Port | Label | Protocol | Direction | Controllers | Purpose |
-|------|-------|----------|-----------|-------------|---------|
-| **10019** | A1 | ICD framed 521B | Sub → Upper | TMC→MCC, FMC→BDC, TRC→BDC | Unsolicited 100 Hz telemetry |
-| **10019** | A1 | Raw 5B (0xAB) | BDC → TRC | BDC→TRC | Fire control status relay (no frame wrapper) |
-| **10018** | A2 | ICD framed | Bidirectional | All 5 controllers | Internal engineering — ENG GUI + BDC→TRC commands |
-| **10050** | A3 | ICD framed | Bidirectional | MCC, BDC only | External — THEIA HMI only |
-| **10023** | — | ICD framed | Bidirectional | FMC only | BDC→FMC commands (direct, not via A2) |
-| **5000** | Video | RTP/H.264 UDP | TRC → THEIA | TRC | H.264 video stream, 1280×720 @ 60 fps, payload type 96 |
-| **5010** | Legacy | Raw 64B binary | Bidirectional | TRC | ⚠ DEPRECATED — pending TRC-M9 removal |
-| **5012** | ASCII | UDP text | Bidirectional | TRC | Engineering ASCII commands |
-| **7777** | Galil CMD | Galil ASCII | BDC → Gimbal | Galil | Command TX (JG velocity, PA position) |
-| **7778** | Galil DATA | Galil ASCII | Gimbal → BDC | Galil | Data/status RX (~125 Hz) |
-| **15001** | EXT_OPS | EXT_OPS framed | Integrator → HYPERION | HYPERION aRADAR | Generic sensor input / CUE SIM injection |
-| **15002** | EXT_OPS | EXT_OPS framed | Integrator → HYPERION | HYPERION aLORA | LoRa/MAVLink sensor input |
-| **15009** | EXT_OPS | EXT_OPS framed | Bidirectional | THEIA CueReceiver | CUE inbound (CMD 0xAA) + status response (CMD 0xAF/0xAB) |
-| **15010** | EXT_OPS | EXT_OPS framed | HYPERION → THEIA | HYPERION CUE output | HYPERION forwards Kalman-filtered track to THEIA |
-
-> **Video note:** Stream is currently unicast TRC→THEIA (.208). Multicast option (`0xD1
-> ORIN_SET_STREAM_MULTICAST`) is wired in ICD but not yet deployed — see action items.
-> 30 fps option via `0xD2` / ASCII `FRAMERATE 30` — see action items.
 
 ---
 
-## 6. IP Range Policy and Framing Protocol
+## 5. Data Flows
 
-### 6.1 IP Range Policy
-
-A single 192.168.1.x subnet is used. All controllers enforce range-based access control on every
-incoming packet before any frame parsing:
-
-| Range | Class | Permitted Ports |
-|-------|-------|-----------------|
-| 192.168.1.1 – 192.168.1.99 | Internal — embedded devices + engineering | A1 (10019) and A2 (10018) |
-| 192.168.1.100 – 192.168.1.199 | Reserved | Silently dropped on all ports |
-| 192.168.1.200 – 192.168.1.254 | External — THEIA and integration clients | A3 (10050) only |
-
-```cpp
-uint8_t src = udpClient.remoteIP()[3];
-if      (src >= 1   && src <= 99)  handleInternal(packet);   // A1 or A2
-else if (src >= 200 && src <= 254) handleExternal(packet);   // A3
-else                               return;                    // reserved — drop
-```
-
-> **Trust model:** Enforcement by IP convention. Internal frame magic `0xCB 0x49` is the
-> backstop — a packet from a rogue .1–.99 IP still fails the magic check. Physical network
-> discipline and IP assignment policy govern the outer layer.
-
-### 6.2 Magic Byte Assignment
-
-Frame structure is identical across all three ports. Magic bytes are the only difference.
-
-| Port | MAGIC_HI | MAGIC_LO | Mnemonic |
-|------|----------|----------|----------|
-| A1 + A2 (internal) | `0xCB` | `0x49` | CB + `I` (ASCII 0x49) |
-| A3 (external) | `0xCB` | `0x58` | CB + `X` (ASCII 0x58) |
-
-> Internal magic bytes are **confidential** — not included in any external-facing document.
-
-### 6.3 Response Frame Geometry (521 bytes, fixed)
-
-```
-[0-1]     MAGIC_HI / MAGIC_LO
-[2]       SEQ_NUM    uint8  — server rolling counter
-[3]       CMD_BYTE   uint8  — ICD command byte
-[4]       STATUS     uint8  — 0x00 = OK; non-zero = error
-[5-6]     PAYLOAD_LEN uint16 LE — always 0x0200 (512) for REG1
-[7-518]   PAYLOAD    512 bytes — register data, zero-padded
-[519-520] CRC-16     uint16 BE — CRC-16/CCITT over bytes [0..518]
-```
-
-### 6.4 Request Frame Geometry (variable length)
-
-```
-[0-1]   MAGIC_HI / MAGIC_LO
-[2]     SEQ_NUM     uint8
-[3]     CMD_BYTE    uint8
-[4-5]   PAYLOAD_LEN uint16 LE — 0 for no-payload commands
-[6+]    PAYLOAD     (PAYLOAD_LEN bytes)
-[last-2] CRC-16     uint16 BE — over all bytes before CRC field
-```
-
-Minimum request frame (no payload): 8 bytes.
-
-### 6.5 CRC-16/CCITT
-
-Poly=0x1021, init=0xFFFF, no reflection, BE wire order.
-Known-answer: `crc16("123456789", 9) == 0x29B1`
-Shared implementation: `crc.hpp` (all embedded controllers). Runtime-generated table —
-verified correct on STM32, SAMD21, Arduino, and x86-64.
-
-> ⚠ **CRC cross-platform verification note:** Past integration issues were observed between
-> the STM32 implementation and Linux/x86 implementations. Before first HW integration, perform
-> a full end-to-end CRC verification across all five controllers and both C# applications using
-> the known-answer test above. Do not assume correctness from unit tests alone — verify with
-> live framed packets on the wire. Log as a pre-HW-test checklist item.
-
-### 6.6 A1 — Internal Unsolicited (Always-On Stream)
-
-Sub-controllers boot and immediately begin streaming REG1 to their upper-level controller at
-100 Hz. No handshake or `0xA0` enable required.
-
-| Source | Destination | Port | Rate | Content |
-|--------|-------------|------|------|---------|
-| TMC | MCC (.10) | 10019 | 100 Hz | TMC REG1 (64 bytes) |
-| FMC | BDC (.20) | 10019 | 50 Hz | FMC REG1 (64 bytes) |
-| TRC | BDC (.20) | 10019 | 100 Hz | TRC REG1 (64 bytes) |
-| MCC | BDC (.20) | 10019 | 50 Hz | MCC REG1 via 0xAB fire control vote |
-| BDC | TRC (.22) | 10019 | 100 Hz | Fire control status (raw 5B, no frame) |
-
-Liveness timeout: if no A1 packet received within `2 × expected_interval` (200 ms), the
-`DEVICE_READY` bit for that source clears. Stream resumes automatically on reconnect.
-
-**A1 ARP backoff (session 36, revised CB-20260425):** Non-blocking — `endPacket()` on W5500 returns immediately on ARP miss (drops packet, returns 0). Backoff purpose is to limit SPI bus traffic when peer is offline, not to prevent blocking. After `A1_FAIL_MAX = 3` consecutive send failures, the A1 send is suppressed for `A1_BACKOFF_TICKS` cycles (~2 s at the controller's stream rate). Recovery is instant — first successful send clears both counters. Gate uses the device *enabled* flag (not the ready flag); peer-ready flag set exclusively by `endPacket()` result. Serial command `A1 ON|OFF` allows disabling the A1 stream for bench testing. TRC (Jetson/Linux) requires no backoff — Linux kernel handles ARP asynchronously.
-
-### 6.7 A2 — Internal Engineering (Bidirectional, All Controllers)
-
-**Session 35 unified client model** — applies to all five controllers (MCC, BDC, TMC, FMC, TRC):
-
-| Command | Byte | Description |
-|---------|------|-------------|
-| `FRAME_KEEPALIVE` | `0xA4` | Replaces `EXT_FRAME_PING`. Register/keepalive. Empty payload = ACK only (ping response). Payload `{0x01}` = ACK + solicited REG1 return (rate-gated 1 Hz per slot); suppressed if `wantsUnsolicited=true` on that slot. |
-| `SET_UNSOLICITED` | `0xA0` | Sets per-slot `wantsUnsolicited` flag on the sender's client table entry. `{0x01}` = subscribe to 50/100 Hz unsolicited push. `{0x00}` = unsubscribe (client stays registered). Does NOT affect A1 stream. |
-| `RES_A1` | `0xA1` | **RETIRED inbound** — returns `STATUS_CMD_REJECTED`. `0xA1` is still used as the outbound `CMD_BYTE` in all REG1 unsolicited frames. |
-| `RES_A3` | `0xA3` | **RETIRED** — returns `STATUS_CMD_REJECTED`. |
-
-**Client table:** Any accepted A2 or A3 frame auto-registers the sender and refreshes its 60-second liveness window. Up to **4 simultaneous A2 clients** and **2 simultaneous A3 clients** per controller. `isUnSolicitedEnabled` global flag retired (session 35) — per-slot `wantsUnsolicited` in `FrameClient` replaces it.
-
-**STATUS_BITS bit 7** (`isUnsolicitedModeEnabled`) retired session 35 across all controllers — always `0`. C# callers should not read this bit.
-
-**C# client connect sequence (A2):**
-```
-Start() → FRAME_KEEPALIVE {}         (single registration frame — burst retired, firmware replay fix handles reconnects)
-KeepaliveLoop() → FRAME_KEEPALIVE {} every 30 s  (maintain slot liveness)
-```
-Registration burst (`0xA4 ×3`) retired — see §4.2 for authoritative standard. `SET_UNSOLICITED` is user-controlled via checkbox, not sent automatically on connect.
-
-ENG GUI is the primary A2 client. BDC also uses A2 to issue commands to TRC.
-
-### 6.8 A3 — External (MCC and BDC Only)
-
-THEIA connects here. CMD_BYTE whitelist (`EXT_CMDS[]`) enforced on all received frames.
-Up to **2 simultaneous external clients** per controller (MCC and BDC independently).
-Same `0xA0` registration / 60-second liveness model as A2.
-
-### 6.9 Serial Debug — Standards (Session 28)
-
-All four embedded controllers share a unified serial debug architecture. Any new command
-added to any controller must conform to this standard.
-
-#### Serial Buffer
-
-All four `.ino` files use identical fixed-size char buffer pattern:
-
-```cpp
-// ── Serial input buffer ───────────────────────────────────────────────────
-static char    serialBuffer[64];
-static uint8_t serialLen = 0;
-```
-
-`handleSerialInput()` reads characters into the buffer, null-terminates on `\n`/`\r`, and
-calls `parseSerialCommand(serialBuffer, serialLen)`. Characters beyond 63 are silently
-dropped — no heap allocation, no String fragmentation.
-
-Handler signatures are `const char*` throughout:
-```cpp
-void parseSerialCommand(const char* input, uint8_t len);
-void handleCommand(const char* command, const char* payload);
-```
-
-Re-wrap to `String` occurs only at the class boundary:
-```cpp
-mcc.SERIAL_CMD(String(command), String(payload));   // .ino → class boundary only
-```
-
-**FMC exception:** uses `SerialUSB` not `Serial`. All handler logic is identical; only
-the serial object name differs.
-
-#### HELP Box Structure
-
-All controllers print HELP using Unicode box drawing with a COMMON block (identical across
-all controllers) followed by a SPECIFIC block (local hardware only):
-
-```
-╔══ <CTRL> — COMMON COMMANDS ═══════════════════════════════╗
-║  <command list — same on all controllers>                  ║
-╠══ <CTRL> — SPECIFIC COMMANDS ═════════════════════════════╣
-║  <controller-specific hardware commands>                   ║
-╚═══════════════════════════════════════════════════════════╝
-```
-
-#### COMMON Commands (All Controllers)
-
-These commands appear in the COMMON block of every controller's HELP output with identical
-syntax and behavior. When adding a new common command, add it to all four controllers.
-
-| Command | Description |
-|---------|-------------|
-| `INFO` | Build info, IP, link, firmware version |
-| `REG` | Full REG1 register dump (all fields) |
-| `STATUS` | System state/mode + status bits decoded |
-| `TEMPS` | Temperature sensors |
-| `TIME` | Active time source + PTP/NTP status |
-| `TIMESRC <PTP\|NTP\|AUTO\|OFF>` | Set time source policy |
-| `PTPDEBUG <0-3>` | Set PTP debug level (0=OFF 1=MIN 2=NORM 3=VERBOSE) |
-| `PTPDIAG ON\|OFF` | Suppress DELAY_REQ — W5500 SPI contention testing (FW-B3) |
-| `A1 ON\|OFF` | Enable/disable A1 TX stream (firmware only, no network gate) |
-| `NTP` | NTP sync status + server + epoch time |
-| `NTPIP <a.b.c.d>` | Set primary NTP server IP + force resync |
-| `NTPFB <a.b.c.d>` | Set fallback NTP server (OFF to clear) |
-| `NTPSYNC` | Force immediate NTP resync |
-| `DEBUG <0-3>` | Set controller debug level |
-| `STATE <n>` | Set system state (0=OFF 1=STNDBY 2=ISR 3=COMBAT 4=MAINT 5=FAULT) |
-| `MODE <n>` | Set gimbal mode (0=OFF 1=POS 2=RATE 3=CUE 4=ATRACK 5=FTRACK) |
-
-#### SPECIFIC Commands (Per Controller)
-
-| Controller | Specific Commands |
-|------------|------------------|
-| TMC | FLOWS, LCM, VICOR, TEMP, FAN, VICOR \<ch\>, LCM \<ch\>, DAC, PUMP |
-| BDC | REINIT, ENABLE, FMC, TRC, MCC, RELAY, VICOR |
-| MCC | REINIT, ENABLE, TMC, SOL, RELAY, VICOR, CHARGER, CHARLEVEL, HEL, HELCLR, FAN, TARGETTEMP |
-| FMC | FSM, FSMPOS, FSMPOW, STAGE, STAGEPOS, STAGECAL, STAGEEN, SCAN |
-
-#### TIME Command Output (All Controllers)
-
-```
-TIME  active source : PTP|NTP|NONE
-------------------------------------------------
-PTP   enabled       : YES|NO
-PTP   synched       : YES|NO
-PTP   misses        : <n>
-PTP   offset_us     : <n>
-PTP   lastSync      : <n> ms ago
-PTP   time          : <date/time> | [not synced]
-------------------------------------------------
-NTP   enabled       : YES|NO
-NTP   synched       : YES|NO
-NTP   misses        : <n> / <NTP_STALE_MISSES>
-NTP   offset_us     : <n>
-NTP   usingFallback : YES|no
-NTP   lastSync      : <n> ms ago
-NTP   time          : <date/time> | [not synced]
-------------------------------------------------
-  <register bytes>
-```
-
-**FMC exception:** `PrintTime()` calls `Serial` not `SerialUSB` — cannot call on SAMD21.
-FMC prints `[see PTPDEBUG]` when synced, `[not synced]` when not synced.
-
-#### A1 TX Control
-
-All four controllers have `bool isA1Enabled = true` in their `.hpp` file. The flag is:
-- Firmware-only — no network command may change it
-- Serial only: `A1 ON` / `A1 OFF`
-- Default `true` — A1 streams from boot
-- `SEND_FIRE_STATUS()` (MCC) and `SEND_FIRE_STATUS_TO_TRC()` (BDC) gated on this flag
-
-#### FMC SerialUSB Constraint
-
-FMC (SAMD21) uses `SerialUSB` for all debug output. `Serial` goes to the hardware UART
-which is not connected. Key rules:
-- All debug output: `SerialUSB.println()` or `uprintf()` (formatted helper)
-- Never call `ptp.PrintTime()` or `ntp.PrintTime()` — both use `Serial` internally
-- `ptp.INIT()` and `ntp.INIT()` use `Serial` internally — gated on `isPTP_Enabled` /
-  `isNTP_Enabled` in `fmc.cpp INIT()` so they don't fire unless the source is enabled
-
----
-
-## 7. Data Flows
-
-### 7.1 Video
+### 5.1 Video
 
 ```
 TRC (Jetson Orin NX, .22)
@@ -944,7 +621,7 @@ TRC (Jetson Orin NX, .22)
 - Hardware decoder: `nvh264dec` (NVIDIA GTX 900+ / driver 452.39+)
 - Software fallback: `avdec_h264` (~10–15% CPU at 720p/30fps)
 
-### 7.2 Commands (THEIA → Subsystems)
+### 5.2 Commands (THEIA → Subsystems)
 
 ```
 THEIA (.208)
@@ -960,7 +637,7 @@ THEIA (.208)
 THEIA does NOT communicate directly with TMC, FMC, or TRC.
 TRC ASCII engineering commands (port 5012) are ENG GUI only — not used in production THEIA.
 
-### 7.3 Telemetry (Unsolicited → THEIA)
+### 5.3 Telemetry (Unsolicited → THEIA)
 
 ```
 ─── A1 Port 10019 — Sub-controller → Upper-level ──────────────────────────
@@ -981,7 +658,7 @@ BDC (.20):10050 → THEIA (.208)   BDC REG1 512B @ 100 Hz  (unsolicited, A3 regi
 THEIA receives TMC data embedded in MCC REG1 ([66–129]) and FMC/TRC data embedded in
 BDC REG1. THEIA never directly requests TMC or FMC telemetry.
 
-### 7.4 External Cueing — CUE Source → THEIA → BDC
+### 5.4 External Cueing — CUE Source → THEIA → BDC
 
 #### CUE Input Source
 
@@ -1151,9 +828,12 @@ may be operated by one person or two depending on the engagement scenario.
 
 ---
 
-## 8. TRC Internal Architecture
 
-### 8.1 Pipeline
+---
+
+## 6. TRC Internal Architecture
+
+### 6.1 Pipeline
 
 ```
 AlviumCamera (VIS, 60 Hz) / MWIRCamera (MWIR, 30 Hz)
@@ -1165,7 +845,7 @@ AlviumCamera (VIS, 60 Hz) / MWIRCamera (MWIR, 30 Hz)
                     └── nvv4l2h264enc → rtph264pay → udpsink port 5000
 ```
 
-### 8.2 Thread Architecture
+### 6.2 Thread Architecture
 
 | Thread | Source | Rate | Purpose |
 |--------|--------|------|---------|
@@ -1179,7 +859,7 @@ AlviumCamera (VIS, 60 Hz) / MWIRCamera (MWIR, 30 Hz)
 | ASCII | UdpListener::asciiThreadFunc | blocking | ASCII command receive |
 | stats | statsThreadFunc | 1 Hz | Jetson temp (30s), CPU+GPU load (1Hz, complementary filtered) |
 
-### 8.3 Tracker Architecture
+### 6.3 Tracker Architecture
 
 ```
 CameraBase
@@ -1192,7 +872,7 @@ CameraBase
 
 Tracker enable/disable per-ID via `0xDB ORIN_ACAM_ENABLE_TRACKERS`.
 
-### 8.4 TRC REG1 Telemetry Packet (64 bytes, #pragma pack(push,1))
+### 6.4 TRC REG1 Telemetry Packet (64 bytes, #pragma pack(push,1))
 
 | Offset | Size | Type | Field | Notes |
 |--------|------|------|-------|-------|
@@ -1232,7 +912,7 @@ Tracker enable/disable per-ID via `0xDB ORIN_ACAM_ENABLE_TRACKERS`.
 
 **BDC embedding:** TRC REG1 occupies bytes [60–123] of BDC REG1 payload (64-byte fixed block).
 
-### 8.5 CamStatus / TrackStatus Bits
+### 6.5 CamStatus / TrackStatus Bits
 
 **CamStatusBits** (status_cam0 / status_cam1):
 
@@ -1258,7 +938,7 @@ Tracker enable/disable per-ID via `0xDB ORIN_ACAM_ENABLE_TRACKERS`.
 | 5-6 | TrackC — not implemented |
 | 7 | Kalman — not implemented |
 
-### 8.6 Startup
+### 6.6 Startup
 
 ```bash
 ./trc --dest-host 192.168.1.208 --osd ON --focusscore ON --coco-ambient
@@ -1279,7 +959,7 @@ Tracker enable/disable per-ID via `0xDB ORIN_ACAM_ENABLE_TRACKERS`.
 
 `--dest-host` sets the video stream destination. Telemetry auto-targets BDC (`192.168.1.20`) at boot regardless of `--dest-host`.
 
-### 8.7 COCO Inference Architecture
+### 6.7 COCO Inference Architecture
 
 SSD MobileNet V3 Large (80-class COCO). CUDA FP16 backend on Orin, CPU fallback.
 
@@ -1299,7 +979,7 @@ Compositor (60 Hz)
 
 **Runtime tunables (ASCII):** `COCO NMS`, `COCO MINAREA`, `COCO MAXAREA`, `COCO DRIFT`, `COCO INTERVAL`.
 
-### 8.8 OSD Layout
+### 6.8 OSD Layout
 
 **Left column (top-down):** camera name/source, view mode, exposure, gain, ICT, gamma, FPS, DT, device temp, AMR, TRACK state + tx/ty + AT offset, COCO rows (3, model-loaded only).
 
@@ -1309,13 +989,47 @@ Compositor (60 Hz)
 
 ---
 
-## 9. MCC Internal Architecture
+
+### 6.9 Fire State HUD
+
+TRC receives `0xE0 SET_BCAST_FIRECONTROL_STATUS` on A1 port 10019 (raw 5-byte, no frame
+wrapper) and stores vote bits in `state_.voteBitsMcc` / `state_.voteBitsBdc`. Compositor
+renders reticle color and interlock messages every frame.
+
+**`voteBitsMcc` layout:**
+
+| Bit | Meaning |
+|-----|---------|
+| 1 | notAbort (0 = abort ACTIVE — inverted, safe-by-default) |
+| 2 | armed |
+| 3 | BDAVote (LOS clear) |
+| 4 | firing (laser energized) |
+| 5 | trigger pulled |
+| 6 | fireState (all votes, should be firing) |
+| 7 | COMBAT state |
+
+**Reticle color scheme:**
+
+| Color | Condition |
+|-------|-----------|
+| GREEN | Nominal / idle |
+| ORANGE | Armed |
+| YELLOW | Abort active |
+| WHITE | Trigger pulled, interlock blocking |
+| RED | Laser firing |
+
+---
+
+
+---
+
+## 7. MCC Internal Architecture
 
 MCC runs on Arduino/STM32F7, FW v3.3.0, IP: 192.168.1.10.
 
 Hardware revision is selected at compile time in `hw_rev.hpp` (`HW_REV_V1`, `HW_REV_V2`, or `HW_REV_V3`). A second compile-time axis `LASER_3K` / `LASER_6K` selects the laser model and gates power pin dispatch in `EnablePower()` — the runtime `ipg.laserModel` sense is a verification check only. The active revision is reported in REG1 byte [254] (`HW_REV`) so `MSG_MCC.cs` can self-detect the register layout. Read byte [254] before interpreting `HEALTH_BITS` [9] and `POWER_BITS` [10].
 
-### 9.1 Role
+### 7.1 Role
 
 Master Control Controller — manages all power and energy subsystems:
 - Battery (BAT) — pack voltage, current, state of charge
@@ -1346,7 +1060,7 @@ Master Control Controller — manages all power and energy subsystems:
 
 > ⚠️ **V2 pin-reuse note:** V2 reused three V1 pins with polarity changes to accommodate 300V architecture: A0 (VICOR_BUS→VICOR_GIM), pin 20 (RELAY_LASER→VICOR_TMS), pin 83 (RELAY_GPS→RELAY_LASER). V3 uses dedicated pins for all outputs — no reuse.
 
-### 9.1a PMS Power Flow — Per Hardware Revision
+### 7.1a PMS Power Flow — Per Hardware Revision
 
 The PMS (Power Management System) connects directly to the battery on all revisions. The MCC acts as the PDU controller, switching power to all downstream accessories via `EnablePower()`. Compile-time defines `HW_REV_Vx` and `LASER_xK` together fully determine the pin map and power sequence. `LASER_3K` always implies 48V battery; `LASER_6K` always implies 300V battery (internal or external PSU) — these are physically coupled. A mismatch is a hardware configuration error; the runtime `ipg.laserModel` sense provides fault detection only.
 
@@ -1434,7 +1148,26 @@ fitted to the V3 PCB. VICOR_TMS PC pin is held open — no firmware switch.
 
 > ⚠️ **Bring-up note (V3 VICOR_BUS):** `POL_VICOR_BUS_ON = HIGH` on V3 — polarity inverted vs V1 (was LOW=ON). Use `POL_VICOR_BUS_ON` / `POL_VICOR_BUS_OFF` macros; never write literal `HIGH`/`LOW` to the VICOR_BUS pin.
 
-### 9.2 Subsystem Embedding
+
+### 7.2 W5500 Socket Budget
+
+W5500 has 8 hardware sockets. MCC allocates **6/8 with PTP disabled (current default)** or
+**8/8 with PTP enabled**.
+
+| # | Owner | Port | Type | Notes |
+|---|-------|------|------|-------|
+| 1 | MCC `udpA1` | 10019 | unicast | A1 RX — TMC unsolicited stream |
+| 2 | MCC `udpA2` | 10018 | unicast | A2 eng RX+TX — shared: NTP TX/RX, TMC TX, fire control broadcast to BDC |
+| 3 | MCC `udpA3` | 10050 | unicast | A3 external RX+TX |
+| 4 | GNSS `udpRxClient` | 3001 | unicast | GNSS data RX from NovAtel |
+| 5 | GNSS `udpTxClient` | 3002 | unicast | GNSS cmd TX to NovAtel |
+| 6 | IPG `udpClient` | 10011 | unicast | HEL laser status/control |
+| 7 | PTP `udpEvent` | 319 | multicast | PTP SYNC RX — only opened when `isPTP_Enabled=true` |
+| 8 | PTP `udpGeneral` | 320 | multicast | PTP DELAY_REQ/RESP — only opened when `isPTP_Enabled=true` |
+
+BAT (RS485), DBU (I2C), CRG (I2C), TPH (I2C) consume no W5500 sockets.
+
+### 7.3 Subsystem Embedding
 
 MCC REG1 (256-byte payload) embeds:
 
@@ -1446,12 +1179,12 @@ MCC REG1 (256-byte payload) embeds:
 | [135–212] | GNSS block (78 bytes) | MSG_GNSS |
 | [213–244] | Charger block (32 bytes) | MSG_CMC |
 
-### 9.3 A1 TX → BDC
+### 7.4 A1 TX → BDC
 
 MCC sends REG1 and fire control vote (0xAB) to BDC via A1 at 50 Hz and 100 Hz respectively.
 `SEND_FIRE_STATUS` gate: `isPwr_LaserRelay && isBDC_Enabled` (all revisions). `isBDC_Ready` is set exclusively by `endPacket()` result — the only real-time feedback on BDC reachability. ARP backoff added (`BDC_A1_FAIL_MAX=3`, `BDC_A1_BACKOFF_TICKS=5` × 5 ms = 25 ms suppression). Replaces V1's `isSolenoid2_Enabled` gate — laser power is the correct semantic gate on all hardware variants.
 
-### 9.4 Vote Aggregation
+### 7.5 Vote Aggregation
 
 ```
 MCC aggregates fire control votes:
@@ -1465,7 +1198,7 @@ MCC aggregates fire control votes:
   → 0xE0 SET_BCAST_FIRECONTROL_STATUS → BDC @ 100 Hz
 ```
 
-### 9.5 Time Source Architecture
+### 7.6 Time Source Architecture
 
 MCC maintains two concurrent time sources with automatic priority routing.
 
@@ -1556,7 +1289,7 @@ Validated session 29: state=MASTER, `offset=0.000ns`, `Time Offsets Valid=TRUE`,
 
 `TIME_BITS` layout is identical across MCC (byte 253), BDC (byte 391), and TMC (`STATUS_BITS3` byte 61) — single decode path for all controllers.
 
-### 9.6 Build Configuration (`hw_rev.hpp`)
+### 7.7 Build Configuration (`hw_rev.hpp`)
 
 Two compile-time axes must both be set. `hw_rev.hpp` enforces mutual exclusion within each axis and validates the combination.
 
@@ -1596,13 +1329,16 @@ Two compile-time axes must both be set. `hw_rev.hpp` enforces mutual exclusion w
 
 ---
 
-## 10. BDC Internal Architecture
+
+---
+
+## 8. BDC Internal Architecture
 
 BDC is the system integration hub. Runs on STM32F7, FW v3.3.0, IP: 192.168.1.20.
 
 Hardware revision is selected at compile time in `hw_rev.hpp` (`HW_REV_V1` or `HW_REV_V2`). The active revision is reported in REG1 byte [392] (`HW_REV`) so `MSG_BDC.cs` can self-detect the register layout. Read byte [392] before interpreting `HEALTH_BITS` [10] bit 1 (`isSwitchEnabled`).
 
-### 10.1 Role
+### 8.1 Role
 
 Beam Director Controller — system integration hub managing all payload and tracking subsystems:
 - Gimbal (Galil) — pan/tilt servo drive, NED coordinate transforms, PID loops
@@ -1628,7 +1364,7 @@ Beam Director Controller — system integration hub managing all payload and tra
 | Ethernet switch | Not present | IP175 5-port switch — `PIN_IP175_RESET` GPIO 52, `PIN_SWITCH_DISABLE` GPIO 64 |
 | `PIN_DIG2_ENABLE` | GPIO 42 (defined, never used) | **Removed** |
 
-### 10.2 Boot Sequence
+### 8.2 Boot Sequence
 
 Non-blocking state machine (~26s total before UDP_READ runs):
 ```
@@ -1639,7 +1375,7 @@ POWER_SETTLE(10s) → VICOR_ON(1s) → RELAYS_ON(1s) → GIMBAL_INIT(1s)
 `FUJI_WAIT` added session 28 — advances when `fuji.isConnected` or after 5s timeout. Non-blocking. Prints `BOOT: FUJI READY` or `BOOT: FUJI timeout`. Note: `fuji.SETUP()` deferred to post-boot via `pendingRelaySetup` flag — `fuji.isConnected` is always false at this step, so FUJI_WAIT always times out at 5s regardless of physical connection (FW-C3 open).
 `DONE` reduced from 1s to 0.5s — Fuji now has dedicated wait step. Completion print: `BOOT: complete  gimbal=RDY|---  trc=RDY|---  fmc=RDY|---  fuji=RDY|---  ntp=RDY|---`
 
-### 10.3 Subsystem Drivers
+### 8.3 Subsystem Drivers
 
 | Driver | Transport | Rate | Notes |
 |--------|-----------|------|-------|
@@ -1655,7 +1391,7 @@ POWER_SETTLE(10s) → VICOR_ON(1s) → RELAYS_ON(1s) → GIMBAL_INIT(1s)
 | PTP client | Ethernet multicast | 1 Hz sync | IEEE 1588; GNSS master .30; primary time source |
 | PALOS fire control | Internal | per-vote-cycle | KIZ, LCH, horizon validation |
 
-### 10.4 BDC W5500 Socket Budget
+### 8.4 BDC W5500 Socket Budget
 
 W5500 has 8 hardware sockets. BDC allocates 7/8 — one spare remaining.
 
@@ -1671,7 +1407,7 @@ W5500 has 8 hardware sockets. BDC allocates 7/8 — one spare remaining.
 
 TRC and FMC command TX borrows `udpA2` via pointer — TX-only, single-threaded, no conflict. Previously each opened their own socket (TRC on 10017, FMC on 10018), consuming 9 sockets total and preventing PTP from initialising. Fuji (serial), MWIR (serial), Inclinometer (serial), TPH (I2C) consume no W5500 sockets.
 
-### 10.5 BDC Time Source Architecture
+### 8.5 BDC Time Source Architecture
 
 BDC mirrors MCC time source architecture (section 9.5) exactly. `isPTP_Enabled` defaults to `false` (FW-B3 deferred — W5500 `DELAY_REQ` contention when both BDC and FMC run PTP simultaneously). Enable via serial `TIMESRC PTP`.
 
@@ -1701,7 +1437,7 @@ isPTP_Enabled = false  (default — FW-B3 deferred)
 | DEVICE_READY | 9 | 7 | `ptp.isSynched` |
 | TIME_BITS | 391 | 0–5 | Same layout as MCC byte 253 / TMC STATUS_BITS3 byte 61 |
 
-### 10.6 Liveness Flags
+### 8.6 Liveness Flags
 
 | Flag | Condition | Timeout |
 |------|-----------|---------|
@@ -1711,7 +1447,7 @@ isPTP_Enabled = false  (default — FW-B3 deferred)
 | `isJETSON_Ready()` | `trc.isConnected && isTRC_A1_Alive` | — |
 | `isFSM_Ready()` | `fmc.isConnected && isFMC_A1_Alive` | — |
 
-### 10.7 Mode State Machine
+### 8.7 Mode State Machine
 
 ```
 OFF ──► POS ──────────────────────────────► AT ──► FT (not yet impl.)
@@ -1729,7 +1465,7 @@ OFF ──► POS ────────────────────�
 | AT | BDC PID on tx+atX0/ty+atY0 (slow) | BDC PID on tx+atX0/ty+atY0 (fast) | TrackB ON |
 | FT | Drives to AT lock | Operator FT offset | TrackB ON |
 
-### 10.8 Dual-Loop Control (AT Mode)
+### 8.8 Dual-Loop Control (AT Mode)
 
 ```
 TRC tx, ty
@@ -1739,7 +1475,7 @@ TRC tx, ty
         └── Galil: JG velocity commands (port 7777)
 ```
 
-### 10.9 Build Configuration (`hw_rev.hpp`)
+### 8.9 Build Configuration (`hw_rev.hpp`)
 
 | Define | Effect |
 |---|---|
@@ -1769,13 +1505,16 @@ Defined: 404 bytes. Reserved: 108 bytes. Fixed block: 512 bytes.
 
 ---
 
-## 11. TMC Internal Architecture
+
+---
+
+## 9. TMC Internal Architecture
 
 TMC runs on STM32F7 (OpenCR board library), FW v3.3.0, IP: 192.168.1.12.
 
 Hardware revision is selected at compile time in `hw_rev.hpp` (`HW_REV_V1` or `HW_REV_V2`). The active revision is reported in REG1 byte [62] (`HW_REV`) so `MSG_TMC.cs` can self-detect the layout.
 
-### 11.1 Role
+### 9.1 Role
 
 Thermal Management Controller — maintains coolant temperature for the HEL thermal load.
 
@@ -1792,7 +1531,7 @@ Thermal Management Controller — maintains coolant temperature for the HEL ther
 | Opto type (PSU inhibit) | Normally Open (NO) | Normally Closed (NC) |
 | Opto type (LCM enable) | Normally Open (NO) | **Unchanged — NO** |
 
-### 11.2 TMC W5500 Socket Budget
+### 9.2 TMC W5500 Socket Budget
 
 W5500 has 8 hardware sockets. TMC allocates **4/8 always** — four sockets spare.
 
@@ -1807,7 +1546,7 @@ Pump (GPIO/DAC), LCM1/2 (DAC+ADC), Vicors (GPIO), Fans (PWM), TPH (I2C), Flow se
 
 > **ptp.INIT() unconditional:** TMC calls `ptp.INIT(IP_GNSS)` at boot regardless of `isPTP_Enabled` — sockets 3/4 are always allocated. `isPTP_Enabled` gates `ptp.UPDATE()` only. This is the correct pattern — MCC and FMC will align to match (FW-B4).
 
-### 11.3 Hardware
+### 9.3 Hardware
 
 | Hardware | Interface | V1 | V2 |
 |----------|-----------|----|----|
@@ -1823,13 +1562,13 @@ Pump (GPIO/DAC), LCM1/2 (DAC+ADC), Vicors (GPIO), Fans (PWM), TPH (I2C), Flow se
 | PSU inhibit opto | GPIO | Normally Open (CTRL_ON=LOW) | Normally Closed (CTRL_ON=HIGH) |
 | LCM enable opto | GPIO | Normally Open (HIGH=ON) | **Unchanged** |
 
-### 11.4 A1 TX → MCC
+### 9.4 A1 TX → MCC
 
 TMC streams REG1 (64 bytes) to MCC (.10) at 100 Hz via A1 port 10019. MCC embeds the
 received buffer directly into MCC REG1 bytes [66–129] with no parsing at the MCC level —
 raw pass-through. THEIA parses it as `MSG_TMC`.
 
-### 11.5 Temperature Channels
+### 9.5 Temperature Channels
 
 | Field | Description | Source |
 |-------|-------------|--------|
@@ -1843,7 +1582,7 @@ raw pass-through. THEIA parses it as `MSG_TMC`.
 | `tv3` | Vicor heater temp °C | **V1 only** — ADS1015 ADC2 CH3; 0x00 on V2 |
 | `tv4` | Vicor pump temp °C | **V1 only** — ADS1015 ADC2 CH4; 0x00 on V2 |
 
-### 11.6 Build Configuration (`hw_rev.hpp`)
+### 9.6 Build Configuration (`hw_rev.hpp`)
 
 | Define | Effect |
 |--------|--------|
@@ -1855,13 +1594,16 @@ raw pass-through. THEIA parses it as `MSG_TMC`.
 
 ---
 
-## 12. FMC Internal Architecture
+
+---
+
+## 10. FMC Internal Architecture
 
 FMC runs on STM32F7 (OpenCR board library), FW v3.3.0, IP: 192.168.1.23.
 
 Hardware revision is selected at compile time in `hw_rev.hpp` (`HW_REV_V1` or `HW_REV_V2`). The active revision is reported in REG1 byte [45] (`HW_REV`) so `MSG_FMC.cs` can self-detect the register layout. Read byte [45] before interpreting `HEALTH_BITS` [7] and `POWER_BITS` [46].
 
-### 12.1 Hardware
+### 10.1 Hardware
 
 | Hardware | Interface | Notes |
 |----------|-----------|-------|
@@ -1869,7 +1611,7 @@ Hardware revision is selected at compile time in `hw_rev.hpp` (`HW_REV_V1` or `H
 | LTC1867 ADC | SPI | FSM X/Y position readback (int32 counts) |
 | M3-LS focus stage | I2C | Single axis, counts-based position |
 
-### 12.2 FMC W5500 Socket Budget
+### 10.2 FMC W5500 Socket Budget
 
 W5500 has 8 hardware sockets. FMC allocates **2/8 with PTP disabled (current default)** or **4/8 with PTP enabled** — six sockets spare.
 
@@ -1884,7 +1626,7 @@ DAC (SPI), ADC (SPI), stage (I2C) consume no W5500 sockets. NTP shares `udpA2`.
 
 > ⚠️ **FW-B3 constraint:** FMC `ptp.INIT()` is gated by `if (isPTP_Enabled)` at boot. Unlike MCC (FW-B4), FMC's gate is required due to W5500 multicast contention with BDC — both opening ports 319/320 simultaneously causes W5500 socket exhaustion on the shared network. FMC socket budget stays at 2/8 until FW-B3 is resolved fleet-wide.
 
-### 12.3 FMC Time Source Architecture
+### 10.3 FMC Time Source Architecture
 
 FMC mirrors MCC/BDC/TMC time source architecture. `isPTP_Enabled` defaults to `false` (FW-B3 deferred). `isNTP_Enabled` defaults to `true` (SAMD21 NTP bug resolved — not applicable on STM32F7). NTP init is unconditional at boot; PTP init gated by `isPTP_Enabled`.
 
@@ -1899,7 +1641,7 @@ isNTP_Enabled  = true   (default — STM32F7; SAMD21 NTP bug no longer applicabl
 
 **Register:** `TIME_BITS` at FMC REG1 byte 44 — identical layout to MCC (253), BDC (391), TMC (61). FSM STAT BITS bits 2-3 vacated (were `ntp.isSynched`/`ntpUsingFallback`) — all time status now in TIME_BITS. Bit 7 (`isUnsolicitedModeEnabled`) retired session 35 — always 0.
 
-### 12.4 Embedding
+### 10.4 Embedding
 
 FMC REG1 (64 bytes) is embedded in BDC REG1 at bytes [169–232] as a raw pass-through.
 BDC also separately sets FSM calibration fields directly into `fmcMSG` from BDC REG1 fields
@@ -1909,7 +1651,7 @@ BDC also separately sets FSM calibration fields directly into `fmcMSG` from BDC 
 > ADC readback (int32) in FMC REG1 [20–27] are correct distinct types — int16 fits the DAC
 > command range; int32 is the signed ADC readback with sign inversion. Not a bug. ✅ Closed #7.
 
-### 12.5 Build Configuration (`hw_rev.hpp`)
+### 10.5 Build Configuration (`hw_rev.hpp`)
 
 | Define | Effect |
 |--------|--------|
@@ -1923,9 +1665,12 @@ BDC also separately sets FSM calibration fields directly into `fmcMSG` from BDC 
 
 ---
 
-## 13. THEIA (HMI) Architecture
 
-### 13.1 Class Structure
+---
+
+## 11. THEIA Architecture
+
+### 11.1 Class Structure
 
 ```
 frmMain (WinForms)
@@ -1940,7 +1685,7 @@ frmMain (WinForms)
         └── xInput   — Xbox controller (SharpDX, 50 Hz poll)
 ```
 
-### 13.2 Xbox Controller Mapping
+### 11.2 Xbox Controller Mapping
 
 | Input | Normal | + Left Shoulder |
 |-------|--------|-----------------|
@@ -1961,7 +1706,7 @@ frmMain (WinForms)
 | X | Reset tracker to current gate (`0xDA`) | — |
 | Y | Autofocus | — |
 
-### 13.3 Fire Control Chain
+### 11.3 Fire Control Chain
 
 ```
 Operator: Left + Right trigger simultaneously
@@ -1973,37 +1718,140 @@ Operator: Left + Right trigger simultaneously
 
 ---
 
-## 14. Fire State HUD
-
-TRC receives `0xE0 SET_BCAST_FIRECONTROL_STATUS` on A1 port 10019 (raw 5-byte, no frame
-wrapper) and stores vote bits in `state_.voteBitsMcc` / `state_.voteBitsBdc`. Compositor
-renders reticle color and interlock messages every frame.
-
-**`voteBitsMcc` layout:**
-
-| Bit | Meaning |
-|-----|---------|
-| 1 | notAbort (0 = abort ACTIVE — inverted, safe-by-default) |
-| 2 | armed |
-| 3 | BDAVote (LOS clear) |
-| 4 | firing (laser energized) |
-| 5 | trigger pulled |
-| 6 | fireState (all votes, should be firing) |
-| 7 | COMBAT state |
-
-**Reticle color scheme:**
-
-| Color | Condition |
-|-------|-----------|
-| GREEN | Nominal / idle |
-| ORANGE | Armed |
-| YELLOW | Abort active |
-| WHITE | Trigger pulled, interlock blocking |
-| RED | Laser firing |
 
 ---
 
-## 15. Version Word Format
+
+---
+
+## Appendix A — Serial Debug Standards
+
+All four embedded controllers share a unified serial debug architecture. Any new command
+added to any controller must conform to this standard.
+
+### A.1 Serial Buffer
+
+All four `.ino` files use identical fixed-size char buffer pattern:
+
+```cpp
+// ── Serial input buffer ───────────────────────────────────────────────────
+static char    serialBuffer[64];
+static uint8_t serialLen = 0;
+```
+
+`handleSerialInput()` reads characters into the buffer, null-terminates on `\n`/`\r`, and
+calls `parseSerialCommand(serialBuffer, serialLen)`. Characters beyond 63 are silently
+dropped — no heap allocation, no String fragmentation.
+
+Handler signatures are `const char*` throughout:
+```cpp
+void parseSerialCommand(const char* input, uint8_t len);
+void handleCommand(const char* command, const char* payload);
+```
+
+Re-wrap to `String` occurs only at the class boundary:
+```cpp
+mcc.SERIAL_CMD(String(command), String(payload));   // .ino → class boundary only
+```
+
+**FMC exception:** uses `SerialUSB` not `Serial`. All handler logic is identical; only
+the serial object name differs.
+
+### A.2 HELP Box Structure
+
+All controllers print HELP using Unicode box drawing with a COMMON block (identical across
+all controllers) followed by a SPECIFIC block (local hardware only):
+
+```
+╔══ <CTRL> — COMMON COMMANDS ═══════════════════════════════╗
+║  <command list — same on all controllers>                  ║
+╠══ <CTRL> — SPECIFIC COMMANDS ═════════════════════════════╣
+║  <controller-specific hardware commands>                   ║
+╚═══════════════════════════════════════════════════════════╝
+```
+
+### A.3 Common Commands (All Controllers)
+
+These commands appear in the COMMON block of every controller's HELP output with identical
+syntax and behavior. When adding a new common command, add it to all four controllers.
+
+| Command | Description |
+|---------|-------------|
+| `INFO` | Build info, IP, link, firmware version |
+| `REG` | Full REG1 register dump (all fields) |
+| `STATUS` | System state/mode + status bits decoded |
+| `TEMPS` | Temperature sensors |
+| `TIME` | Active time source + PTP/NTP status |
+| `TIMESRC <PTP\|NTP\|AUTO\|OFF>` | Set time source policy |
+| `PTPDEBUG <0-3>` | Set PTP debug level (0=OFF 1=MIN 2=NORM 3=VERBOSE) |
+| `PTPDIAG ON\|OFF` | Suppress DELAY_REQ — W5500 SPI contention testing (FW-B3) |
+| `A1 ON\|OFF` | Enable/disable A1 TX stream (firmware only, no network gate) |
+| `NTP` | NTP sync status + server + epoch time |
+| `NTPIP <a.b.c.d>` | Set primary NTP server IP + force resync |
+| `NTPFB <a.b.c.d>` | Set fallback NTP server (OFF to clear) |
+| `NTPSYNC` | Force immediate NTP resync |
+| `DEBUG <0-3>` | Set controller debug level |
+| `STATE <n>` | Set system state (0=OFF 1=STNDBY 2=ISR 3=COMBAT 4=MAINT 5=FAULT) |
+| `MODE <n>` | Set gimbal mode (0=OFF 1=POS 2=RATE 3=CUE 4=ATRACK 5=FTRACK) |
+
+### A.4 Specific Commands (Per Controller)
+
+| Controller | Specific Commands |
+|------------|------------------|
+| TMC | FLOWS, LCM, VICOR, TEMP, FAN, VICOR \<ch\>, LCM \<ch\>, DAC, PUMP |
+| BDC | REINIT, ENABLE, FMC, TRC, MCC, RELAY, VICOR |
+| MCC | REINIT, ENABLE, TMC, SOL, RELAY, VICOR, CHARGER, CHARLEVEL, HEL, HELCLR, FAN, TARGETTEMP |
+| FMC | FSM, FSMPOS, FSMPOW, STAGE, STAGEPOS, STAGECAL, STAGEEN, SCAN |
+
+### A.5 TIME Command Output
+
+```
+TIME  active source : PTP|NTP|NONE
+------------------------------------------------
+PTP   enabled       : YES|NO
+PTP   synched       : YES|NO
+PTP   misses        : <n>
+PTP   offset_us     : <n>
+PTP   lastSync      : <n> ms ago
+PTP   time          : <date/time> | [not synced]
+------------------------------------------------
+NTP   enabled       : YES|NO
+NTP   synched       : YES|NO
+NTP   misses        : <n> / <NTP_STALE_MISSES>
+NTP   offset_us     : <n>
+NTP   usingFallback : YES|no
+NTP   lastSync      : <n> ms ago
+NTP   time          : <date/time> | [not synced]
+------------------------------------------------
+  <register bytes>
+```
+
+**FMC exception:** `PrintTime()` calls `Serial` not `SerialUSB` — cannot call on SAMD21.
+FMC prints `[see PTPDEBUG]` when synced, `[not synced]` when not synced.
+
+### A.6 A1 TX Control
+
+All four controllers have `bool isA1Enabled = true` in their `.hpp` file. The flag is:
+- Firmware-only — no network command may change it
+- Serial only: `A1 ON` / `A1 OFF`
+- Default `true` — A1 streams from boot
+- `SEND_FIRE_STATUS()` (MCC) and `SEND_FIRE_STATUS_TO_TRC()` (BDC) gated on this flag
+
+### A.7 FMC SerialUSB Constraint
+
+FMC (SAMD21) uses `SerialUSB` for all debug output. `Serial` goes to the hardware UART
+which is not connected. Key rules:
+- All debug output: `SerialUSB.println()` or `uprintf()` (formatted helper)
+- Never call `ptp.PrintTime()` or `ntp.PrintTime()` — both use `Serial` internally
+- `ptp.INIT()` and `ntp.INIT()` use `Serial` internally — gated on `isPTP_Enabled` /
+  `isNTP_Enabled` in `fmc.cpp INIT()` so they don't fire unless the source is enabled
+
+---
+
+
+---
+
+## Appendix B — Version Word Format
 
 All five controllers use `VERSION_PACK` semver encoding as of ICD v3.1.0:
 
@@ -2032,7 +1880,41 @@ UInt32 patch =  VERSION_WORD        & 0xFFF;
 
 ---
 
-## 16. Compatibility Matrix
+
+---
+
+## Appendix C — Consolidated Port Reference
+
+Single source of truth for all UDP ports across all nodes. No port numbers appear elsewhere
+in this document or in the ICD — reference this table.
+
+| Port | Label | Protocol | Direction | Controllers | Purpose |
+|------|-------|----------|-----------|-------------|---------|
+| **10019** | A1 | ICD framed 521B | Sub → Upper | TMC→MCC, FMC→BDC, TRC→BDC | Unsolicited 100 Hz telemetry |
+| **10019** | A1 | Raw 5B (0xAB) | BDC → TRC | BDC→TRC | Fire control status relay (no frame wrapper) |
+| **10018** | A2 | ICD framed | Bidirectional | All 5 controllers | Internal engineering — ENG GUI + BDC→TRC commands |
+| **10050** | A3 | ICD framed | Bidirectional | MCC, BDC only | External — THEIA HMI only |
+| **10023** | — | ICD framed | Bidirectional | FMC only | BDC→FMC commands (direct, not via A2) |
+| **5000** | Video | RTP/H.264 UDP | TRC → THEIA | TRC | H.264 video stream, 1280×720 @ 60 fps, payload type 96 |
+| **5010** | Legacy | Raw 64B binary | Bidirectional | TRC | ⚠ DEPRECATED — pending TRC-M9 removal |
+| **5012** | ASCII | UDP text | Bidirectional | TRC | Engineering ASCII commands |
+| **7777** | Galil CMD | Galil ASCII | BDC → Gimbal | Galil | Command TX (JG velocity, PA position) |
+| **7778** | Galil DATA | Galil ASCII | Gimbal → BDC | Galil | Data/status RX (~125 Hz) |
+| **15001** | EXT_OPS | EXT_OPS framed | Integrator → HYPERION | HYPERION aRADAR | Generic sensor input / CUE SIM injection |
+| **15002** | EXT_OPS | EXT_OPS framed | Integrator → HYPERION | HYPERION aLORA | LoRa/MAVLink sensor input |
+| **15009** | EXT_OPS | EXT_OPS framed | Bidirectional | THEIA CueReceiver | CUE inbound (CMD 0xAA) + status response (CMD 0xAF/0xAB) |
+| **15010** | EXT_OPS | EXT_OPS framed | HYPERION → THEIA | HYPERION CUE output | HYPERION forwards Kalman-filtered track to THEIA |
+
+> **Video note:** Stream is currently unicast TRC→THEIA (.208). Multicast option (`0xD1
+> ORIN_SET_STREAM_MULTICAST`) is wired in ICD but not yet deployed — see action items.
+> 30 fps option via `0xD2` / ASCII `FRAMERATE 30` — see action items.
+
+---
+
+
+---
+
+## Appendix D — Compatibility Matrix
 
 | Interface | Status |
 |-----------|--------|
@@ -2064,33 +1946,3 @@ UInt32 patch =  VERSION_WORD        & 0xFFF;
 
 ---
 
-## 17. Known Open Items
-
-Full open and closed action item tracking is in the unified register:
-- **`CROSSBOW_CHANGELOG.md`** (IPGD-0019) — Part 2: all open items; Part 3: full closure archive
-
-Quick reference — selected items as of CB-20260416:
-
-| ID | Item | Priority |
-|----|------|----------|
-| ~~TRC-SOM-SN~~ | ~~TRC SOM serial — read `/proc/device-tree/serial-number` at startup into `GlobalState` as `uint64`; pack LE into `TelemetryPacket` bytes [49–56]. See ICD TRC REG1 update. `MSG_TRC.cs`: add `SomSerial` property.~~ | ✅ **Closed CB-20260413** (firmware + C# + ICD INT_ENG row applied; SOM also wired to TRC OSD) |
-| THEIA-SHUTDOWN | Graceful STANDBY→OFF sequence — laser safe, relays off, HMI disconnect | 🔴 High |
-| HMI-A3-18 | LCH/KIZ/HORIZ — architecture analyzed; C# emplacement GUI work pending | 🔴 High |
-| ~~FMC-NTP~~ | ~~FMC dt elevated — suspected NTP/USB CDC main loop blocking~~ ✅ Closed — SAMD21 NTP bug not applicable on STM32F7. isNTP_Enabled default true, NTP init unconditional. | ~~🔴 High~~ |
-| GUI-2 | HMI robust testing — full engagement sequence on live HW | 🔴 High |
-| FW-B3 | PTP DELAY_REQ W5500 contention — `isPTP_Enabled=false` fleet-wide workaround | 🔴 High |
-| ~~FW-B4~~ | ~~Fleet `ptp.INIT()` gate audit — BDC and TMC `ptp.INIT()` unconditional needs gate (FW-B3 multicast contention fleet-wide). MCC and FMC already gated. Fix BDC boot state machine PTP_INIT step and TMC INIT().~~ | ✅ **Closed CB-20260412** — all five controllers confirmed gated. |
-| ~~FW-B5~~ | ~~BDC FSM position offsets wrong in `handleA1Frame()` — `fsm_posX_rb` reads offset 24 (should be 20), `fsm_posY_rb` reads offset 28 (should be 24). Wrong values, no crash. Fix in next BDC session.~~ | ✅ **Closed CB-20260412** |
-| ~~HW-FMC-1~~ | ~~FMC/BDC shared power via serial connection — brownout risk on USB power in test. Use dedicated supply for FMC. Verify power rail isolation in production harness.~~ | ✅ **Closed CB-20260413** (HW fix bench-verified by user) |
-| ~~GUI-8~~ | ~~TRC C# client model — apply standardized pattern from session 29~~ | ✅ **Closed CB-20260419b** — `trc.cs` fully rewritten: port 10018, INT framing, `BuildA2Frame`/`CrcHelper`/`CrossbowNic`, single `0xA4` registration, `KeepaliveLoop`, frame-driven `isConnected`, `DropCount`, `LatestMSG`. Verified on live HW. |
-| FW-C3 | BDC Fuji boot status — `fuji.SETUP()` deferred post-boot, FUJI_WAIT always times out | 🟡 Medium |
-| ~~FW-C4~~ | ~~BDC A1 ARP backoff not working — `A1 OFF` workaround when TRC offline~~ | ✅ **Closed CB-20260425** — backoff confirmed correct; W5500 `endPacket()` is non-blocking (ARP miss drops packet, returns 0 immediately). Pattern verified fleet-wide. |
-| FW-FUJI-1 | BDC `FUJI_WAIT` timeout 10 s vs ARCH 5 s — hold pending HW stability investigation | 🔴 HW |
-| THEIA-POS-JOG-1 | POS mode gimbal unresponsive — `XBOX_FOV_SCALE=0` when `VIS_FOV=0`; add `Debug.WriteLine(vx, vy, XBOX_FOV_SCALE, VIS_FOV)` at failure point | 🔴 HW |
-| ~~FW-C5-FRAME-CLEANUP~~ | ~~Retire dead `A1_DEST_*_IP` defines from `frame.hpp`; update stale comments in `tmc.hpp` and `fmc.hpp`~~ | ✅ **Closed CB-20260425** — `frame.hpp` `A1_DEST_*_IP` block deleted; `tmc.hpp` comment updated to `IP_MCC_BYTES`; `fmc.hpp` stale TODO removed. |
-| ~~BDC-FSM-VOTE-LATCH~~ | ~~`isFSMNotLimited` only updated inside ATRACK/FTRACK case body — vote bit latched stale on track exit until next track entry~~ | ✅ **Closed CB-20260413** (readback-based fix at top of `BDC::PidUpdate()` ahead of TICK_PID gate; ATRACK/FTRACK still overwrites with predictive value) |
-| FW-14 | GNSS socket bug — MCC `RUNONCE` case 6 and `EXEC_UDP` use wrong socket | 🟡 Medium |
-| NEW-38d | TRC PTP integration — TIME_BITS, MSG_TRC.cs, `ptp4l` | 🟡 Medium |
-| ~~DOC-1~~ | ~~Add TRC NTP setup reference to ARCHITECTURE.md §2.5~~ | ✅ **Closed CB-20260425** — §2.5 already contains full `timesyncd.conf` config, `timedatectl` verification commands, and JETSON_SETUP.md cross-reference. |
-| ~~DOC-2~~ | ~~Create JETSON_SETUP.md — full Jetson Orin NX setup procedure~~ | ✅ **Closed** — JETSON_SETUP.md complete at v2.2.1 (IPGD-0020). |
-| DOC-3 | Add file format specs (horizon, KIZ/LCH, survey) to ICD INT_ENG and INT_OPS | 🟡 Medium |

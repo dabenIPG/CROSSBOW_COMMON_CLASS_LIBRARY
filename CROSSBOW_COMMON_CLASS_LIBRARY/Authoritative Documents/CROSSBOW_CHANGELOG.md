@@ -2,7 +2,7 @@
 
 **Document:** `CROSSBOW_CHANGELOG.md`
 **Doc #:** IPGD-0019
-**Version:** 4.6.0
+**Version:** 4.7.0
 **Date:** 2026-04-25
 **Status:** Current
 **Supersedes:** `Embedded_Controllers_ACTION_ITEMS.md` (unregistered, retired), `Embedded_Controllers_CLOSED_ACTION_ITEMS.md` (unregistered, retired)
@@ -21,6 +21,33 @@ Session numbers marked `~` are approximate where the exact session number is unc
 ---
 
 # PART 1 — SESSION LOG
+
+---
+
+## CB-20260425b — IP range gating removed fleet-wide
+**Files:** `frame.hpp`, `mcc.cpp`, `bdc.cpp`, `tmc.cpp`, `fmc.cpp`
+**ICD:** no change
+**ARCH:** v4.0.7 → v4.0.8
+
+**Summary:** IP range enforcement removed from all five controller firmware files. The A2/A3 distinction is fully preserved by port number and magic bytes (`0xCB 0x49` INT vs `0xCB 0x58` EXT). A3 command whitelist (`EXT_CMDS`) remains in place. IP ranges are now convention only — not enforced. Motivation: closed physical subnet provides adequate network discipline; IP gating caused operational friction when THEIA or integrator clients came up on unexpected octets with no diagnostic feedback (silent drop before magic check).
+
+**Changes:**
+- `frame.hpp`: `IP_INTERNAL_MIN/MAX` and `IP_EXTERNAL_MIN/MAX` defines deleted; "IP range policy" comment block removed
+- `fmc.cpp` `handleA2Frame()`: `.1–.99` range check + `udpA2.flush()` removed
+- `tmc.cpp` `handleA2Frame()`: `.1–.99` range check + `udpA2.flush()` removed
+- `bdc.cpp` `handleA3Frame()`: `.200–.254` range check removed
+- `mcc.cpp` `handleA3Frame()`: `.200–.254` range check removed
+
+**Fleet behaviour before/after:**
+| Controller | Before | After |
+|---|---|---|
+| MCC A2 | No gate (already open) | No gate |
+| MCC A3 | `.200–.254` gated | EXT magic + whitelist only |
+| BDC A2 | No gate (already open) | No gate |
+| BDC A3 | `.200–.254` gated | EXT magic + whitelist only |
+| TMC A2 | `.1–.99` gated | INT magic only |
+| FMC A2 | `.1–.99` gated | INT magic only |
+| TRC A2 | No gate (Linux — already open) | No gate |
 
 ---
 
@@ -1063,9 +1090,9 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 
 # PART 2 — OPEN ITEMS
 
-**Last reconciled:** 2026-04-22 (ICD scope/target audit — whitelist-verified)
-**ICD Reference:** INT_ENG v4.2.1 (IPGD-0003) | INT_OPS v3.6.2 (IPGD-0004) | EXT_OPS v3.3.0 (IPGD-0005)
-**ARCH Reference:** v4.0.4 (IPGD-0006)
+**Last reconciled:** 2026-04-25 (CB-20260425 pass — FW-C4 closed, FW-FUJI-1/THEIA-POS-JOG-1 opened; ARCH §17 and APP_SUMMARY items migrated)
+**ICD Reference:** INT_ENG v4.2.2 (IPGD-0003) | INT_OPS v3.6.2 (IPGD-0004) | EXT_OPS v3.3.0 (IPGD-0005)
+**ARCH Reference:** v4.0.8 (IPGD-0006)
 **Closed items:** Part 3 of this document
 
 ---
@@ -1077,6 +1104,8 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 | ~~FW-CRG-V2~~ | ~~MCC V2 SET_CHARGER rejects enable — firmware fix pending flash~~ | ✅ **CLOSED CB-20260416** | Flashed and bench-verified. `EnableCharger(true)` path confirmed working on V2 hardware. | `mcc.cpp` ✅ |
 | ~~HW-CRG-V2-OPTO~~ | ~~V2 charger opto sticking — enable/disable unreliable~~ | ✅ **CLOSED CB-20260416** | Root cause: mis-wire. Corrected on bench. Charger enable/disable confirmed reliable on V2. | Hardware ✅ |
 | THEIA-HUD-FIRECONTROL | TRC video overlay fire control label | ⏳ Pending | Display key MCC→BDC vote state on HUD video overlay. Minimum: `isNotBatLowVoltage`, `isHEL_TrainingMode`. Review full MCC vote chain for additional overlay candidates. Coordinate with TRC OSD implementation. | `frmMain.cs` — video overlay draw path; TRC OSD |
+| FW-FUJI-1 | BDC `FUJI_WAIT` timeout 10s vs ARCH 5s | 🔴 HW | BDC boot sequence waits 5s for Fuji at `FUJI_WAIT` step per ARCH, but actual firmware timeout is 10s. Hold pending HW stability investigation — Fuji may need the longer window. Opened CB-20260425. | `bdc.cpp` — `FUJI_WAIT` boot step |
+| THEIA-POS-JOG-1 | POS mode gimbal unresponsive — `XBOX_FOV_SCALE=0` | 🔴 HW | Gimbal unresponsive in POS mode when `VIS_FOV=0` causes `XBOX_FOV_SCALE=0`. Add `Debug.WriteLine(vx, vy, XBOX_FOV_SCALE, VIS_FOV)` at failure point to confirm. Opened CB-20260425. | THEIA `frmMain.cs` — Xbox POS jog path |
 | THEIA-SHUTDOWN | Clean THEIA/system shutdown — graceful STANDBY→OFF | ⏳ Pending | Laser safe, relays off, state→OFF, HMI disconnect. Define shutdown sequence for commanded shutdown vs power loss. Review MCC/BDC responsibilities. No progress S27→~S39. | THEIA `.cs` shutdown handler / state machine |
 | HMI-A3-18 | LCH/KIZ/HORIZ bulk upload bench test | ⏳ Bench verify | Whitelist confirmed clean in firmware. Full end-to-end bench verification needed: upload from THEIA via A3, confirm receipt and correct parse in BDC, verify all fields land correctly in REG1. | None — test only |
 | GUI-2 | HMI robust testing — live HW | ⏳ In progress | MCC/BDC/TMC/FMC ENG GUI stable S29. BDC A3 (THEIA) stable. Full engagement sequence, mode transitions, fire control chain end-to-end still pending. | HW — no code changes |
@@ -1137,7 +1166,7 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 |----|------|--------|--------|-------|
 | BDC-1 | Gate Fuji/MWIR comms on relay state | ⏳ Pending | Disable comms to Fuji/MWIR when their relays are off — suppress spurious lost-message errors. Tie to `SET_BDC_RELAY_ENABLE` state in BDC. | `bdc.cpp`, `bdc.hpp` |
 | FW-C3 | BDC Fuji boot status — FUJI_WAIT always times out | ⏳ Open | `fuji.SETUP()` and `fuji.UPDATE()` deferred until post-boot. At DONE print, `fuji=---` always shown regardless of physical connection. Fix: run lightweight Fuji ping or move SETUP earlier in boot sequence. | `bdc.cpp` — boot sequence, `fuji.cpp` SETUP() |
-| FW-C4 | BDC A1 ARP backoff not working | ⏳ Open | `a1FailCount` not incrementing correctly when TRC offline. Workaround: `A1 OFF` serial command when TRC is offline. Root cause: send failure may not be returned correctly from `frameSend()`. | `bdc.cpp` — A1 TX path, `frameSend()` return value |
+| ~~FW-C4~~ | ~~BDC A1 ARP backoff not working~~ | ✅ **CLOSED CB-20260425** | Root cause was incorrect — `endPacket()` on W5500 returns 0 immediately on ARP miss (non-blocking). Backoff confirmed correct. `A1 OFF` workaround retired. Pattern verified fleet-wide. | `bdc.cpp` ✅ |
 | CLEANUP-3 | A3 ACK discrepancy — MCC visible in debug, BDC not | ⏳ Pending | MCC A3 ACK visible in debug output, BDC A3 not — both working. Likely a log level or debug print difference, not a protocol issue. Investigate when on HW. | `bdc.cpp` — A3 handler debug prints |
 | ~~BDC-FSM-VOTE-LATCH~~ | ~~`isFSMNotLimited` stale outside ATRACK/FTRACK — vote latches NO-FIRE on track exit~~ | ✅ **CLOSED** | **Opened and closed CB-20260413.** Bug: `isFSMNotLimited` (VOTE_BITS_BDC bit 7, `FSM_NOT_LTD` — inverted logic, bit set = "FSM not limited" = OK) was only updated inside the ATRACK/FTRACK case body of `BDC::PidUpdate()`. The variable is read every telemetry tick to build the broadcast vote bitmask at `bdc.hpp:224`, but the *write* only happened in track mode. On exit from ATRACK/FTRACK with the bit cleared (track point too far off-center → predicted FSM correction exceeds `FSM_ANGLE_MAX_TARGET_SPACE_DEG = 2.0°`), the value stuck at `false` and the broadcast vote kept reporting NO-FIRE until the next track entry recomputed it. User symptom: "FMC fsm limit vote not clearing on the BDC until system goes into track." Fix: compute `isFSMNotLimited` from the FMC FSM position readback (`fmc.fsm_posX_rb` / `fsm_posY_rb` — already extracted at `bdc.cpp:435-436` from FMC REG1 bytes [20-23] / [24-27] via the FW-B5 offset fix) at the top of `PidUpdate()`. Conversion: `(fsm_posX_rb - FSM_X0) * iFOV_FSM_X_DEG_COUNT` gives target-space degrees (matching units of the existing constants), magnitude check via `sqrt(ax_rb² + ay_rb²) <= FSM_ANGLE_MAX_TARGET_SPACE_DEG`. Sign omitted (magnitude only). Gimbal NED offset omitted (we want local FSM angle, not world frame). The ATRACK/FTRACK case body still overwrites with the predictive (track-error-derived) value when actively driving the FSM — the predictive computation leads the readback by one tick, which is the correct behaviour in track mode. In all other modes the readback value persists, so the vote tracks actual FSM angular state instead of latching the last ATRACK predictive value. **Placement note (preserve this design choice):** user moved the `if ((millis() - prev_PID_Millis) < TICK_PID) return;` rate gate from above the readback block to BELOW it — intentional. The FSM limit check is an instantaneous physical state read, not a control-loop concept, and gating it at PID rate would mean some A1 frames carry a vote bit up to one PID period stale. Both the readback fallback and the predictive override live inside `PidUpdate()` together by design — they are two halves of the same FSM-limit decision, paired alongside the existing FSM_X/FSM_Y/Set_FM_POS code. Do not move the rate gate back above the FSM block. Do not hoist either computation out of `PidUpdate()`. | `bdc.cpp` — `BDC::PidUpdate()` ✅ |
 
@@ -1208,6 +1237,9 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 
 | ID | Item | Status | Detail | Files |
 |----|------|--------|--------|-------|
+| NEW-18 | CRC cross-platform verification — pre-HW test | ⏳ Pre-HW test | End-to-end CRC-16/CCITT verification across all five controllers and both C# applications using known-answer `crc16("123456789",9)==0x29B1`. Past integration issues observed between STM32 and Linux/x86 implementations. Verify with live framed packets on the wire — do not rely on unit tests alone. | All five controllers + THEIA + ENG GUI |
+| NEW-31 | `frmMain.cs` — `SET_LCH_VOTE` arg swap | ⏳ Fix before HW test | Argument order incorrect in `SET_LCH_VOTE` call in `frmMain.cs`. Fix before any fire control HW test. | THEIA `frmMain.cs` — `SET_LCH_VOTE` call |
+| ~~CROSS-APP-1~~ | ~~CROSS_APP_SUMMARY.md update pass~~ | ✅ **CLOSED CB-20260428** | Document retired — content superseded by ARCHITECTURE.md §3 (codebase inventory), §4 (client access model / SW suite), and CROSSBOW_DOCUMENT_REGISTER.md (IPGD-0001). Cross-app consistency table and ICD governance mapping migrated to ARCH §3.2 / §4. Changelog and open items consolidated into this document. | `CROSS_APP_SUMMARY.md` retired ✅ |
 | ~~DOC-1~~ | ~~Add TRC NTP setup reference to ARCHITECTURE.md §2.5~~ | ✅ **Closed CB-20260425** | §2.5 already contains full `timesyncd.conf` config, `timedatectl` verification, and JETSON_SETUP.md cross-reference. Content was added when §2.5 was written; item was not retroactively closed at the time. | `ARCHITECTURE.md` §2.5 ✅ |
 | DOC-3 | File format specs in ICD INT_ENG and INT_OPS | ⏳ Open | Add file format specifications for horizon files, KIZ/LCH uploads, and survey data to both INT_ENG and INT_OPS ICDs. Currently undocumented — integrators have no reference for file structure. | `CROSSBOW_ICD_INT_ENG.md`, `CROSSBOW_ICD_INT_OPS.md` |
 | CROSS-APP-1 | CROSS_APP_SUMMARY.md update pass | 🟢 Low | Document at v3.0.5 (2026-03-17), ICD ref v3.1.0, ARCH ref v3.0.3 — all significantly stale. Update needed: header refs → ICD v3.6.0 / ARCH v3.3.7; §5/§6/§7 `ICD.GET_REGISTER1` dispatch → literal bytes (FW-C10); §8 FW version table → 4.0.0 fleet-wide; §9 defines → v4.0.0; §11 document set → all current versions + new docs; §12 close NEW-9/10/18/31/33/35; §12 add NEW-32, S19-33–37; §13 close #14→FW-14, TRC-M9. Bump document version to 4.0.0. | `CROSS_APP_SUMMARY.md` |
@@ -1291,6 +1323,22 @@ Items closed: **S14-1**, **S14-2**, **FW-PRE-CHECK**, **FW-BDC-1**, **DISC-1**, 
 # PART 3 — CLOSED ITEMS
 
 *Most recent first. Within each session: FW → SW → Docs.*
+
+---
+
+## CB-20260428 — ARCHITECTURE.md restructure / APP_SUMMARY retirement
+| ID | Item | Closed |
+|----|------|--------|
+| CROSS-APP-1 | CROSSBOW_APP_SUMMARY.md retired — content migrated to ARCHITECTURE.md | CB-20260428 |
+
+---
+
+## CB-20260425 — Codebase review closures
+| ID | Item | Closed |
+|----|------|--------|
+| FW-C4 | BDC A1 ARP backoff confirmed correct — `endPacket()` non-blocking, pattern verified fleet-wide | CB-20260425 |
+| FW-C5-FRAME-CLEANUP | `frame.hpp` dead `A1_DEST_*_IP` block deleted; `tmc.hpp`/`fmc.hpp` stale comments corrected | CB-20260425 |
+| DOC-1 | ARCH §2.5 already contains full TRC NTP config — `timesyncd.conf`, `timedatectl`, JETSON_SETUP.md cross-reference | CB-20260425 |
 
 ---
 

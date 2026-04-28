@@ -269,7 +269,7 @@ namespace CROSSBOW
             SomSerial = BitConverter.ToUInt64(rxBuff, ndx); ndx += sizeof(UInt64);        // [49–56]
             voteBitsMcc2 = rxBuff[ndx]; ndx++;                                            // [57] MCC_VOTES2
             voteBitsBdc2 = rxBuff[ndx]; ndx++;                                            // [58] BDC_VOTES2
-            ndx += 5;                                                                     // [57–63] RESERVED
+            ndx += 5;                                                                     // [59–63] RESERVED
 
             return ndx;
         }
